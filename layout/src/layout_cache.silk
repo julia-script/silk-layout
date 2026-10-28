@@ -255,6 +255,20 @@ impl LayoutCache {
     }
     ranges[id].range = range
   }
+  // Sizes the per-box records for a compute of `count` boxes up front, so a
+  // fresh compute does not grow them a box at a time. A box added here has
+  // no range, of this compute or a previous one.
+  pub effect fn reserveBoxes(self: &mut Self, count: usize) ! OutOfMemoryError ? &mut Allocator {
+    let results = self.results.length()
+    if results < count { run self.results.appendRepeated(FinalResult.none(), count - results) }
+    if self.ranges.length() < count {
+      let length = self.ranges.length()
+      let added = count - length
+      let fresh = BoxRanges { range: FinalRange.none(), kept: FinalRange.none(), stamp: self.generation }
+      run self.ranges.appendRepeated(fresh, added)
+      self.stamped = self.stamped + added
+    }
+  }
   // A box is being laid out again: it has no range of this compute until it
   // records one.
   pub effect fn beginLayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
@@ -290,7 +304,7 @@ impl LayoutCache {
       while self.results.length() <= id { run self.results.append(FinalResult.none()) }
     }
     let first = self.floats.length()
-    run self.floats.appendSlice(floats)
+    if floats.length != 0 { run self.floats.appendSlice(floats) }
     run self.writeRange(id, FinalRange { valid: true, start: start, end: end, floats: first, floatCount: floats.length })
     let ranges = self.ranges.asMutSlice()
     ranges[id].kept = FinalRange.none()

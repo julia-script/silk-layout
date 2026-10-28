@@ -127,19 +127,38 @@ fn locate(values: &[Fragment], index: usize) -> Point {
 
 // Previous fragments edited in a compute that resolveLocations tracks.
 const EDITS_TRACKED: usize = 256
-// A fragment slot at or above this names a saved placement, at the slot
+// A fragment slot at or above this names a saved position, at the slot
 // less this, instead of a saved fragment.
 const PARTIAL_SLOT: usize = 9223372036854775808
 
-// What a placement writes of a box fragment (LayoutPass.place): an
-// in-place compute saves just this when that is the fragment's first write.
-struct FragmentPlacement { location: Point, layoutBounds: Rect, usedMargin: ResolvedEdges }
-impl Copy for FragmentPlacement {}
-impl FragmentPlacement {
-  fn of(value: &Fragment) -> FragmentPlacement {
-    return FragmentPlacement { location: value.location, layoutBounds: value.layoutBounds, usedMargin: value.usedMargin }
+// Where a fragment is: its tree and box links, which appending and keeping
+// fragments after it write, and the placement LayoutPass.place writes of a
+// box fragment. An in-place compute saves just this when such a write is
+// the fragment's first.
+struct FragmentPosition {
+  parent: usize, firstChild: usize, lastChild: usize,
+  previousSibling: usize, nextSibling: usize,
+  previousForBox: usize, nextForBox: usize,
+  location: Point, layoutBounds: Rect, usedMargin: ResolvedEdges,
+}
+impl Copy for FragmentPosition {}
+impl FragmentPosition {
+  fn of(value: &Fragment) -> FragmentPosition {
+    return FragmentPosition {
+      parent: value.parent, firstChild: value.firstChild, lastChild: value.lastChild,
+      previousSibling: value.previousSibling, nextSibling: value.nextSibling,
+      previousForBox: value.previousForBox, nextForBox: value.nextForBox,
+      location: value.location, layoutBounds: value.layoutBounds, usedMargin: value.usedMargin,
+    }
   }
   fn restore(self: &Self, value: &mut Fragment) {
+    value.parent = self.parent
+    value.firstChild = self.firstChild
+    value.lastChild = self.lastChild
+    value.previousSibling = self.previousSibling
+    value.nextSibling = self.nextSibling
+    value.previousForBox = self.previousForBox
+    value.nextForBox = self.nextForBox
     value.location = self.location
     value.layoutBounds = self.layoutBounds
     value.usedMargin = self.usedMargin
@@ -181,7 +200,7 @@ pub struct FragmentArena {
   // Every index below these was written by this compute.
   written: usize, textsWritten: usize,
   generation: usize,
-  fragmentStamps: List<usize>, fragmentSlots: List<usize>, savedFragments: List<Fragment>, savedPlacements: List<FragmentPlacement>,
+  fragmentStamps: List<usize>, fragmentSlots: List<usize>, savedFragments: List<Fragment>, savedPositions: List<FragmentPosition>,
   textStamps: List<usize>, textSlots: List<usize>, savedTexts: List<TextFragment>,
   // A box whose stamp is current has chains of this compute; the others
   // keep their previous chains, in kept ranges, or none (see first).
@@ -217,7 +236,7 @@ impl FragmentArena {
       previousCount: 0, previousTexts: 0,
       written: 0, textsWritten: 0,
       generation: 0,
-      fragmentStamps: List<usize>.make(), fragmentSlots: List<usize>.make(), savedFragments: List<Fragment>.make(), savedPlacements: List<FragmentPlacement>.make(),
+      fragmentStamps: List<usize>.make(), fragmentSlots: List<usize>.make(), savedFragments: List<Fragment>.make(), savedPositions: List<FragmentPosition>.make(),
       textStamps: List<usize>.make(), textSlots: List<usize>.make(), savedTexts: List<TextFragment>.make(),
       boxStamps: List<usize>.make(), boxSlots: List<usize>.make(), savedFirst: List<usize>.make(), savedLast: List<usize>.make(),
       tailFragments: List<Fragment>.make(), tailTexts: List<TextFragment>.make(),
@@ -300,7 +319,7 @@ impl FragmentArena {
     self.damaged = false
     self.settled.clear()
     self.savedFragments.clear()
-    self.savedPlacements.clear()
+    self.savedPositions.clear()
     self.savedTexts.clear()
     self.savedFirst.clear()
     self.savedLast.clear()
@@ -358,7 +377,7 @@ impl FragmentArena {
       let slot = self.fragmentSlots.get(index)
       if slot < PARTIAL_SLOT { return self.savedFragments.get(slot) }
       let mut value = self.values.get(index)
-      self.savedPlacements.asSlice()[slot - PARTIAL_SLOT].restore(&mut value)
+      self.savedPositions.asSlice()[slot - PARTIAL_SLOT].restore(&mut value)
       return value
     }
     if !self.inPlace && index >= self.closedAt { return self.tailFragments.get(index - self.closedAt) }
@@ -389,21 +408,21 @@ impl FragmentArena {
     self.fragmentStamps.set(index, self.generation)
     self.fragmentSlots.set(index, self.savedFragments.length() - 1)
   }
-  // A fragment saved by placement is about to be written whole: saves its
+  // A fragment saved by position is about to be written whole: saves its
   // whole previous value.
   effect fn savePlaced(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
     run self.savedFragments.appendSlice(one<Fragment>(&self.values.asSlice()[index]))
     let last = self.savedFragments.length() - 1
-    self.savedPlacements.asSlice()[self.fragmentSlots.get(index) - PARTIAL_SLOT].restore(&mut self.savedFragments.asMutSlice()[last])
+    self.savedPositions.asSlice()[self.fragmentSlots.get(index) - PARTIAL_SLOT].restore(&mut self.savedFragments.asMutSlice()[last])
     self.fragmentSlots.set(index, last)
   }
-  // saveFragment for a write of only the fragment's placement.
-  effect fn savePlacement(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
+  // saveFragment for a write of only the fragment's position.
+  effect fn savePosition(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
     if !self.inPlace || index >= self.previousCount || self.fragmentStamps.get(index) == self.generation { return }
-    run self.savedPlacements.append(FragmentPlacement.of(&self.values.asSlice()[index]))
+    run self.savedPositions.append(FragmentPosition.of(&self.values.asSlice()[index]))
     run self.noteEdit(index)
     self.fragmentStamps.set(index, self.generation)
-    self.fragmentSlots.set(index, self.savedPlacements.length() - 1 + PARTIAL_SLOT)
+    self.fragmentSlots.set(index, self.savedPositions.length() - 1 + PARTIAL_SLOT)
   }
   effect fn saveText(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
     if !self.inPlace || index >= self.previousTexts || self.textStamps.get(index) == self.generation { return }
@@ -423,13 +442,15 @@ impl FragmentArena {
     // A fresh arena, writing over no previous output, saves and notes nothing.
     if self.inPlace || self.viewing { run self.editPrevious(index) }
   }
-  // edit for a write of only a box fragment's location, layout bounds and
-  // used margin (see FragmentPlacement).
-  pub effect fn editPlacement(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
-    if self.inPlace || self.viewing { run self.editPlacementPrevious(index) }
+  // edit for a write of only a fragment's links or a box fragment's
+  // placement (see FragmentPosition).
+  pub effect fn editPosition(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
+    // Most such writes are to fragments this compute already wrote.
+    if self.inPlace && index < self.written && (index >= self.previousCount || self.fragmentStamps.asSlice()[index] == self.generation) { return }
+    if self.inPlace || self.viewing { run self.editPositionPrevious(index) }
   }
-  effect fn editPlacementPrevious(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
-    run self.savePlacement(index)
+  effect fn editPositionPrevious(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
+    run self.savePosition(index)
     if self.inPlace && index + 1 > self.written { self.written = index + 1 }
     else if self.viewing && !self.inPlace && index < self.previousCount { run self.noteEdit(index) }
   }
@@ -553,13 +574,13 @@ impl FragmentArena {
     let box = value.box
     let next = self.count
     if box != NO_NODE { run self.claimBox(box, next) }
-    if parent != NO_NODE { run self.edit(parent) }
+    if parent != NO_NODE { run self.editPosition(parent) }
     let mut previousSibling = NO_NODE
     let mut previousForBox = NO_NODE
     if parent != NO_NODE { previousSibling = self.values.asSlice()[parent].lastChild }
     if box != NO_NODE { previousForBox = self.lastByBox.get(box) }
-    if previousSibling != NO_NODE { run self.edit(previousSibling) }
-    if previousForBox != NO_NODE { run self.edit(previousForBox) }
+    if previousSibling != NO_NODE { run self.editPosition(previousSibling) }
+    if previousForBox != NO_NODE { run self.editPosition(previousForBox) }
     value.firstChild = NO_NODE
     value.lastChild = NO_NODE
     value.previousSibling = previousSibling
@@ -576,13 +597,13 @@ impl FragmentArena {
     if !self.inPlace && !self.viewing && !self.afterFlow { return run self.appendFresh(box, source, kind, parent, fragmentainer, first, last) }
     let next = self.count
     if box != NO_NODE { run self.claimBox(box, next) }
-    if parent != NO_NODE { run self.edit(parent) }
+    if parent != NO_NODE { run self.editPosition(parent) }
     let mut previousSibling = NO_NODE
     let mut previousForBox = NO_NODE
     if parent != NO_NODE { previousSibling = self.values.asSlice()[parent].lastChild }
     if box != NO_NODE { previousForBox = self.lastByBox.get(box) }
-    if previousSibling != NO_NODE { run self.edit(previousSibling) }
-    if previousForBox != NO_NODE { run self.edit(previousForBox) }
+    if previousSibling != NO_NODE { run self.editPosition(previousSibling) }
+    if previousForBox != NO_NODE { run self.editPosition(previousForBox) }
     run self.adopting(parent, previousForBox)
     let index = run self.putMade(box, source, kind)
     let value = &mut self.values.asMutSlice()[index]
@@ -810,7 +831,7 @@ impl FragmentArena {
     // In place, field by field: a moved fragment is copied once.
     let values = self.values.asMutSlice()
     let saved = self.savedFragments.asSlice()
-    let placements = self.savedPlacements.asSlice()
+    let positions = self.savedPositions.asSlice()
     let stamps = self.fragmentStamps.asMutSlice()
     let slots = self.fragmentSlots.asSlice()
     step = 0
@@ -821,7 +842,7 @@ impl FragmentArena {
       if stamps[from] == generation && slots[from] < PARTIAL_SLOT { values[to] = saved[slots[from]] }
       else {
         values[to] = values[from]
-        if stamps[from] == generation { placements[slots[from] - PARTIAL_SLOT].restore(&mut values[to]) }
+        if stamps[from] == generation { positions[slots[from] - PARTIAL_SLOT].restore(&mut values[to]) }
       }
       stamps[to] = 0
       let value = &mut values[to]
@@ -903,7 +924,7 @@ impl FragmentArena {
     if self.values.asSlice()[end - 1].textData != NO_NODE { texts = texts + 1 }
     self.count = end
     self.textCount = texts
-    run self.edit(start)
+    run self.editPosition(start)
     let values = self.values.asMutSlice()
     values[start].parent = parent
     run self.linkParent(start)
@@ -1048,9 +1069,9 @@ impl FragmentArena {
     let parent = self.values.asSlice()[index].parent
     let mut previousSibling = NO_NODE
     if parent != NO_NODE {
-      run self.edit(parent)
+      run self.editPosition(parent)
       previousSibling = self.values.asSlice()[parent].lastChild
-      if previousSibling != NO_NODE { run self.edit(previousSibling) }
+      if previousSibling != NO_NODE { run self.editPosition(previousSibling) }
     }
     let values = self.values.asMutSlice()
     values[index].previousSibling = previousSibling
@@ -1072,7 +1093,7 @@ impl FragmentArena {
     }
     run self.claimBox(box, index)
     let previousForBox = self.lastByBox.get(box)
-    if previousForBox != NO_NODE { run self.edit(previousForBox) }
+    if previousForBox != NO_NODE { run self.editPosition(previousForBox) }
     let values = self.values.asMutSlice()
     values[index].nextForBox = NO_NODE
     values[index].previousForBox = previousForBox

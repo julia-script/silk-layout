@@ -183,7 +183,7 @@ effect fn layoutFragmentedBlock<'pass, 'source, M: Measure + TextMeasure>(nodes:
 
 /// `layoutBlockPass` for a block without in-flow children outside fragmentation: no child
 /// loop, so the box's size and margins follow from its own style alone.
-fn leafBlock(style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &BfcState) -> Layout {
+pub fn leafBlock(style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &BfcState) -> Layout {
   let axes = Axes.make(style.writingMode)
   let box = axes.box(physicalBox.*)
   let formattingRoot = input.blockRoot || establishesContext(style, &input) || style.writingMode != input.parentWritingMode

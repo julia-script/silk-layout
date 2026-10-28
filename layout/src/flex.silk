@@ -850,7 +850,7 @@ fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer
 
 // A flex container without children: no lines, no item contributions and no
 // baselines, so layoutFlexPass reduces to clamping its content-free size.
-fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
+pub fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
   let axis = axes(style)
   let mainInset = edgeTotal(box.inset, axis.horizontal)
   let crossInset = edgeTotal(box.inset, !axis.horizontal)

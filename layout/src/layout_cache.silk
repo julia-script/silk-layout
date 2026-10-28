@@ -8,6 +8,7 @@ import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind }
 import fragments { FragmentArena }
 import bfc { FloatBox }
 import silk.slice { Slice }
+import inline_prepared { KeptText }
 
 const ABSENT: usize = usize.MAX
 // Reuse levels of a subtree's kept layout; see Incremental.reusableSubtrees.
@@ -65,10 +66,12 @@ pub struct LayoutCache {
   kept: List<FinalRange>,
   finalFloats: List<FloatBox>,
   keptFloats: List<FloatBox>,
+  // Each box's prepared paragraph from the compute that last laid it out.
+  texts: List<List<KeptText>>,
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), finals: List<FinalRange>.make(), kept: List<FinalRange>.make(), finalFloats: List<FloatBox>.make(), keptFloats: List<FloatBox>.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), finals: List<FinalRange>.make(), kept: List<FinalRange>.make(), finalFloats: List<FloatBox>.make(), keptFloats: List<FloatBox>.make(), texts: List<List<KeptText>>.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
@@ -81,6 +84,7 @@ impl LayoutCache {
     self.kept.clear()
     self.finalFloats.clear()
     self.keptFloats.clear()
+    self.texts.clear()
   }
   // Starts a compute: the previous compute's final layouts become reusable.
   pub fn rotateFinals(self: &mut Self) {
@@ -144,6 +148,7 @@ impl LayoutCache {
     return true
   }
   pub fn clearBox(self: &mut Self, id: usize) {
+    if id < self.texts.length() { self.texts.asMutSlice()[id].clear() }
     if id < self.kept.length() { self.kept.set(id, FinalRange.none()) }
     if id < self.finals.length() { self.finals.set(id, FinalRange.none()) }
     if id >= self.heads.length() { return }
@@ -224,6 +229,26 @@ impl LayoutCache {
     self.heads = move heads
     self.kept = move kept
     self.results = move results
+    let mut texts = List<List<KeptText>>.make()
+    run texts.reserveExact(toOld.length)
+    id = 0
+    while id < toOld.length {
+      let from = toOld[id]
+      let mut text = List<KeptText>.make()
+      if from != ABSENT && from < self.texts.length() { text = Intrinsic.replace(self.texts.asMutSlice()[from], List<KeptText>.make()) }
+      run texts.append(move text)
+      id = id + 1
+    }
+    self.texts = move texts
+  }
+  pub fn takeText(self: &mut Self, id: usize) -> Option<KeptText> {
+    if id >= self.texts.length() { return Option<KeptText>.None }
+    return self.texts.asMutSlice()[id].pop()
+  }
+  pub effect fn keepText(self: &mut Self, id: usize, text: KeptText) ! OutOfMemoryError ? &mut Allocator {
+    while self.texts.length() <= id { run self.texts.append(List<KeptText>.make()) }
+    self.texts.asMutSlice()[id].clear()
+    run self.texts.asMutSlice()[id].append(move text)
   }
   // Rebuilds the entry list without unreachable entries and, once entries the
   // previous compute did not use dominate (a drag-resize leaves one set per

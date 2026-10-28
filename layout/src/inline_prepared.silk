@@ -68,6 +68,14 @@ impl PreparedInline {
   }
 }
 
+// What a paragraph's preparation keeps between computes of a LayoutTree:
+// everything but the normalized tokens, which borrow source text and are
+// rebuilt. Compute drops it with the box's other kept results when a change
+// can reach the box's content.
+pub struct KeptText {
+  pub analysis: TextAnalysis, pub offered: List<TextBreak>, pub visual: Plan, pub barriers: List<bool>, pub memo: TextMemo,
+}
+
 // Line fitting results that depend only on the prepared paragraph, its items
 // and scopes, and the line width, so later probes of the same box in one pass
 // repeat them instead of shaping again. Results apply only while `items` and
@@ -146,6 +154,12 @@ impl TextMemo {
     return NO_NODE
   }
   pub effect fn record(self: &mut Self, width: f64, ends: &[usize]) ! OutOfMemoryError ? &mut Allocator {
+    // A drag-resize offers a new width each compute; keep the latest few.
+    if self.widths.length() >= 16 {
+      self.widths.clear()
+      self.counts.clear()
+      self.ends.clear()
+    }
     run self.widths.append(width)
     run self.counts.append(ends.length)
     let mut index: usize = 0

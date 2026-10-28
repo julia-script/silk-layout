@@ -13,7 +13,7 @@ import box_tree { BoxTree }
 import fragments { Fragment, FragmentArena, FragmentKind }
 import fragmentation { ResumeStore, ResumeCheckpoint, StaticAnchor, Fragmentainers, Fragmentainer, FragmentAncestor, FragmentationError }
 import breaks { ForcedBreaks, PageSide, BreakKinds }
-import inline_prepared { PreparedInline }
+import inline_prepared { PreparedInline, KeptText }
 
 pub import layout_cache { REUSE_INDEPENDENT, REUSE_IN_FLOW, CacheKind }
 import layout_cache { LayoutCache, Snapshot, FinalRange }
@@ -463,6 +463,19 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     id = 0
     while id < nodes.boxes.length() {
       self.selections.set(id, ScrollbarSelection { horizontal: self.boxes[id].horizontalScrollbar, vertical: self.boxes[id].verticalScrollbar })
+      id = id + 1
+    }
+  }
+  // Hands every paragraph prepared in this compute to the cache.
+  pub effect fn keepTexts(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
+    let mut id: usize = 0
+    while id < self.inlinePrepared.length() {
+      match self.inlinePrepared.asMutSlice()[id].pop() {
+        Option<PreparedInline<'source>>.Some { value } => {
+          run self.cache.keepText(id, KeptText { analysis: move value.analysis, offered: move value.offered, visual: move value.visual, barriers: move value.barriers, memo: move value.memo })
+        }
+        Option<PreparedInline<'source>>.None => {}
+      }
       id = id + 1
     }
   }

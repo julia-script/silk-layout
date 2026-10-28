@@ -20,7 +20,7 @@ import inline_bidi as Bidi
 import inline_items { FontBox, Scope, ItemKind, Item }
 import inline_visual as Visual
 import inline_visual { Line }
-import inline_prepared { PreparedInline, TextLeaf, TextFont, TextCandidate, TextMemo }
+import inline_prepared { PreparedInline, TextLeaf, TextFont, TextCandidate, TextMemo, KeptText }
 import fragmentation { FlowCursor, FragmentationError, BoundaryProbe }
 import breaks { BreakBoundary, BreakRelaxation, ForcedBreaks, allowsLineBreak }
 import fragment_box as FragmentBox
@@ -1657,9 +1657,24 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   // fragment of this box in one compute shares a single preparation.
   run output.ensureInlinePrepared()
   let mut saved = PreparedInline.make<'source>()
+  // A paragraph prepared by an earlier compute keeps all but its tokens.
+  let mut haveTokens = true
   match move output.inlinePrepared.asMutSlice()[id].pop() {
     Option<PreparedInline<'source>>.Some { value } => { saved = move value }
-    Option<PreparedInline<'source>>.None => {}
+    Option<PreparedInline<'source>>.None => {
+      match output.cache.takeText(id) {
+        Option<KeptText>.Some { value } => {
+          saved.ready = true
+          saved.analysis = move value.analysis
+          saved.offered = move value.offered
+          saved.visual = move value.visual
+          saved.barriers = move value.barriers
+          saved.memo = move value.memo
+          haveTokens = false
+        }
+        Option<KeptText>.None => {}
+      }
+    }
   }
   let mut reuse = saved.ready && saved.barriers.length() == raw.length
   let mut barrierIndex: usize = 0
@@ -1671,9 +1686,20 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut normalized = move saved.normalized
   let mut memo = move saved.memo
   if !reuse { memo.forget() }
-  if !reuse {
+  if !reuse || !haveTokens {
     let rawTokens = run tokensFor(nodes, raw, scopes)
     normalized = run TextFlow.normalize(rawTokens.asSlice(), nodes.sources)
+  }
+  // Kept analysis covers exactly the tokens it was made for.
+  if reuse && !haveTokens {
+    let mut covered = saved.analysis.paragraph.end
+    if saved.analysis.paragraphs.length() != 0 { covered = saved.analysis.paragraphs.get(saved.analysis.paragraphs.length() - 1).end }
+    if covered.unit != normalized.tokens.length() || covered.offset != 0 {
+      reuse = false
+      memo.forget()
+    }
+  }
+  if !reuse {
     barriers.clear()
     barrierIndex = 0
     while barrierIndex < raw.length {

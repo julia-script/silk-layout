@@ -1050,6 +1050,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     boxes.stats.passes = boxes.stats.passes + 1
     if !boxes.needsRelayout {
       output.stats = boxes.stats
+      run boxes.keepTexts()
       let kept = Intrinsic.replace(boxes.cache, LayoutCache.make())
       let captured = Intrinsic.replace(boxes.next, Snapshot.make())
       // Auto scrollbar selection is not part of a cache key.

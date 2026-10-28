@@ -3,9 +3,9 @@
 
 For each unfragmented fixture, the native adapter lays out the input, applies
 a cycle of updates (viewport resizes, restyling an element with its own style,
-hiding and showing it, editing a text node), and the final geometry must equal
-a fresh layout of the final document. Fixtures only check single computes;
-this covers what the LayoutTree keeps between them.
+hiding and showing it, editing a text node, scrolling a scroll container), and
+the final geometry must equal a fresh layout of the final document. Fixtures
+only check single computes; this covers what the LayoutTree keeps between them.
 """
 import argparse
 import json
@@ -34,6 +34,13 @@ def scenarios(document):
         yield "restyle", [{"set": [{"node": node, "style": style}]}]
         hidden = dict(style, display="none")
         yield "hide", [{"set": [{"node": node, "style": hidden}]}, {"set": [{"node": node, "style": style}]}]
+    scrollers = [index for index, node in enumerate(document["nodes"])
+                 if "style" in node and ({node["style"].get("overflowX"), node["style"].get("overflowY"), node["style"].get("overflow")} & {"scroll", "auto", "hidden"})]
+    if scrollers:
+        node = scrollers[len(scrollers) // 2]
+        offset = document["nodes"][node].get("scrollOffset", {"x": 0, "y": 0})
+        yield "scroll", [{"viewport": {"width": width - 37, "height": height}},
+                         {"set": [{"node": node, "scrollOffset": {"x": offset.get("x", 0) + 7, "y": offset.get("y", 0) + 5}}]}]
     texts = [index for index, node in enumerate(document["nodes"]) if isinstance(node.get("text"), str)]
     if texts:
         node = texts[len(texts) // 2]
@@ -48,7 +55,7 @@ def final(document, cycle):
         if "viewport" in step:
             result["viewport"] = step["viewport"]
         for change in step.get("set", []):
-            for key in ("style", "text"):
+            for key in ("style", "text", "scrollOffset"):
                 if key in change:
                     result["nodes"][change["node"]][key] = change[key]
     return result

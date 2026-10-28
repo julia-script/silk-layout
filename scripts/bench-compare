@@ -1,9 +1,15 @@
 #!/bin/sh
 # Build the release CLI and the taffy and yoga harnesses, then compare layout time and geometry
 # on the shared workloads in bench/compare/workloads.py. Extra arguments go to compare.py
-# (for example --iterations 31 or --only deep-random-10k).
+# (for example --iterations 31 or --only deep-random-10k). With --updates first, compare
+# re-layout after small updates instead (bench/compare/updates.py).
 # Needs cargo, cmake and a C++20 compiler besides the Silk toolchain. Not part of PR CI.
 set -eu
+script=compare.py
+if [ "${1:-}" = "--updates" ]; then
+  script=updates.py
+  shift
+fi
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 yoga_rev=6c79cca0eca9a688e3f8e16bb562016933f4e703
@@ -24,7 +30,7 @@ case "$(uname -s)-$(uname -m)" in
   Linux-aarch64) target=aarch64-unknown-linux-gnu ;;
   *) echo "Unsupported native host for this script" >&2; exit 1 ;;
 esac
-exec python3 bench/compare/compare.py \
+exec python3 "bench/compare/$script" \
   --silk "build/llvm/$target/release/silk_layout_cli" \
   --taffy bench/compare/taffy/target/release/taffy-harness \
   --yoga bench/compare/yoga/build/yoga-harness "$@"

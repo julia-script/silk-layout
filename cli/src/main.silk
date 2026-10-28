@@ -436,7 +436,8 @@ fn resetCounters(fixtures: &mut Fixtures) {
 }
 
 // One step of an update benchmark: `viewport` replaces the viewport, and each
-// `set` entry replaces a node's whole style or a text node's text.
+// `set` entry replaces a node's whole style, a text node's text, or an
+// element's scroll offset.
 effect fn applyStep(step: &Value, tree: &mut Tree, current: OptionalSize, fonts: usize) -> OptionalSize
   ! ProtocolError | OutOfMemoryError | InvalidNode ? &mut Allocator {
   let mut viewport = current
@@ -453,7 +454,7 @@ effect fn applyStep(step: &Value, tree: &mut Tree, current: OptionalSize, fonts:
   let mut index: usize = 0
   while index < changes.length {
     let change = run P.item(&changes[index])
-    run P.fields(change, &["node", "style", "text"])
+    run P.fields(change, &["node", "style", "text", "scrollOffset"])
     let node = run P.integer(run P.required(change, "node"))
     if node < 0 { fail P.invalid("set.node must be a node index") }
     let id = NodeId { index: i32.toUsize(node) }
@@ -465,6 +466,9 @@ effect fn applyStep(step: &Value, tree: &mut Tree, current: OptionalSize, fonts:
     if P.has(change, "text") {
       let text = run String.copy(run P.text(run P.required(change, "text")))
       run tree.setText(id, move text)
+    }
+    if P.has(change, "scrollOffset") {
+      run tree.setScrollOffset(id, run parseScrollOffset(run P.required(change, "scrollOffset")))
     }
     index = index + 1
   }

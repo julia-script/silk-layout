@@ -500,13 +500,21 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.needsRelayout = false
     self.hasAutoScrollbars = false
   }
+  // Records the normal-flow overflow positioning is about to extend.
   pub effect fn captureSnapshot(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
-    run self.fragments.copyInto(&mut self.next.fragments)
-    self.next.boxes.clear()
-    run self.next.boxes.reserveExact(self.boxes.length)
+    let values = self.fragments.values.asSlice()
+    self.next.fragmentOverflow.clear()
+    run self.next.fragmentOverflow.reserveExact(values.length)
     let mut index: usize = 0
+    while index < values.length {
+      run self.next.fragmentOverflow.append(values[index].scrollableOverflow)
+      index = index + 1
+    }
+    self.next.boxOverflow.clear()
+    run self.next.boxOverflow.reserveExact(self.boxes.length)
+    index = 0
     while index < self.boxes.length {
-      run self.next.boxes.append(self.boxes[index])
+      run self.next.boxOverflow.append(self.boxes[index].scrollableOverflow)
       index = index + 1
     }
   }
@@ -525,6 +533,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // their kept ranges forward, moved to where the copy put their fragments.
   effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize) ! OutOfMemoryError ? &mut Allocator {
     self.boxes[id] = self.previous.boxes.asSlice()[id]
+    self.boxes[id].scrollableOverflow = self.previous.boxOverflow.get(id)
     let mut child = nodes.node(id).firstChild
     while child != NO_NODE {
       let kept = self.cache.keptRange(child)
@@ -546,15 +555,18 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }
     if !beside && slot.floatCount != 0 { return Option<Layout>.None }
     if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || self.previous.boxes.length() != self.boxes.length { return Option<Layout>.None }
+    if slot.end > self.previous.fragmentOverflow.length() || self.previous.boxOverflow.length() != self.boxes.length { return Option<Layout>.None }
     let previous = self.previous.fragments.values.asSlice()
-    let mut index = slot.start + 1
+    let mut index = slot.start
     while index < slot.end {
       let parent = previous[index].parent
-      if parent < slot.start || parent >= index { return Option<Layout>.None }
+      if index > slot.start && (parent < slot.start || parent >= index) { return Option<Layout>.None }
+      // Positioning appends after normal flow; no copied link may reach it.
+      if previous[index].lastChild != NO_NODE && previous[index].lastChild >= slot.end { return Option<Layout>.None }
       index = index + 1
     }
     let base = self.fragments.checkpoint()
-    run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent)
+    run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent, self.previous.fragmentOverflow.asSlice())
     run self.restoreBoxes(nodes, id, slot, base)
     let layout = self.cache.result(id).layout
     run self.store(id, &layout, true)

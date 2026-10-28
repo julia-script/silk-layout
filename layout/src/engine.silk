@@ -16,7 +16,7 @@ import replaced { layoutReplaced, preferredRatio, borderRatio }
 import box_tree as Boxes
 import box_tree { BoxTree, BoxKind, BoxNode }
 import silk.list { List }
-import fragments { FragmentKind }
+import fragments { FragmentKind, FragmentArena }
 import inline_layout { layoutInline }
 import text { TextMeasure, TextError }
 import fragment_box as FragmentBox
@@ -1014,6 +1014,8 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   let kept = output.reusable() && output.boxNodes.length() != 0
   let restoring = kept && tree.structureRevision() <= since && tree.boxRevision() <= since
   let nodes = run boxesFor(tree, &mut output, since, restoring)
+  // The previous output becomes the snapshot reused subtrees are copied from.
+  output.snapshot.takeOutput(&mut output.fragments, &mut output.boxes)
   if restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice())) {
     output.cache.rotateFinals()
     Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
@@ -1053,7 +1055,9 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       output.stats = boxes.stats
       run boxes.keepTexts()
       let kept = Intrinsic.replace(boxes.cache, LayoutCache.make())
-      let captured = Intrinsic.replace(boxes.next, Snapshot.make())
+      let mut captured = Intrinsic.replace(boxes.next, Snapshot.make())
+      captured.fragments = Intrinsic.replace(boxes.previous.fragments, FragmentArena.make())
+      captured.boxes = Intrinsic.replace(boxes.previous.boxes, List<Layout>.make())
       // Auto scrollbar selection is not part of a cache key.
       let settled = !boxes.hasAutoScrollbars
       drop boxes

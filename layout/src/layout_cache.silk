@@ -4,7 +4,7 @@ import silk.option { Option }
 import silk.ownership { Copy }
 import silk.usize
 import context { Input }
-import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind }
+import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind, Rect }
 import fragments { FragmentArena }
 import bfc { FloatBox }
 import silk.slice { Slice }
@@ -287,12 +287,22 @@ impl LayoutCache {
   }
 }
 
-// Fragments and box records as they stood after the final pass's normal-flow
-// layout, before positioning moved, offset or extended any of them. Reused
-// subtrees are copied from here into the next compute.
-pub struct Snapshot { pub fragments: FragmentArena, pub boxes: List<Layout> }
+// The previous compute's output, which reused subtrees are copied from, and
+// the scrollable overflow each fragment and box had after the final pass's
+// normal-flow layout, before positioning extended it. Positioning's other
+// edits (visual offsets, world locations, out-of-flow fragments appended
+// after the normal-flow ones) are reset or excluded when copying. Between
+// computes `fragments` and `boxes` are spare storage for the next output.
+pub struct Snapshot { pub fragments: FragmentArena, pub boxes: List<Layout>, pub fragmentOverflow: List<Rect>, pub boxOverflow: List<Rect> }
 impl Snapshot {
-  pub fn make() -> Snapshot { return Snapshot { fragments: FragmentArena.make(), boxes: List<Layout>.make() } }
+  pub fn make() -> Snapshot { return Snapshot { fragments: FragmentArena.make(), boxes: List<Layout>.make(), fragmentOverflow: List<Rect>.make(), boxOverflow: List<Rect>.make() } }
+  // Takes a finished compute's output, leaving the spare storage in its place.
+  pub fn takeOutput(self: &mut Self, fragments: &mut FragmentArena, boxes: &mut List<Layout>) {
+    let spareFragments = Intrinsic.replace(self.fragments, FragmentArena.make())
+    self.fragments = Intrinsic.replace(fragments.*, move spareFragments)
+    let spareBoxes = Intrinsic.replace(self.boxes, List<Layout>.make())
+    self.boxes = Intrinsic.replace(boxes.*, move spareBoxes)
+  }
   // Renumbers boxes as LayoutCache.remap does.
   pub effect fn remap(self: &mut Self, toOld: &[usize], toNew: &[usize]) ! OutOfMemoryError ? &mut Allocator {
     let mut boxes = List<Layout>.make()
@@ -305,6 +315,18 @@ impl Snapshot {
       id = id + 1
     }
     self.boxes = move boxes
+    let mut overflow = List<Rect>.make()
+    if self.boxOverflow.length() == toNew.length {
+      run overflow.reserveExact(toOld.length)
+      id = 0
+      while id < toOld.length {
+        let from = toOld[id]
+        if from != ABSENT { run overflow.append(self.boxOverflow.get(from)) }
+        else { run overflow.append(Rect.zero()) }
+        id = id + 1
+      }
+    }
+    self.boxOverflow = move overflow
     run self.fragments.remapBoxes(toOld, toNew)
   }
 }

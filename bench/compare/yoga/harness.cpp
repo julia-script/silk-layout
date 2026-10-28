@@ -1,6 +1,9 @@
 // Lays out a silk-layout CLI workload document with yoga.
-// Usage: yoga-harness WORKLOAD.json ITERATIONS [--dump]
+// Usage: yoga-harness WORKLOAD.json ITERATIONS [--dump] [--updates CYCLE.json]
 // Prints {"layoutNs": [...]} and, with --dump, every node's border box in absolute coordinates.
+// With --updates, one tree is kept: each iteration applies the next step of the cycle (a new
+// viewport and/or node styles, as in the silk-layout CLI's "updates" field) and times one layout.
+// A restyle sets every property its style names; the cycles only change values, never remove one.
 // Yoga has no block layout: a block container becomes a column flex container whose children
 // do not shrink, which matches block layout for the workloads here (no margin collapsing).
 #include <yoga/Yoga.h>
@@ -20,6 +23,8 @@ struct Fixture {
 };
 
 static std::vector<Fixture> fixtures;
+// Whether each node's parent is a block container, whose children do not shrink.
+static std::vector<bool> inBlock;
 
 static YGSize measure(YGNodeConstRef node, float width, YGMeasureMode widthMode, float height, YGMeasureMode heightMode) {
   const Fixture& f = fixtures[reinterpret_cast<size_t>(YGNodeGetContext(node))];
@@ -68,6 +73,29 @@ static YGJustify justify(const std::string& v) {
   return YGJustifyFlexStart;
 }
 
+static void applyStyle(YGNodeRef n, const json& s) {
+  std::string display = s.value("display", "block");
+  bool block = display != "flex";
+  if (display == "none") YGNodeStyleSetDisplay(n, YGDisplayNone);
+  YGNodeStyleSetFlexDirection(n, block || s.value("flexDirection", "row") == "column" ? YGFlexDirectionColumn : YGFlexDirectionRow);
+  YGNodeStyleSetFlexWrap(n, s.value("flexWrap", "nowrap") == "wrap" ? YGWrapWrap : YGWrapNoWrap);
+  YGNodeStyleSetFlexGrow(n, s.value("flexGrow", 0.0f));
+  YGNodeStyleSetFlexShrink(n, s.value("flexShrink", 1.0f));
+  dimension(s, "flexBasis", [&](float v) { YGNodeStyleSetFlexBasis(n, v); }, [&](float v) { YGNodeStyleSetFlexBasisPercent(n, v); }, [&] { YGNodeStyleSetFlexBasisAuto(n); });
+  dimension(s, "width", [&](float v) { YGNodeStyleSetWidth(n, v); }, [&](float v) { YGNodeStyleSetWidthPercent(n, v); }, [&] { YGNodeStyleSetWidthAuto(n); });
+  dimension(s, "height", [&](float v) { YGNodeStyleSetHeight(n, v); }, [&](float v) { YGNodeStyleSetHeightPercent(n, v); }, [&] { YGNodeStyleSetHeightAuto(n); });
+  dimension(s, "minWidth", [&](float v) { YGNodeStyleSetMinWidth(n, v); }, [&](float v) { YGNodeStyleSetMinWidthPercent(n, v); }, [] {});
+  dimension(s, "minHeight", [&](float v) { YGNodeStyleSetMinHeight(n, v); }, [&](float v) { YGNodeStyleSetMinHeightPercent(n, v); }, [] {});
+  dimension(s, "maxWidth", [&](float v) { YGNodeStyleSetMaxWidth(n, v); }, [&](float v) { YGNodeStyleSetMaxWidthPercent(n, v); }, [] {});
+  dimension(s, "maxHeight", [&](float v) { YGNodeStyleSetMaxHeight(n, v); }, [&](float v) { YGNodeStyleSetMaxHeightPercent(n, v); }, [] {});
+  edges(n, s, "padding", YGNodeStyleSetPadding, YGNodeStyleSetPaddingPercent);
+  edges(n, s, "margin", YGNodeStyleSetMargin, YGNodeStyleSetMarginPercent);
+  edges(n, s, "border", YGNodeStyleSetBorder, nullptr);
+  dimension(s, "columnGap", [&](float v) { YGNodeStyleSetGap(n, YGGutterColumn, v); }, [&](float v) { YGNodeStyleSetGapPercent(n, YGGutterColumn, v); }, [] {});
+  dimension(s, "rowGap", [&](float v) { YGNodeStyleSetGap(n, YGGutterRow, v); }, [&](float v) { YGNodeStyleSetGapPercent(n, YGGutterRow, v); }, [] {});
+  if (s.contains("alignItems")) YGNodeStyleSetAlignItems(n, align(s["alignItems"]));
+  if (s.contains("justifyContent")) YGNodeStyleSetJustifyContent(n, justify(s["justifyContent"]));
+}
 // nodes[0] is the initial containing block, a fixed-size block box holding the root;
 // document node i is nodes[i + 1].
 static std::vector<YGNodeRef> build(const json& doc, YGConfigRef config) {
@@ -82,30 +110,13 @@ static std::vector<YGNodeRef> build(const json& doc, YGConfigRef config) {
   isBlock.push_back(true);
   nodes.reserve(items.size());
   fixtures.clear();
+  inBlock.assign(1, false);
   for (const json& item : items) {
     YGNodeRef n = YGNodeNewWithConfig(config);
     const json& s = item["style"];
     std::string display = s.value("display", "block");
     bool block = display != "flex";
-    if (display == "none") YGNodeStyleSetDisplay(n, YGDisplayNone);
-    YGNodeStyleSetFlexDirection(n, block || s.value("flexDirection", "row") == "column" ? YGFlexDirectionColumn : YGFlexDirectionRow);
-    YGNodeStyleSetFlexWrap(n, s.value("flexWrap", "nowrap") == "wrap" ? YGWrapWrap : YGWrapNoWrap);
-    YGNodeStyleSetFlexGrow(n, s.value("flexGrow", 0.0f));
-    YGNodeStyleSetFlexShrink(n, s.value("flexShrink", 1.0f));
-    dimension(s, "flexBasis", [&](float v) { YGNodeStyleSetFlexBasis(n, v); }, [&](float v) { YGNodeStyleSetFlexBasisPercent(n, v); }, [&] { YGNodeStyleSetFlexBasisAuto(n); });
-    dimension(s, "width", [&](float v) { YGNodeStyleSetWidth(n, v); }, [&](float v) { YGNodeStyleSetWidthPercent(n, v); }, [&] { YGNodeStyleSetWidthAuto(n); });
-    dimension(s, "height", [&](float v) { YGNodeStyleSetHeight(n, v); }, [&](float v) { YGNodeStyleSetHeightPercent(n, v); }, [&] { YGNodeStyleSetHeightAuto(n); });
-    dimension(s, "minWidth", [&](float v) { YGNodeStyleSetMinWidth(n, v); }, [&](float v) { YGNodeStyleSetMinWidthPercent(n, v); }, [] {});
-    dimension(s, "minHeight", [&](float v) { YGNodeStyleSetMinHeight(n, v); }, [&](float v) { YGNodeStyleSetMinHeightPercent(n, v); }, [] {});
-    dimension(s, "maxWidth", [&](float v) { YGNodeStyleSetMaxWidth(n, v); }, [&](float v) { YGNodeStyleSetMaxWidthPercent(n, v); }, [] {});
-    dimension(s, "maxHeight", [&](float v) { YGNodeStyleSetMaxHeight(n, v); }, [&](float v) { YGNodeStyleSetMaxHeightPercent(n, v); }, [] {});
-    edges(n, s, "padding", YGNodeStyleSetPadding, YGNodeStyleSetPaddingPercent);
-    edges(n, s, "margin", YGNodeStyleSetMargin, YGNodeStyleSetMarginPercent);
-    edges(n, s, "border", YGNodeStyleSetBorder, nullptr);
-    dimension(s, "columnGap", [&](float v) { YGNodeStyleSetGap(n, YGGutterColumn, v); }, [&](float v) { YGNodeStyleSetGapPercent(n, YGGutterColumn, v); }, [] {});
-    dimension(s, "rowGap", [&](float v) { YGNodeStyleSetGap(n, YGGutterRow, v); }, [&](float v) { YGNodeStyleSetGapPercent(n, YGGutterRow, v); }, [] {});
-    if (s.contains("alignItems")) YGNodeStyleSetAlignItems(n, align(s["alignItems"]));
-    if (s.contains("justifyContent")) YGNodeStyleSetJustifyContent(n, justify(s["justifyContent"]));
+    applyStyle(n, s);
     if (item.contains("measure")) {
       const json& m = item["measure"];
       YGNodeSetContext(n, reinterpret_cast<void*>(fixtures.size()));
@@ -115,6 +126,7 @@ static std::vector<YGNodeRef> build(const json& doc, YGConfigRef config) {
     {
       size_t parent = item["parent"].is_null() ? 0 : item["parent"].get<size_t>() + 1;
       if (isBlock[parent]) YGNodeStyleSetFlexShrink(n, 0.0f);
+      inBlock.push_back(isBlock[parent]);
       YGNodeInsertChild(nodes[parent], n, YGNodeGetChildCount(nodes[parent]));
     }
     nodes.push_back(n);
@@ -127,7 +139,15 @@ int main(int argc, char** argv) {
   std::ifstream in(argv[1]);
   json doc = json::parse(in);
   int iterations = std::atoi(argv[2]);
-  bool dump = argc > 3 && std::strcmp(argv[3], "--dump") == 0;
+  bool dump = false;
+  json cycle;
+  for (int a = 3; a < argc; a++) {
+    if (std::strcmp(argv[a], "--dump") == 0) dump = true;
+    if (std::strcmp(argv[a], "--updates") == 0 && a + 1 < argc) {
+      std::ifstream file(argv[a + 1]);
+      cycle = json::parse(file);
+    }
+  }
   YGConfigRef config = YGConfigNew();
   YGConfigSetUseWebDefaults(config, true);
   YGConfigSetPointScaleFactor(config, 0.0f);
@@ -135,6 +155,31 @@ int main(int argc, char** argv) {
   float height = doc["viewport"]["height"].get<float>();
   std::vector<long long> samples;
   std::vector<YGNodeRef> last;
+  if (cycle.is_array()) {
+    last = build(doc, config);
+    YGNodeCalculateLayout(last[0], width, height, YGDirectionLTR);
+    for (int i = 0; i < iterations; i++) {
+      const json& step = cycle[i % cycle.size()];
+      if (step.contains("viewport")) {
+        width = step["viewport"]["width"].get<float>();
+        height = step["viewport"]["height"].get<float>();
+        YGNodeStyleSetWidth(last[0], width);
+        YGNodeStyleSetHeight(last[0], height);
+      }
+      if (step.contains("set")) {
+        for (const json& change : step["set"]) {
+          size_t index = change["node"].get<size_t>() + 1;
+          applyStyle(last[index], change["style"]);
+          if (inBlock[index]) YGNodeStyleSetFlexShrink(last[index], 0.0f);
+        }
+      }
+      auto start = std::chrono::steady_clock::now();
+      YGNodeCalculateLayout(last[0], width, height, YGDirectionLTR);
+      auto end = std::chrono::steady_clock::now();
+      samples.push_back(std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
+    }
+    iterations = -1;
+  }
   for (int i = 0; i <= iterations; i++) {
     // A fresh tree per iteration: yoga caches layouts inside the tree, while silk-layout
     // recomputes everything on every call.

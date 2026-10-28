@@ -18,17 +18,21 @@ pub struct TextFragment {
 impl Copy for TextFragment {}
 
 pub struct Fragment {
-  pub box: usize, pub source: usize, pub kind: FragmentKind,
+  // What resolveLocations reads and writes for every fragment comes first,
+  // in one cache line.
+  pub parent: usize,
+  // Normal physical geometry; rectangles are relative to the border origin.
+  pub location: Point, pub visualOffset: Point,
+  pub worldLocation: Point,
+  pub kind: FragmentKind,
+  pub box: usize, pub source: usize,
   pub fragmentainer: usize,
-  pub parent: usize, pub firstChild: usize, pub lastChild: usize,
+  pub firstChild: usize, pub lastChild: usize,
   pub previousSibling: usize, pub nextSibling: usize,
   pub previousForBox: usize, pub nextForBox: usize,
-  // Normal physical geometry; rectangles are relative to the border origin.
-  pub location: Point, pub size: Size,
+  pub size: Size,
   pub contentRect: Rect, pub paddingRect: Rect,
   pub layoutBounds: Rect, pub scrollableOverflow: Rect,
-  pub visualOffset: Point,
-  pub worldLocation: Point,
   // Logical block offsets in the owning box's writing mode.
   pub firstBaselines: BaselineSet, pub lastBaselines: BaselineSet,
   pub hasFirstBaseline: bool, pub hasLastBaseline: bool,

@@ -1,11 +1,50 @@
 import silk.allocator { Allocator, OutOfMemoryError }
+import silk.ownership { Copy }
 import silk.list { List }
 import inline_text { NormalizedText }
 import inline_visual { Plan }
 import text { TextToken, TextAnalysis, TextBreak }
-import inline_items { Item, Scope }
+import inline_items { Item, Scope, FontBox }
+import inline_visual { Line }
+import fragments { TextFragmentKind }
 import geometry { ResolvedEdges }
 import tree { NO_NODE }
+
+pub struct TextLeaf { pub font: usize, pub start: usize, pub end: usize, pub key: usize, pub kind: TextFragmentKind }
+impl Copy for TextLeaf {}
+pub struct TextFont { pub style: usize, pub key: usize, pub font: FontBox }
+pub struct TextCandidate {
+  pub items: List<Item>, pub texts: List<TextLeaf>, pub advance: f64, pub hanging: f64, pub hangingItems: usize, pub real: bool, pub visual: Line,
+}
+impl TextCandidate {
+  pub fn make() -> TextCandidate {
+    return TextCandidate { items: List<Item>.make(), texts: List<TextLeaf>.make(), advance: 0.0, hanging: 0.0, hangingItems: 0, real: false, visual: Line.make() }
+  }
+  // Copies a candidate shaped without a visual plan.
+  pub effect fn copyPlain(self: &mut Self, from: &TextCandidate) ! OutOfMemoryError ? &mut Allocator {
+    self.items.clear()
+    self.texts.clear()
+    run self.items.reserveExact(from.items.length())
+    run self.texts.reserveExact(from.texts.length())
+    let mut index: usize = 0
+    while index < from.items.length() { run self.items.append(from.items.get(index))
+      index = index + 1 }
+    index = 0
+    while index < from.texts.length() { run self.texts.append(from.texts.get(index))
+      index = index + 1 }
+    self.advance = from.advance
+    self.hanging = from.hanging
+    self.hangingItems = from.hangingItems
+    self.real = from.real
+    self.visual.active = false
+    self.visual.order.clear()
+    self.visual.positions.clear()
+    self.visual.spans.clear()
+    self.visual.firstSpan = from.visual.firstSpan
+    self.visual.advance = from.visual.advance
+    self.visual.real = from.visual.real
+  }
+}
 
 // An entire normalized paragraph belongs to one compute pass. Fragment cursors
 // address these tokens, never a suffix whose bidi or source coordinates differ.
@@ -42,6 +81,10 @@ pub struct TextMemo {
   // For each width fitted without floats: the index of the break point
   // ending each line, `counts[i]` of them for `widths[i]`, in order.
   pub widths: List<f64>, pub counts: List<usize>, pub ends: List<usize>,
+  // Fonts that candidates' text leaves index, and the whole paragraph
+  // shaped as one candidate without a visual plan.
+  pub fonts: List<TextFont>, pub whole: TextCandidate, pub hasWhole: bool,
+  valid: bool,
 }
 impl TextMemo {
   pub fn make() -> TextMemo {
@@ -49,12 +92,13 @@ impl TextMemo {
       items: List<Item>.make(), scopes: List<Scope>.make(), prefix: List<f64>.make(),
       minContent: 0.0, maxContent: 0.0, hasMin: false, hasMax: false,
       widths: List<f64>.make(), counts: List<usize>.make(), ends: List<usize>.make(),
+      fonts: List<TextFont>.make(), whole: TextCandidate.make(), hasWhole: false, valid: false,
     }
   }
   // Keeps the results when they were computed from the same items and
   // scopes; otherwise starts over from these.
   pub effect fn prepare(self: &mut Self, items: &[Item], scopes: &[Scope]) ! OutOfMemoryError ? &mut Allocator {
-    let mut same = self.items.length() == items.length && self.scopes.length() == scopes.length
+    let mut same = self.valid && self.items.length() == items.length && self.scopes.length() == scopes.length
     let mut index: usize = 0
     while same && index < items.length {
       same = sameItem(&self.items.asSlice()[index], &items[index])
@@ -66,6 +110,9 @@ impl TextMemo {
       index = index + 1
     }
     if same { return }
+    self.valid = true
+    self.hasWhole = false
+    self.fonts.clear()
     self.hasMin = false
     self.hasMax = false
     self.widths.clear()
@@ -81,6 +128,11 @@ impl TextMemo {
     index = 0
     while index < scopes.length { run self.scopes.append(scopes[index])
       index = index + 1 }
+  }
+  // Drops every result, for a paragraph whose tokens changed.
+  pub fn forget(self: &mut Self) {
+    self.valid = false
+    self.prefix.clear()
   }
   // The first line end recorded for `width`, or NO_NODE.
   pub fn linesFor(self: &Self, width: f64) -> usize {

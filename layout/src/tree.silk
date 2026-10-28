@@ -84,8 +84,12 @@ pub struct Tree {
   // was touched at revision `logRevisions[slot]`. `logLost` is the latest
   // revision overwritten.
   logNodes: List<usize>, logRevisions: List<usize>, logged: usize, logLost: usize,
+  // Scroll offset changes, which move fragments without a revision: the
+  // count so far and the last SCROLL_LOG nodes changed.
+  scrolls: usize, scrollNodes: List<usize>,
 }
 const CHANGE_LOG: usize = 256
+const SCROLL_LOG: usize = 64
 impl Tree {
   pub effect fn make(style: Style) -> Tree ! OutOfMemoryError ? &mut Allocator {
     let mut nodes = List<Node>.make()
@@ -101,7 +105,9 @@ impl Tree {
     let mut logRevisions = List<usize>.make()
     run logNodes.appendRepeated(NO_NODE, CHANGE_LOG)
     run logRevisions.appendRepeated(0, CHANGE_LOG)
-    return Tree { nodes: move nodes, styles: move styles, viewportScrollOffset: Point { x: 0.0, y: 0.0 }, current: 1, structure: 1, generated: 1, changed: move changed, logNodes: move logNodes, logRevisions: move logRevisions, logged: 0, logLost: 0 }
+    let mut scrollNodes = List<usize>.make()
+    run scrollNodes.appendRepeated(NO_NODE, SCROLL_LOG)
+    return Tree { nodes: move nodes, styles: move styles, viewportScrollOffset: Point { x: 0.0, y: 0.0 }, current: 1, structure: 1, generated: 1, changed: move changed, logNodes: move logNodes, logRevisions: move logRevisions, logged: 0, logLost: 0, scrolls: 0, scrollNodes: move scrollNodes }
   }
   // The current revision; it advances on every change.
   pub fn revision(self: &Self) -> usize { return self.current }
@@ -137,6 +143,19 @@ impl Tree {
       // A node's latest touch stands for all of its touches.
       if self.changed.get(node) == revision { run result.append(node) }
       back = back + 1
+    }
+    return true
+  }
+  // The number of scroll offset changes so far.
+  pub fn scrollRevision(self: &Self) -> usize { return self.scrolls }
+  // Appends each node whose scroll offset changed after `since` scroll
+  // changes and returns true, or returns false when there were too many.
+  pub effect fn scrolledNodes(self: &Self, since: usize, result: &mut List<usize>) -> bool ! OutOfMemoryError ? &mut Allocator {
+    if since > self.scrolls || self.scrolls - since > SCROLL_LOG { return false }
+    let mut at = since
+    while at < self.scrolls {
+      run result.append(self.scrollNodes.get(at % SCROLL_LOG))
+      at = at + 1
     }
     return true
   }
@@ -218,7 +237,10 @@ impl Tree {
     if id.index >= self.nodes.length() { fail InvalidNode { index: id.index } }
     let nodes = self.nodes.asMutSlice()
     if nodes[id.index].isText() { fail InvalidNode { index: id.index } }
+    if nodes[id.index].scrollOffset.x == offset.x && nodes[id.index].scrollOffset.y == offset.y { return }
     nodes[id.index].scrollOffset = offset
+    self.scrollNodes.set(self.scrolls % SCROLL_LOG, id.index)
+    self.scrolls = self.scrolls + 1
   }
   pub effect fn setMeasurement(self: &mut Self, id: NodeId, key: usize) ! InvalidNode {
     if id.index >= self.nodes.length() { fail InvalidNode { index: id.index } }
@@ -259,8 +281,9 @@ pub struct LayoutTree {
   // completes without auto scrollbars or fragmentation.
   pub cache: LayoutCache, pub snapshot: Snapshot, keptRevision: usize, keptReusable: bool,
   pub facts: BoxFacts, pub writes: BoxWrites,
-  // The viewport and viewport scroll offset of the last compute.
-  pub keptViewport: OptionalSize, pub keptScroll: Point,
+  // The viewport, viewport scroll offset and Tree scroll revision of the
+  // last compute.
+  pub keptViewport: OptionalSize, pub keptScroll: Point, pub keptScrolls: usize,
   pub boxes: List<Layout>, pub boxNodes: List<BoxNode>,
   pub anonymousStyles: List<Style>,
   pub anonymousOrigins: List<usize>, pub anonymousText: List<bool>,
@@ -272,7 +295,7 @@ impl LayoutTree {
   pub fn make() -> LayoutTree {
     return LayoutTree {
       stats: LayoutStats.zero(),
-      cache: LayoutCache.make(), snapshot: Snapshot.make(), facts: BoxFacts.make(), writes: BoxWrites.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 },
+      cache: LayoutCache.make(), snapshot: Snapshot.make(), facts: BoxFacts.make(), writes: BoxWrites.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 }, keptScrolls: 0,
       boxes: List<Layout>.make(), boxNodes: List<BoxNode>.make(),
       anonymousStyles: List<Style>.make(),
       anonymousOrigins: List<usize>.make(), anonymousText: List<bool>.make(),

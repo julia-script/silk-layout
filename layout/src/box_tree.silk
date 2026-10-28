@@ -43,8 +43,9 @@ pub struct BoxTree<'a> {
 impl BoxTree {
   // A box tree built from these sources at an earlier revision, when no
   // change since could alter which boxes are generated.
-  pub fn restore<'a>(sources: &'a [Node], styles: &'a [Style], boxes: List<BoxNode>, anonymousStyles: List<Style>, anonymousOrigins: List<usize>, anonymousText: List<bool>, firstBySource: List<usize>, lastBySource: List<usize>) -> BoxTree<'a> {
+  pub fn restore<'a>(sources: &'a [Node], styles: &'a [Style], boxes: List<BoxNode>, anonymousStyles: List<Style>, anonymousOrigins: List<usize>, anonymousText: List<bool>, firstBySource: List<usize>, lastBySource: List<usize>, copyScrolls: bool) -> BoxTree<'a> {
     let mut result = BoxTree { boxes: move boxes, anonymousStyles: move anonymousStyles, anonymousOrigins: move anonymousOrigins, anonymousText: move anonymousText, firstBySource: move firstBySource, lastBySource: move lastBySource, sources: sources, styles: styles, textStyles: List<usize>.make() }
+    if !copyScrolls { return move result }
     let values = result.boxes.asMutSlice()
     let mut index: usize = 0
     while index < values.length {
@@ -53,6 +54,17 @@ impl BoxTree {
       index = index + 1
     }
     return move result
+  }
+  // Copies a source's scroll offset to its boxes.
+  pub fn refreshScroll(self: &mut Self, source: usize) {
+    if source >= self.firstBySource.length() { return }
+    let offset = self.sources[source].scrollOffset
+    let boxes = self.boxes.asMutSlice()
+    let mut id = self.firstBySource.get(source)
+    while id != NO_NODE {
+      boxes[id].scrollOffset = offset
+      id = boxes[id].nextContinuation
+    }
   }
   // Recomputes an anonymous style after its origin's style changed.
   pub fn refreshAnonymous(self: &mut Self, slot: usize) {

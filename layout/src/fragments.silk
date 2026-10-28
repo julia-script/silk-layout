@@ -87,8 +87,27 @@ impl Fragment {
 pub struct SettledRange { pub start: usize, pub end: usize, pub overflow: Rect, pub kept: bool }
 impl Copy for SettledRange {}
 
+// A move of the previous output (see FragmentArena.shiftPrevious): indices
+// at or after `start` move `by` up or down.
+pub struct Shift { pub start: usize, pub up: bool, pub by: usize }
+impl Copy for Shift {}
+impl Shift {
+  fn between(from: usize, to: usize) -> Shift {
+    if to >= from { return Shift { start: from, up: true, by: to - from } }
+    return Shift { start: from, up: false, by: from - to }
+  }
+  pub fn apply(self: &Self, index: usize) -> usize {
+    if index == NO_NODE || index < self.start { return index }
+    if self.up { return index + self.by }
+    return index - self.by
+  }
+}
+
 // Previous fragments edited in a compute that resolveLocations tracks.
 const EDITS_TRACKED: usize = 256
+
+// Times a compute may move the previous output (see shiftPrevious).
+const SHIFTS: usize = 4
 
 // Fragments appendRange checks, copies and relinks at a time.
 const RANGE_CHUNK: usize = 64
@@ -139,6 +158,8 @@ pub struct FragmentArena {
   resolveAll: bool, edited: List<usize>,
   afterFlow: bool, flowEnd: usize,
   adopted: List<usize>, previousAdopted: List<usize>,
+  // How many times this compute moved the previous output.
+  shifts: usize,
 }
 impl FragmentArena {
   pub fn make() -> FragmentArena {
@@ -161,6 +182,7 @@ impl FragmentArena {
       resolveAll: true, edited: List<usize>.make(),
       afterFlow: false, flowEnd: 0,
       adopted: List<usize>.make(), previousAdopted: List<usize>.make(),
+      shifts: 0,
     }
   }
 
@@ -215,6 +237,7 @@ impl FragmentArena {
     }
     self.edited.clear()
     self.afterFlow = false
+    self.shifts = 0
     let adopted = Intrinsic.replace(self.previousAdopted, List<usize>.make())
     self.previousAdopted = Intrinsic.replace(self.adopted, move adopted)
     self.adopted.clear()
@@ -552,6 +575,133 @@ impl FragmentArena {
     }
   }
 
+
+  // Moves the previous output from fragment `start` on, and its texts, to
+  // the write position, so the previous ranges after a box that emitted more
+  // or fewer fragments than before can be kept in place (canKeep) rather
+  // than copied a fragment at a time. Previous indices at or after `start`
+  // move by the returned shift; the caller moves those it holds (see
+  // LayoutCache.shiftRanges). Returns a shift of 0 when it cannot.
+  pub effect fn shiftPrevious(self: &mut Self, start: usize) -> Shift ! OutOfMemoryError ? &mut Allocator {
+    let none = Shift { start: 0, up: false, by: 0 }
+    if !self.inPlace || self.damaged || self.afterFlow || self.shifts == SHIFTS || start == self.count || start >= self.previousCount { return none }
+    self.shifts = self.shifts + 1
+    let total = self.previousCount
+    // The first text of the moved fragments.
+    let mut textStart = self.previousTexts
+    let mut index = start
+    while index < total && textStart == self.previousTexts {
+      let data = self.previous(index).textData
+      if data != NO_NODE { textStart = data }
+      index = index + 1
+    }
+    let shift = Shift.between(start, self.count)
+    let textShift = Shift.between(textStart, self.textCount)
+    let texts = self.previousTexts
+    let movedTexts = texts - textStart
+    let newTexts = textShift.apply(texts)
+    if newTexts > self.texts.length() {
+      let filler = self.previousText(textStart)
+      let textsLength = self.texts.length()
+      run self.texts.appendRepeated(filler, newTexts - textsLength)
+    }
+    if newTexts > self.textStamps.length() {
+      let textStampsLength = self.textStamps.length()
+      run self.textStamps.appendRepeated(0, newTexts - textStampsLength)
+      let textSlotsLength = self.textSlots.length()
+      run self.textSlots.appendRepeated(0, newTexts - textSlotsLength)
+    }
+    let generation = self.generation
+    let mut step: usize = 0
+    while step < movedTexts {
+      let mut from = textStart + step
+      if textShift.up { from = texts - 1 - step }
+      let value = self.previousText(from)
+      let to = textShift.apply(from)
+      self.texts.set(to, value)
+      self.textStamps.set(to, 0)
+      step = step + 1
+    }
+    let moved = total - start
+    let newTotal = shift.apply(total)
+    if newTotal > self.values.length() {
+      let filler = self.previous(start)
+      let valuesLength = self.values.length()
+      run self.values.appendRepeated(filler, newTotal - valuesLength)
+      let textMarksLength = self.textMarks.length()
+      run self.textMarks.appendRepeated(0, newTotal - textMarksLength)
+    }
+    if newTotal > self.fragmentStamps.length() {
+      let fragmentStampsLength = self.fragmentStamps.length()
+      run self.fragmentStamps.appendRepeated(0, newTotal - fragmentStampsLength)
+      let fragmentSlotsLength = self.fragmentSlots.length()
+      run self.fragmentSlots.appendRepeated(0, newTotal - fragmentSlotsLength)
+    }
+    // In place, field by field: a moved fragment is copied once.
+    let values = self.values.asMutSlice()
+    let saved = self.savedFragments.asSlice()
+    let stamps = self.fragmentStamps.asMutSlice()
+    let slots = self.fragmentSlots.asSlice()
+    step = 0
+    while step < moved {
+      let mut from = start + step
+      if shift.up { from = total - 1 - step }
+      let to = shift.apply(from)
+      if stamps[from] == generation { values[to] = saved[slots[from]] }
+      else { values[to] = values[from] }
+      stamps[to] = 0
+      let value = &mut values[to]
+      value.parent = shift.apply(value.parent)
+      value.firstChild = shift.apply(value.firstChild)
+      value.lastChild = shift.apply(value.lastChild)
+      value.previousSibling = shift.apply(value.previousSibling)
+      value.nextSibling = shift.apply(value.nextSibling)
+      value.previousForBox = shift.apply(value.previousForBox)
+      value.nextForBox = shift.apply(value.nextForBox)
+      value.textData = textShift.apply(value.textData)
+      step = step + 1
+    }
+    // Text marks of the moved fragments, in order.
+    let mut mark = self.textCount
+    index = self.count
+    while index < newTotal {
+      self.textMarks.set(index, mark)
+      if self.values.asSlice()[index].textData != NO_NODE { mark = mark + 1 }
+      index = index + 1
+    }
+    // Box chains that still name previous fragments.
+    let mut box: usize = 0
+    while box < self.firstByBox.length() {
+      if self.boxStamps.get(box) == self.generation {
+        let slot = self.boxSlots.get(box)
+        let savedFirstValue = shift.apply(self.savedFirst.get(slot))
+        self.savedFirst.set(slot, savedFirstValue)
+        let savedLastValue = shift.apply(self.savedLast.get(slot))
+        self.savedLast.set(slot, savedLastValue)
+      } else {
+        let firstByBoxValue = shift.apply(self.firstByBox.get(box))
+        self.firstByBox.set(box, firstByBoxValue)
+        let lastByBoxValue = shift.apply(self.lastByBox.get(box))
+        self.lastByBox.set(box, lastByBoxValue)
+      }
+      box = box + 1
+    }
+    let adopted = self.previousAdopted.asMutSlice()
+    index = 0
+    while index < adopted.length {
+      adopted[index] = shift.apply(adopted[index])
+      index = index + 1
+    }
+    self.previousCount = newTotal
+    self.previousTexts = newTexts
+    if !shift.up { self.values.truncate(newTotal) }
+    if !shift.up { self.textMarks.truncate(newTotal) }
+    if !textShift.up { self.texts.truncate(newTexts) }
+    // Past the write position lies only the previous output now.
+    self.written = self.count
+    self.textsWritten = self.textCount
+    return shift
+  }
 
   // Whether the previous range [start, end) can stay where it is as the
   // next fragments: it starts at the write position, nothing of it or its

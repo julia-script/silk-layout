@@ -602,7 +602,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // of subtree the caller can take (see Incremental.markSubtrees).
   pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
     if self.frame != NO_NODE || id >= self.reusable.length() || (self.reusable.get(id) & REUSE_LEVEL) < level { return Option<Layout>.None }
-    let slot = self.cache.keptRange(id)
+    let mut slot = self.cache.keptRange(id)
     if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return Option<Layout>.None }
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }
     if !beside && slot.floatCount != 0 { return Option<Layout>.None }
@@ -612,6 +612,14 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       // The previous output is this arena's own, kept where it was when the
       // range is still at the write position.
       if !self.fragments.previousWhole() || slot.end > self.fragments.previousLength() || id >= self.fragments.boxCount() || self.fragments.previousFirst(id) != slot.start { return Option<Layout>.None }
+      // Else moved there first, with the rest of the previous output.
+      if slot.start != base && !self.fragments.canKeep(slot.start, slot.end) {
+        let shift = run self.fragments.shiftPrevious(slot.start)
+        if shift.by != 0 {
+          self.cache.shiftRanges(shift)
+          slot = self.cache.keptRange(id)
+        }
+      }
       if self.fragments.canKeep(slot.start, slot.end) {
         run self.fragments.keepRange(slot.start, slot.end, self.fragmentParent)
         kept = true

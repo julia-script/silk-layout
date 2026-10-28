@@ -1,0 +1,406 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.testing { Testing, AssertionError }
+import style {
+  Style,
+  Display,
+  DisplayOutside,
+  DisplayInside,
+  Direction,
+  WritingMode,
+  Position,
+  Visibility
+}
+import tree { Tree, InvalidNode, NO_NODE }
+import box_tree as Boxes
+import grid_style {
+  GridTemplate,
+  GridLine,
+  GridLineKind,
+  GridTrack,
+  GridBreadth,
+  GridAutoFlow,
+  GridError
+}
+import grid_placement { GridItem, PlacementScratch, collectItems }
+
+// Original fixtures derived from Grid 2 §8.5, not reference-engine tests.
+// All fixtures run in both flows: r/c below denote logical major/minor axes.
+struct Case {
+  r: i32,
+  rs: i32,
+  c: i32,
+  cs: i32,
+  order: i32,
+  slot: usize,
+  collapsed: bool,
+  firstRow: i32,
+  lastRow: i32,
+  firstColumn: i32,
+  lastColumn: i32,
+}
+
+impl Copy for Case {}
+
+fn item(
+  r: i32,
+  rs: i32,
+  c: i32,
+  cs: i32,
+  slot: usize,
+  firstRow: i32,
+  lastRow: i32,
+  firstColumn: i32,
+  lastColumn: i32,
+) -> Case {
+  return Case {
+    r: r,
+    rs: rs,
+    c: c,
+    cs: cs,
+    order: 0,
+    slot: slot,
+    collapsed: false,
+    firstRow: firstRow,
+    lastRow: lastRow,
+    firstColumn: firstColumn,
+    lastColumn: lastColumn,
+  }
+}
+
+fn line(number: i32) -> GridLine {
+  if number == 0 {
+    return GridLine.auto()
+  }
+  return GridLine { kind: GridLineKind.Line, number: number, name: 0 }
+}
+
+fn span(number: i32) -> GridLine {
+  return GridLine { kind: GridLineKind.Span, number: number, name: 0 }
+}
+
+effect fn placementCase(
+  cases: &[Case],
+  rows: usize,
+  columns: usize,
+  dense: bool,
+  rowOrigin: i32,
+  columnOrigin: i32,
+  rowCount: usize,
+  columnCount: usize,
+)
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut transpose = false
+  let mut flowIndex: usize = 0
+  let mut work = PlacementScratch.make()
+  let mut items = List<GridItem>.make()
+  while flowIndex < 2 {
+    let mut rootStyle = Style.make()
+    rootStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+    let mut tree = run Tree.make(move rootStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+    let root = tree.root()
+    let mut template = GridTemplate.make()
+    template.dense = dense
+    if transpose {
+      template.flow = GridAutoFlow.Column
+    }
+    let mut at: usize = 0
+    while at < rows {
+      if transpose {
+        run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+          |> Effect.provideMut<Allocator>(&mut allocator)
+      } else {
+        run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+          |> Effect.provideMut<Allocator>(&mut allocator)
+      }
+      at = at + 1
+    }
+    at = 0
+    while at < columns {
+      if transpose {
+        run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+          |> Effect.provideMut<Allocator>(&mut allocator)
+      } else {
+        run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+          |> Effect.provideMut<Allocator>(&mut allocator)
+      }
+      at = at + 1
+    }
+    run tree.setGrid(root, move template) |> Effect.provideMut<Allocator>(&mut allocator)
+    let mut ids = List<usize>.make()
+    let mut inFlow: usize = 0
+    at = 0
+    while at < cases.length {
+      let fixture = cases[at]
+      let mut childStyle = Style.make()
+      childStyle.order = fixture.order
+      if fixture.slot == NO_NODE {
+        childStyle.position = Position.Absolute
+      } else {
+        inFlow = inFlow + 1
+      }
+      if fixture.collapsed {
+        childStyle.visibility = Visibility.Collapse
+      }
+      let child = run tree.append(root, move childStyle)
+        |> Effect.provideMut<Allocator>(&mut allocator)
+      run ids.append(child.index) |> Effect.provideMut<Allocator>(&mut allocator)
+      let mut childTemplate = GridTemplate.make()
+      if transpose {
+        childTemplate.placement.columnStart = line(fixture.r)
+        childTemplate.placement.columnEnd = span(fixture.rs)
+        childTemplate.placement.rowStart = line(fixture.c)
+        childTemplate.placement.rowEnd = span(fixture.cs)
+      } else {
+        childTemplate.placement.rowStart = line(fixture.r)
+        childTemplate.placement.rowEnd = span(fixture.rs)
+        childTemplate.placement.columnStart = line(fixture.c)
+        childTemplate.placement.columnEnd = span(fixture.cs)
+      }
+      run tree.setGrid(child, move childTemplate) |> Effect.provideMut<Allocator>(&mut allocator)
+      at = at + 1
+    }
+    let boxes = run Boxes.build(
+      tree.nodes.asSlice(),
+      tree.styles.asSlice(),
+      tree.grids.asSlice(),
+      tree.gridNames.asSlice(),
+      WritingMode.HorizontalTb,
+      Direction.Ltr,
+    )
+      |> Effect.provideMut<Allocator>(&mut allocator)
+
+    // Re-collect using the same buffers, including across the transposed grid.
+    let mut pass: usize = 0
+    while pass < 2 {
+      let bounds = run collectItems(
+        &boxes,
+        boxes.firstBySource.get(root.index),
+        &mut items,
+        &mut work,
+      )
+        |> Effect.provideMut<Allocator>(&mut allocator)
+      run Testing.expect(items.length() == inFlow, "only in-flow children are collected")
+      if transpose {
+        run Testing.expect(
+          bounds.columnOrigin == rowOrigin && bounds.rowOrigin == columnOrigin
+            && bounds.columns == rowCount
+            && bounds.rows == columnCount,
+          "column-flow bounds transpose",
+        )
+      } else {
+        run Testing.expect(
+          bounds.rowOrigin == rowOrigin && bounds.columnOrigin == columnOrigin
+            && bounds.rows == rowCount
+            && bounds.columns == columnCount,
+          "row-flow implicit bounds",
+        )
+      }
+      at = 0
+      while at < cases.length {
+        let fixture = cases[at]
+        if fixture.slot == NO_NODE {
+          at = at + 1
+          continue
+        }
+        let placed = items.asSlice()[fixture.slot]
+        run Testing.expect(
+          placed.id == boxes.firstBySource.get(ids.asSlice()[at]),
+          "stable order-modified document order",
+        )
+        let mut major = placed.row
+        let mut minor = placed.column
+        if transpose {
+          major = placed.column
+          minor = placed.row
+        }
+        run Testing.expect(
+          major.start == fixture.firstRow && major.end == fixture.lastRow
+            && minor.start == fixture.firstColumn
+            && minor.end == fixture.lastColumn,
+          "resolved normalized grid area",
+        )
+        at = at + 1
+      }
+      pass = pass + 1
+    }
+    transpose = true
+    flowIndex = flowIndex + 1
+  }
+}
+
+// §8.5 step 4: sparse leaves holes; dense restarts at the implicit origin.
+test effect fn gridPlacementSparseAndDenseSpanHoles()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 3] = [
+    item(0, 1, 0, 2, 0, 0, 1, 0, 2),
+    item(0, 1, 0, 2, 1, 1, 2, 0, 2),
+    item(0, 1, 0, 1, 2, 1, 2, 2, 3),
+  ]
+  run placementCase(&cases, 0, 3, false, 0, 0, 2, 3)
+  cases[2].firstRow = 0
+  cases[2].lastRow = 1
+  run placementCase(&cases, 0, 3, true, 0, 0, 2, 3)
+}
+
+// §8.5 step 2: sparse history follows the definite row-start position;
+// occupancy still covers every spanned row. CSSWG #14687 tracks the wording.
+test effect fn gridPlacementRowLockedHistory()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 4] = [
+    item(3, 1, 1, 1, 0, 2, 3, 0, 1),
+    item(1, 3, 0, 1, 1, 0, 3, 1, 2),
+    item(2, 1, 0, 1, 2, 1, 2, 0, 1),
+    item(1, 1, 0, 1, 3, 0, 1, 2, 3),
+  ]
+  run placementCase(&cases, 3, 3, false, 0, 0, 3, 3)
+  cases[3].firstColumn = 0
+  cases[3].lastColumn = 1
+  run placementCase(&cases, 3, 3, true, 0, 0, 3, 3)
+}
+
+// §8.5 step 4 sparse definite-column branch increments the row on backtracking.
+test effect fn gridPlacementDefiniteMinorBacktracks()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 3] = [
+    item(0, 1, 3, 1, 0, 0, 1, 2, 3),
+    item(0, 1, 1, 1, 1, 1, 2, 0, 1),
+    item(0, 1, 2, 1, 2, 1, 2, 1, 2),
+  ]
+  run placementCase(&cases, 0, 3, false, 0, 0, 2, 3)
+  cases[1].firstRow = 0
+  cases[1].lastRow = 1
+  cases[2].firstRow = 0
+  cases[2].lastRow = 1
+  run placementCase(&cases, 0, 3, true, 0, 0, 1, 3)
+}
+
+// §8.5 order-modified document order is stable among equal order values.
+test effect fn gridPlacementStableNegativeAndPositiveOrder()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 4] = [
+    item(0, 1, 0, 1, 3, 0, 1, 3, 4),
+    item(0, 1, 0, 1, 0, 0, 1, 0, 1),
+    item(0, 1, 0, 1, 1, 0, 1, 1, 2),
+    item(0, 1, 0, 1, 2, 0, 1, 2, 3),
+  ]
+  cases[0].order = 3
+  cases[1].order = -2
+  cases[2].order = -2
+  run placementCase(&cases, 1, 4, false, 0, 0, 1, 4)
+}
+
+// §8.5 steps 3/4: negative definite positions establish the implicit origin;
+// automatic spans widen its END, without changing their original length.
+test effect fn gridPlacementNegativeOriginsAndAutomaticSpan()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let cases: [Case; 3] = [
+    item(-4, 1, -4, 1, 0, 0, 1, 0, 1),
+    item(0, 2, 0, 4, 1, 1, 3, 0, 4),
+    item(0, 1, 0, 1, 2, 3, 4, 0, 1),
+  ]
+  run placementCase(&cases, 1, 1, false, -2, -2, 4, 4)
+}
+
+// §8.5 step 2's earliest line is indexed over the implicit grid (§7.5),
+// not restricted to authored positive numeric placements in the explicit grid.
+test effect fn gridPlacementLockedRowsStartAtImplicitOrigin()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let cases: [Case; 3] = [
+    item(1, 1, -4, 1, 0, 0, 1, 0, 1),
+    item(1, 1, 0, 1, 1, 0, 1, 1, 2),
+    item(0, 1, 0, 1, 2, 0, 1, 2, 3),
+  ]
+  run placementCase(&cases, 1, 1, false, 0, -2, 1, 3)
+}
+
+// §8.5 step 3 includes definite minor positions of NOT YET placed items.
+test effect fn gridPlacementFutureDefiniteMinorWidensGrid()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let cases: [Case; 3] = [
+    item(0, 1, 0, 3, 0, 0, 1, 0, 3),
+    item(0, 1, 0, 1, 1, 0, 1, 3, 4),
+    item(0, 1, 5, 2, 2, 0, 1, 4, 6),
+  ]
+  run placementCase(&cases, 0, 1, false, 0, 0, 1, 6)
+}
+
+// §5.4: exhausted placement terminates and clamps into the boundary track.
+test effect fn gridPlacementExhaustedMajorLimit()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let cases: [Case; 3] = [
+    item(1, 10000, 1, 1, 0, 0, 10000, 0, 1),
+    item(0, 2, 0, 1, 1, 9999, 10000, 0, 1),
+    item(0, 1, 1, 1, 2, 9999, 10000, 0, 1),
+  ]
+  run placementCase(&cases, 0, 1, false, 0, 0, 10000, 1)
+  run placementCase(&cases, 0, 1, true, 0, 0, 10000, 1)
+}
+
+// §5.4 applies equally to step-2 expansion and preserves explicit tracks.
+test effect fn gridPlacementExhaustedMinorLimit()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let cases: [Case; 2] = [
+    item(1, 1, 1, 10000, 0, 0, 1, 0, 10000),
+    item(1, 1, 0, 2, 1, 0, 1, 9999, 10000),
+  ]
+  run placementCase(&cases, 1, 0, false, 0, 0, 1, 10000)
+}
+
+// §7.5: an empty implicit grid has no invented cells. Fully definite items
+// may overlap (§8.5 step 1), and clipping retains the explicit grid (§5.4).
+test effect fn gridPlacementEmptyAndFullyDefinite()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let empty: [Case; 0] = []
+  run placementCase(&empty, 0, 0, false, 0, 0, 0, 0)
+  run placementCase(&empty, 2, 3, false, 0, 0, 2, 3)
+  let cases: [Case; 3] = [
+    item(-10000, 1, 1, 1, 0, 0, 1, 0, 1),
+    item(10000, 2, 1, 1, 1, 9999, 10000, 0, 1),
+    item(10000, 2, 1, 1, 2, 9999, 10000, 0, 1),
+  ]
+  run placementCase(&cases, 3, 1, false, -9996, 0, 10000, 1)
+}
+
+// §8.5 steps 1/2/4: step-2 column growth must preserve all reserved rows,
+// including blockers in a different row, across bitmap word boundaries.
+test effect fn gridPlacementWideRowGrowthPreservesReservations()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let cases: [Case; 5] = [
+    item(1, 1, 2, 1, 0, 0, 1, 1, 2),
+    item(2, 1, 2, 1, 1, 1, 2, 1, 2),
+    item(1, 1, 0, 70, 2, 0, 1, 2, 72),
+    item(2, 1, 0, 1, 3, 1, 2, 0, 1),
+    item(0, 1, 0, 2, 4, 1, 2, 2, 4),
+  ]
+  run placementCase(&cases, 0, 2, false, 0, 0, 2, 72)
+  run placementCase(&cases, 0, 2, true, 0, 0, 2, 72)
+}
+
+// §6 / §10.1: collapse still occupies a grid area, while out-of-flow
+// descendants neither reserve cells nor expand the implicit grid.
+test effect fn gridPlacementCollapseAndOutOfFlow()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 3] = [
+    item(10000, 1, 10000, 1, NO_NODE, 0, 0, 0, 0),
+    item(0, 1, 0, 1, 0, 0, 1, 0, 1),
+    item(0, 1, 0, 1, 1, 0, 1, 1, 2),
+  ]
+  cases[1].collapsed = true
+  run placementCase(&cases, 0, 2, false, 0, 0, 1, 2)
+}
+
+// §8.5 steps 2/3: an unplaced definite minor position establishes the implicit
+// prefix that a row-locked item searches before the step-4 cursor is used.
+test effect fn gridPlacementLockedRowsUseFutureImplicitPrefix()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let cases: [Case; 3] = [
+    item(0, 1, -5, 1, 0, 1, 2, 0, 1),
+    item(0, 1, 0, 1, 1, 1, 2, 1, 2),
+    item(1, 1, 0, 1, 2, 0, 1, 0, 1),
+  ]
+  run placementCase(&cases, 0, 2, false, 0, -2, 2, 4)
+}

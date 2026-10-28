@@ -1,0 +1,74 @@
+{
+  "name": "grid-placement-definite-column-cursor-sparse",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "auto-placement",
+    "implicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo",
+    "https://drafts.csswg.org/css-grid-2/#auto-tracks"
+  ],
+  "derivation": "For sparse packing, moving the definite-column cursor backwards increments its row even though row one has a hole. Dense resets to the first row for each item.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 64,
+          "gridTemplateColumns": [
+            20,
+            20,
+            20
+          ],
+          "gridAutoRows": [
+            10
+          ],
+          "columnGap": 2,
+          "rowGap": 1,
+          "gridAutoFlow": "row"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 3
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 64,
+        "height": 21
+      },
+      {
+        "x": 44,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 11,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

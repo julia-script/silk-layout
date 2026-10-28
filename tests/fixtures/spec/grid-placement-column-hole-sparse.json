@@ -1,0 +1,89 @@
+{
+  "name": "grid-placement-column-hole-sparse",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "auto-placement",
+    "implicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo",
+    "https://drafts.csswg.org/css-grid-2/#auto-tracks"
+  ],
+  "derivation": "Transpose row packing: two 2-row spans require two columns. Only dense backfills the one-row hole in column one.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "height": 64,
+          "gridTemplateRows": [
+            20,
+            20,
+            20
+          ],
+          "gridAutoColumns": [
+            10
+          ],
+          "rowGap": 2,
+          "columnGap": 1,
+          "gridAutoFlow": "column"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowEnd": {
+            "span": 2
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowEnd": {
+            "span": 2
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 21,
+        "height": 64
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 42
+      },
+      {
+        "x": 11,
+        "y": 0,
+        "width": 10,
+        "height": 42
+      },
+      {
+        "x": 11,
+        "y": 44,
+        "width": 10,
+        "height": 20
+      }
+    ]
+  }
+}

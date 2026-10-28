@@ -1,0 +1,102 @@
+{
+  "name": "grid-placement-search-crosses-existing-end",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "auto-placement",
+    "implicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo",
+    "https://drafts.csswg.org/css-grid-2/#auto-tracks"
+  ],
+  "derivation": "Step two places the first locked item in columns 1\u20133 and the second in columns 4\u20135. A three-row automatic item cannot start in rows 1\u20134 because it would intersect the first item. Row 5, column 1 is free across all three rows; the search must accept it and create rows 6\u20137 rather than skip to row 6 merely because another item ends there in different columns.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 50,
+          "gridTemplateColumns": [
+            10,
+            10
+          ],
+          "gridTemplateRows": [
+            10,
+            10,
+            10
+          ],
+          "gridAutoColumns": [
+            10
+          ],
+          "gridAutoRows": [
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": 3,
+          "gridRowEnd": {
+            "span": 2
+          },
+          "gridColumnEnd": {
+            "span": 3
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": 1,
+          "gridRowEnd": 6,
+          "gridColumnEnd": {
+            "span": 2
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowEnd": {
+            "span": 3
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 70
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 30,
+        "height": 20
+      },
+      {
+        "x": 30,
+        "y": 0,
+        "width": 20,
+        "height": 50
+      },
+      {
+        "x": 0,
+        "y": 40,
+        "width": 10,
+        "height": 30
+      }
+    ]
+  }
+}

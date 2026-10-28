@@ -9,3 +9,4 @@ import grid_style_tests
 import grid_scratch_tests
 import grid_track_tests
 import grid_contribution_tests
+import grid_placement_tests

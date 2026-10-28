@@ -1,0 +1,71 @@
+{
+  "name": "grid-placement-definite-before-auto",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "auto-placement",
+    "implicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo",
+    "https://drafts.csswg.org/css-grid-2/#auto-tracks"
+  ],
+  "derivation": "Step one occupies the later source item before the earlier fully automatic item searches for a cell.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 64,
+          "gridTemplateColumns": [
+            20,
+            20,
+            20
+          ],
+          "gridAutoRows": [
+            10
+          ],
+          "columnGap": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 64,
+        "height": 10
+      },
+      {
+        "x": 22,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

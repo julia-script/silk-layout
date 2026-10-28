@@ -1,0 +1,76 @@
+{
+  "name": "grid-placement-span-expands-minor-axis",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "auto-placement",
+    "implicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo",
+    "https://drafts.csswg.org/css-grid-2/#auto-tracks"
+  ],
+  "derivation": "Step three expands the minor extent to the largest automatic span, four columns. The first item fills that row; the second starts a new row.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridAutoColumns": [
+            30,
+            40
+          ],
+          "gridAutoRows": [
+            10
+          ],
+          "columnGap": 2,
+          "rowGap": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnEnd": {
+            "span": 4
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 116,
+        "height": 21
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 116,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 11,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

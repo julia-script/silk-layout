@@ -1,0 +1,133 @@
+{
+  "name": "grid-placement-implicit-pattern-both-sides",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "auto-placement",
+    "implicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo",
+    "https://drafts.csswg.org/css-grid-2/#auto-tracks"
+  ],
+  "derivation": "Two implicit tracks precede the single explicit track. The last leading track uses the last auto size; trailing tracks cycle from the first size. Positions sum fixed sizes and the authored gutters independently on both axes.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            40
+          ],
+          "gridTemplateRows": [
+            30
+          ],
+          "gridAutoColumns": [
+            10,
+            20
+          ],
+          "gridAutoRows": [
+            7,
+            11
+          ],
+          "columnGap": 2,
+          "rowGap": 3
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": -4,
+          "gridRowStart": -4
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": -3,
+          "gridRowStart": -3
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 3,
+          "gridRowStart": 3
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 4,
+          "gridRowStart": 4
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 120,
+        "height": 88
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 7
+      },
+      {
+        "x": 12,
+        "y": 10,
+        "width": 20,
+        "height": 11
+      },
+      {
+        "x": 34,
+        "y": 24,
+        "width": 40,
+        "height": 30
+      },
+      {
+        "x": 76,
+        "y": 57,
+        "width": 10,
+        "height": 7
+      },
+      {
+        "x": 88,
+        "y": 67,
+        "width": 20,
+        "height": 11
+      },
+      {
+        "x": 110,
+        "y": 81,
+        "width": 10,
+        "height": 7
+      }
+    ]
+  }
+}

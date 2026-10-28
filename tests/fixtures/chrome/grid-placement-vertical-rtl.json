@@ -1,0 +1,106 @@
+{
+  "name": "grid-placement-vertical-rtl",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "auto-placement",
+    "implicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo",
+    "https://drafts.csswg.org/css-grid-2/#auto-tracks"
+  ],
+  "derivation": "Logical row flow fills inline columns bottom-to-top in vertical-rl RTL, then grows a block row to the left. Logical column sizes are physical heights; row sizes are physical widths.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "height": 60,
+          "writingMode": "vertical-rl",
+          "direction": "rtl",
+          "gridTemplateColumns": [
+            20,
+            25
+          ],
+          "gridTemplateRows": [
+            30
+          ],
+          "gridAutoRows": [
+            10
+          ],
+          "columnGap": 3,
+          "rowGap": 4
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "direction": "rtl"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 44,
+        "height": 60
+      },
+      {
+        "x": 14,
+        "y": 40,
+        "width": 30,
+        "height": 20
+      },
+      {
+        "x": 14,
+        "y": 12,
+        "width": 30,
+        "height": 25
+      },
+      {
+        "x": 0,
+        "y": 40,
+        "width": 10,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 12,
+        "width": 10,
+        "height": 25
+      }
+    ]
+  }
+}

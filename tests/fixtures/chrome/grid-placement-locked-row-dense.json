@@ -1,0 +1,93 @@
+{
+  "name": "grid-placement-locked-row-dense",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "auto-placement",
+    "implicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo",
+    "https://drafts.csswg.org/css-grid-2/#auto-tracks"
+  ],
+  "derivation": "The definite column-two blocker forces the locked-row two-column item to start at column three and extend the implicit grid. Sparse places the next locked-row item after that span, while dense fills column one.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            20,
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "gridAutoColumns": [
+            30,
+            40
+          ],
+          "columnGap": 2,
+          "gridAutoFlow": "row dense"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": 1,
+          "gridColumnStart": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": 1,
+          "gridColumnEnd": {
+            "span": 2
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 96,
+        "height": 10
+      },
+      {
+        "x": 22,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 44,
+        "y": 0,
+        "width": 52,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

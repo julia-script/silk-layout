@@ -154,6 +154,7 @@ fn contribution(value: f64, preferred: f64, item: &Item) -> f64 {
 effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut input = childInput.*
   input.performLayout = false
+  input.baselines = false
   if horizontal { input.intrinsicWidth = true
     input.known.widthDefinite = false } else { input.intrinsicHeight = true
     input.known.heightDefinite = false }
@@ -470,6 +471,9 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     if active(&item, collapsed) {
       let mut childInput = input.*
       childInput.performLayout = false
+      // Baseline alignment reads the item's baselines; a probed container's
+      // own baselines come from its items' stored probe results.
+      childInput.baselines = item.align == Align.Baseline || item.align == Align.LastBaseline || input.baselines && !input.performLayout
       setKnown(&mut childInput, axis.horizontal, item.target)
       setIndefinite(&mut childInput, axis.horizontal, !item.mainDefinite)
       let layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &childInput)
@@ -606,7 +610,7 @@ fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer
     while index < end {
       let item = items[index]
       if !item.collapsed && (!fragmented || output.publication(item.id) != NO_NODE) {
-        let child = output.boxes[item.id]
+        let child = &output.boxes[item.id]
         let childStyle = nodes.style(item.id)
         let compatible = (childStyle.writingMode != WritingMode.HorizontalTb) == blockHorizontal
         let mut rank: usize = 1
@@ -636,9 +640,9 @@ fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer
       index = index + 1
     }
     if chosen != NO_NODE {
-      let child = output.boxes[chosen]
+      let child = &output.boxes[chosen]
       let childStyle = nodes.style(chosen)
-      let mut baselines = physicalBaselines(&child, childStyle, style.writingMode, blockHorizontal, chosenLast)
+      let mut baselines = physicalBaselines(child, childStyle, style.writingMode, blockHorizontal, chosenLast)
       if blockHorizontal { baselines = baselines.translated(child.location.x) }
       else { baselines = baselines.translated(child.location.y) }
       if reverseBlock { baselines = baselines.reversed(axisSize(result.size, blockHorizontal)) }

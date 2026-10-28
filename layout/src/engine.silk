@@ -183,6 +183,7 @@ effect fn contentAlgorithm<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
 effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, natural: NaturalDimensions, horizontal: bool, minimum: bool) -> f64 ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut request = input.*
   request.performLayout = false
+  request.baselines = false
   request.fragmentation.active = false
   if horizontal {
     request.intrinsicWidth = true
@@ -679,7 +680,14 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     }
   }
   let passCheckpoint = output.checkpoint()
-  let mut result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
+  let mut result = Layout.zero()
+  // A size probe of a flex container whose border box is already fixed needs
+  // nothing from its items unless the caller reads baselines.
+  if !input.performLayout && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && box.size.widthDefinite && box.size.heightDefinite && isFlex(style) && !style.replaced {
+    result.size = Size { width: box.size.width, height: box.size.height }
+  } else {
+    result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
+  }
   if fragmented {
     let state = output.resumes.get(id)
     if state.blocked || state.skipped {

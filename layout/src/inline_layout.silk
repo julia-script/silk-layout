@@ -244,6 +244,7 @@ effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   childInput.parentWritingMode = parentStyle.writingMode
   childInput.parentTextOrientation = parentStyle.textOrientation
   childInput.performLayout = false
+  childInput.baselines = true
   childInput.blockRoot = true
   childInput.shrinkToFit = true
   let layout = run layoutNode(nodes, &mut output, &mut measurer, id, &childInput)

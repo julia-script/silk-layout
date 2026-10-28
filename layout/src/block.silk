@@ -141,12 +141,13 @@ pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   if !input.performLayout || !input.fragmentation.active {
     // Leaves skip layoutBlockPass and its large frame entirely.
     let afterProbe = input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After && nodes.node(id).dynamicAfter
-    if !afterProbe && boxChild(nodes, nodes.node(id).firstChild) == NO_NODE { return leafBlock(style, &input, &physicalBox, &bfc) }
-    return run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
+    if afterProbe { return run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none(), true) }
+    if boxChild(nodes, nodes.node(id).firstChild) == NO_NODE { return leafBlock(style, &input, &physicalBox, &bfc) }
+    return run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none(), false)
   }
   let pass = output.checkpoint()
   let floats = bfc.checkpoint()
-  let mut result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
+  let mut result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none(), true)
   let state = output.resumes.get(id)
   let mut cut = NO_NODE
   match state.cursor {
@@ -169,7 +170,7 @@ pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     let forced = output.resumes.get(cut).requested
     output.restoreCheckpoint(pass)
     bfc.restore(floats)
-    result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, cut, forced)
+    result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, cut, forced, true)
   }
   output.closeCheckpoint(pass)
   return result
@@ -207,11 +208,12 @@ fn leafBlock(style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &BfcS
   return result
 }
 
-effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState, endBefore: usize, endBreak: ForcedBreaks) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState, endBefore: usize, endBreak: ForcedBreaks, static fragmentable: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let axes = Axes.make(style.writingMode)
   let box = axes.box(physicalBox.*)
-  let fragmented = input.performLayout && input.fragmentation.active
-  let afterProbe = input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After && nodes.node(id).dynamicAfter
+  // The common unfragmented instance drops every fragmentation path, which keeps its code small.
+  let fragmented = fragmentable && input.performLayout && input.fragmentation.active
+  let afterProbe = fragmentable && input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After && nodes.node(id).dynamicAfter
   let origin = input.bfcContentOrigin
   let formattingRoot = input.blockRoot || establishesContext(style, &input) || style.writingMode != input.parentWritingMode
   let collapseTop = !formattingRoot && box.inset.top == 0.0

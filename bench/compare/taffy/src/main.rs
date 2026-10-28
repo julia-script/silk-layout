@@ -382,3 +382,55 @@ fn main() {
     }
     println!("}}");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn grid_flow_preserves_axis_and_dense_hole_filling() {
+        for (flow, span_axis, expected_position) in [
+            ("row", "gridColumnEnd", (40.0, 20.0)),
+            ("row dense", "gridColumnEnd", (40.0, 0.0)),
+            ("column", "gridRowEnd", (20.0, 40.0)),
+            ("column dense", "gridRowEnd", (0.0, 40.0)),
+        ] {
+            let root = json!({
+                "display": "grid", "width": 60, "height": 60,
+                "gridTemplateColumns": [20, 20, 20], "gridTemplateRows": [20, 20, 20],
+                "gridAutoFlow": flow, "alignItems": "start", "justifyItems": "start"
+            });
+            let mut spanning = json!({"display": "block", "width": 10, "height": 10});
+            spanning[span_axis] = json!({"span": 2});
+            let document = json!({
+                "viewport": {"width": 100, "height": 100},
+                "nodes": [
+                    {"parent": null, "style": root},
+                    {"parent": 0, "style": spanning.clone()},
+                    {"parent": 0, "style": spanning},
+                    {"parent": 0, "style": {"display": "block", "width": 10, "height": 10}}
+                ]
+            });
+            let mut workload = build(&document);
+            layout(&mut workload);
+            let position = workload.tree.layout(workload.nodes[3]).unwrap().location;
+            assert_eq!((position.x, position.y), expected_position, "{flow}");
+        }
+    }
+
+    #[test]
+    fn unsupported_grid_syntax_is_not_approximated() {
+        for unsupported in [
+            json!({"gridAutoFlow": "dense"}),
+            json!({"gridAutoFlow": "masonry"}),
+            json!({"gridTemplateAreas": ["main"]}),
+            json!({"gridTemplateColumns": [{"repeat": [2, 20]}]}),
+            json!({"gridTemplateRows": "subgrid"}),
+            json!({"gridRowStart": "main"}),
+            json!({"gridColumnStart": {"line": 1, "name": "main"}}),
+        ] {
+            assert!(std::panic::catch_unwind(|| style(&unsupported)).is_err(), "{unsupported}");
+        }
+    }
+}

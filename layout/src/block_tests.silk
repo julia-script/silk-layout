@@ -76,7 +76,7 @@ effect fn arrange(tree: &Tree, width: f64) -> LayoutTree ! OutOfMemoryError | Te
   input.availableWidth = AvailableSpace.definite(width)
   input.blockRoot = true
   let mut pass = run LayoutPass.make(layouts.boxes.asMutSlice(), &mut layouts.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &input)
   drop result
   drop pass
   layouts.fragments.resolveLocations()
@@ -292,10 +292,10 @@ test effect fn blockIntrinsicWidthsUseMeasuredChildContributions() -> () ! OutOf
   input.availableWidth = AvailableSpace.minContent()
   input.blockRoot = true
   let mut pass = run LayoutPass.make(layouts.boxes.asMutSlice(), &mut layouts.fragments, constructed.sources) |> Effect.provideMut<Allocator>(&mut allocator)
-  let narrow = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input) |> Effect.provideMut<Allocator>(&mut allocator)
+  let narrow = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &input) |> Effect.provideMut<Allocator>(&mut allocator)
   input.availableWidth = AvailableSpace.maxContent()
   pass.fragments.rollback(0)
-  let wide = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input) |> Effect.provideMut<Allocator>(&mut allocator)
+  let wide = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &input) |> Effect.provideMut<Allocator>(&mut allocator)
   drop pass
   layouts.fragments.resolveLocations()
   layouts.adopt(move constructed)
@@ -380,7 +380,7 @@ effect fn arrangeVertical(tree: &Tree, inlineSize: f64) -> LayoutTree ! OutOfMem
   input.availableHeight = AvailableSpace.definite(inlineSize)
   input.blockRoot = true
   let mut pass = run LayoutPass.make(layouts.boxes.asMutSlice(), &mut layouts.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &input)
   drop result
   drop pass
   layouts.fragments.resolveLocations()
@@ -963,12 +963,12 @@ test effect fn blockifiedItemIgnoresFloatButPreservesExplicitShrinkRequest() -> 
   input.blockRoot = true
   input.availableWidth = AvailableSpace.definite(200.0)
   let mut pass = run LayoutPass.make(layouts.boxes.asMutSlice(), &mut layouts.fragments, constructed.sources) |> Effect.provideMut<Allocator>(&mut allocator)
-  let filled = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input) |> Effect.provideMut<Allocator>(&mut allocator)
+  let filled = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &input) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(filled.size.width == 200.0, "inapplicable float does not force item shrink-to-fit")
   run Testing.expect(pass.boxes[constructed.firstBySource.get(childId.index)].location.y == 10.0, "blockified flow-root still has independent flex-item contents")
   input.shrinkToFit = true
   pass.fragments.rollback(0)
-  let shrunk = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input) |> Effect.provideMut<Allocator>(&mut allocator)
+  let shrunk = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &input) |> Effect.provideMut<Allocator>(&mut allocator)
   drop pass
   layouts.fragments.resolveLocations()
   layouts.adopt(move constructed)

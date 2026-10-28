@@ -30,8 +30,8 @@ pub fn boundary(nodes: &BoxTree, id: usize, before: bool, kind: FragmentainerKin
   return result
 }
 
-fn physical(axes: Axes, box: ResolvedBox) -> ResolvedBox {
-  let mut result = box
+fn physical(axes: Axes, box: &ResolvedBox) -> ResolvedBox {
+  let mut result = box.*
   result.padding = axes.physicalEdges(box.padding)
   result.border = axes.physicalEdges(box.border)
   result.margin = axes.physicalEdges(box.margin)
@@ -77,9 +77,9 @@ pub fn endMargin(style: &Style, value: f64, complete: bool, contextEnd: bool, fr
 
 // Preserve the FULL content sizes used for percentages and flex distribution.
 // Only the current fragment's decorations differ from the resolved CSS box.
-pub fn current(style: &Style, full: ResolvedBox, state: ResumeState, input: FragmentInput, frameMode: WritingMode) -> ResolvedBox {
+pub fn current(style: &Style, full: &ResolvedBox, state: &ResumeState, input: &FragmentInput, frameMode: WritingMode) -> ResolvedBox {
   let axes = Axes.make(frameMode)
-  let mut box = axes.box(full)
+  let mut box = axes.box(full.*)
   let old = box.inset
   if state.normalComplete {
     box.padding = ResolvedEdges.zero()
@@ -95,7 +95,7 @@ pub fn current(style: &Style, full: ResolvedBox, state: ResumeState, input: Frag
       box.border.bottom = 0.0
       box.gutter.bottom = 0.0
     }
-    box.margin.top = startMargin(style, box.margin.top, state, input, frameMode)
+    box.margin.top = startMargin(style, box.margin.top, state.*, input.*, frameMode)
     if state.started && style.boxDecorationBreak == BoxDecorationBreak.Clone && style.marginBreak == MarginBreak.Auto { box.margin.bottom = 0.0 }
   }
   box.inset = ResolvedEdges {
@@ -110,17 +110,17 @@ pub fn current(style: &Style, full: ResolvedBox, state: ResumeState, input: Frag
   if box.size.heightDefinite { box.size.height = max(box.inset.vertical(), box.size.height + dy) }
   box.min = Size { width: max(box.inset.horizontal(), box.min.width + dx), height: max(box.inset.vertical(), box.min.height + dy) }
   box.max = Size { width: max(box.inset.horizontal(), box.max.width + dx), height: max(box.inset.vertical(), box.max.height + dy) }
-  return physical(axes, box)
+  return physical(axes, &box)
 }
 
 // Algorithms report natural content actually placed in this frame. CSS size
 // progress and descendant progress are independent, including overflow-only
 // continuations and a pending ending slice decoration after content EOF.
-pub fn finish(style: &Style, input: Input, full: ResolvedBox, current: ResolvedBox, state: &mut ResumeState, result: &mut Layout, frameMode: WritingMode) -> ResolvedBox {
-  if state.blocked || state.skipped { return current }
+pub fn finish(style: &Style, input: &Input, full: &ResolvedBox, current: &ResolvedBox, state: &mut ResumeState, result: &mut Layout, frameMode: WritingMode) -> ResolvedBox {
+  if state.blocked || state.skipped { return current.* }
   let axes = Axes.make(frameMode)
-  let original = axes.box(full)
-  let mut box = axes.box(current)
+  let original = axes.box(full.*)
+  let mut box = axes.box(current.*)
   let natural = max(0.0, axes.size(result.size).height - box.inset.vertical())
   let available = max(0.0, input.fragmentation.limit - input.fragmentation.offset - box.inset.vertical())
   let fullSize = max(0.0, original.size.height - original.inset.vertical())
@@ -141,11 +141,11 @@ pub fn finish(style: &Style, input: Input, full: ResolvedBox, current: ResolvedB
     if style.boxDecorationBreak == BoxDecorationBreak.Slice && !state.endDecorationDone { ending = original.inset.bottom }
     if input.fragmentation.canBreakBefore && avoid && input.fragmentation.relaxation != BreakRelaxation.Avoidance && desired + ending > available {
       state.blocked = true
-      return current
+      return current.*
     }
     if input.fragmentation.canBreakBefore && available == 0.0 && (desired > 0.0 || box.inset.top > 0.0 || !state.normalContentComplete) {
       state.blocked = true
-      return current
+      return current.*
     }
     used = min(desired, available)
     // A completed unfragmentable content piece may overflow its fragmentainer;
@@ -183,5 +183,5 @@ pub fn finish(style: &Style, input: Input, full: ResolvedBox, current: ResolvedB
   box.margin.bottom = endMargin(style, box.margin.bottom, state.normalComplete, input.fragmentation.marginEnd, frameMode)
   state.started = true
   state.contentComplete = state.normalComplete && state.descendantsComplete
-  return physical(axes, box)
+  return physical(axes, &box)
 }

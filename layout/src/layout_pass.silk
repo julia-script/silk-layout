@@ -50,15 +50,15 @@ pub struct PassCheckpoint {
   scrollbars: usize,
 }
 impl Copy for PassCheckpoint {}
-fn sameOptional(a: OptionalSize, b: OptionalSize) -> bool {
+fn sameOptional(a: &OptionalSize, b: &OptionalSize) -> bool {
   return a.widthDefinite == b.widthDefinite && a.heightDefinite == b.heightDefinite && (!a.widthDefinite || a.width == b.width) && (!a.heightDefinite || a.height == b.height)
 }
-fn sameAvailable(a: AvailableSpace, b: AvailableSpace) -> bool {
+fn sameAvailable(a: &AvailableSpace, b: &AvailableSpace) -> bool {
   return a.kind == b.kind && (a.kind != AvailableKind.Definite || a.value == b.value)
 }
-fn sameInput(a: Input, b: Input) -> bool {
+fn sameInput(a: &Input, b: &Input) -> bool {
   if a.parentMaxSize.width != b.parentMaxSize.width || a.parentMaxSize.height != b.parentMaxSize.height || a.scrollportSize.width != b.scrollportSize.width || a.scrollportSize.height != b.scrollportSize.height { return false }
-  return sameOptional(a.parent, b.parent) && sameOptional(a.initialContainingBlock, b.initialContainingBlock) && sameOptional(a.known, b.known) && sameAvailable(a.availableWidth, b.availableWidth) && sameAvailable(a.availableHeight, b.availableHeight) && a.blockRoot == b.blockRoot && a.blockify == b.blockify && a.atomicInline == b.atomicInline && a.intrinsicWidth == b.intrinsicWidth && a.intrinsicHeight == b.intrinsicHeight && a.shrinkToFit == b.shrinkToFit && a.indefiniteWidth == b.indefiniteWidth && a.indefiniteHeight == b.indefiniteHeight && a.parentWritingMode == b.parentWritingMode && a.parentTextOrientation == b.parentTextOrientation && a.parentJustifyItems == b.parentJustifyItems && a.parentJustifyItemsSafety == b.parentJustifyItemsSafety
+  return sameOptional(&a.parent, &b.parent) && sameOptional(&a.initialContainingBlock, &b.initialContainingBlock) && sameOptional(&a.known, &b.known) && sameAvailable(&a.availableWidth, &b.availableWidth) && sameAvailable(&a.availableHeight, &b.availableHeight) && a.blockRoot == b.blockRoot && a.blockify == b.blockify && a.atomicInline == b.atomicInline && a.intrinsicWidth == b.intrinsicWidth && a.intrinsicHeight == b.intrinsicHeight && a.shrinkToFit == b.shrinkToFit && a.indefiniteWidth == b.indefiniteWidth && a.indefiniteHeight == b.indefiniteHeight && a.parentWritingMode == b.parentWritingMode && a.parentTextOrientation == b.parentTextOrientation && a.parentJustifyItems == b.parentJustifyItems && a.parentJustifyItemsSafety == b.parentJustifyItemsSafety
 }
 
 // Results are memoized only for size-only, independent formatting-context
@@ -502,10 +502,11 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.hasAutoScrollbars = false
   }
   pub fn lookup(self: &Self, id: usize, input: Input, kind: CacheKind) -> Option<Layout> {
+    let entries = self.entries.asSlice()
     let mut index = self.heads.get(id)
     while index != ABSENT {
-      let entry = self.entries.get(index)
-      if entry.kind == kind && sameInput(entry.input, input) { return Option<Layout>.Some { value: entry.layout } }
+      let entry = &entries[index]
+      if entry.kind == kind && sameInput(&entry.input, &input) { return Option<Layout>.Some { value: entry.layout } }
       index = entry.next
     }
     return Option<Layout>.None

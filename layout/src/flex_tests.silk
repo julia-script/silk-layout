@@ -260,7 +260,7 @@ effect fn scenario(case: Case) ! OutOfMemoryError | TextError | FragmentationErr
   input.blockRoot = true
   input.shrinkToFit = true
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &input)
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
@@ -415,7 +415,7 @@ effect fn percentageDescendant(definiteMain: bool) ! OutOfMemoryError | TextErro
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &Input.make(OptionalSize.none()))
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
@@ -476,7 +476,7 @@ effect fn preferredColumnContribution(case: ColumnContribution) ! OutOfMemoryErr
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &Input.make(OptionalSize.none()))
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
@@ -540,7 +540,7 @@ effect fn crossPercentage(percentItem: bool, definiteParent: bool) ! OutOfMemory
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &Input.make(OptionalSize.none()))
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
@@ -592,7 +592,7 @@ effect fn negativeBaselineMargin(last: bool) ! OutOfMemoryError | TextError | Fr
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &Input.make(OptionalSize.none()))
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
@@ -646,7 +646,7 @@ effect fn oppositeBaselineFlows(compatible: bool, reverse: bool) ! OutOfMemoryEr
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &Input.make(OptionalSize.none()))
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
@@ -705,7 +705,7 @@ effect fn columnPreferredCrossContribution(fit: bool) ! OutOfMemoryError | TextE
   let mut input = Input.make(OptionalSize.none())
   input.availableWidth = AvailableSpace.definite(300.0)
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &input)
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
@@ -743,7 +743,7 @@ effect fn partialNegativeInnerBase() ! OutOfMemoryError | TextError | Fragmentat
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
-  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, &Input.make(OptionalSize.none()))
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)

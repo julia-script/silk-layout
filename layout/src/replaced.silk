@@ -35,7 +35,7 @@ fn constrainPair(size: Size, minimum: Size, maximum: Size, ratio: f64) -> Size {
   return size
 }
 
-pub fn layoutReplaced(style: &Style, input: Input, box: ResolvedBox, natural: NaturalDimensions) -> Layout {
+pub fn layoutReplaced(style: &Style, input: &Input, box: &ResolvedBox, natural: NaturalDimensions) -> Layout {
   let ratio = preferredRatio(style, natural)
   let border = borderRatio(style)
   let insetWidth = box.inset.horizontal()

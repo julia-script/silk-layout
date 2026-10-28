@@ -43,18 +43,18 @@ fn exportScrollBaselines(style: &Style, kind: BoxKind, result: &mut Layout) {
   if result.hasLastBaseline { result.lastBaselines = result.lastBaselines.clamped(0.0, blockSize) }
 }
 
-fn scrollbarApplies(style: &Style, input: Input) -> bool {
+fn scrollbarApplies(style: &Style, input: &Input) -> bool {
   if style.replaced || style.scrollbarWidth == ScrollbarWidth.None || style.display.isNone() || style.display.isContents() { return false }
-  let display = effectiveDisplay(style, input)
+  let display = effectiveDisplay(style, &input)
   return !display.outsideIs(DisplayOutside.Inline) || !display.insideIs(DisplayInside.Flow)
 }
-fn configureScrollbars<M: Measure>(style: &Style, output: &mut LayoutPass, measurer: &mut M, id: usize, input: Input, box: ResolvedBox) -> ResolvedBox {
-  if !scrollbarApplies(style, input) { return box }
+fn configureScrollbars<M: Measure>(style: &Style, output: &mut LayoutPass, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox) -> ResolvedBox {
+  if !scrollbarApplies(style, &input) { return box.* }
   let x = overflowForAxis(style, true)
   let y = overflowForAxis(style, false)
   let stable = style.scrollbarGutter != ScrollbarGutter.Auto
   let inlineHorizontal = style.writingMode == WritingMode.HorizontalTb
-  if x != Overflow.Auto && x != Overflow.Scroll && y != Overflow.Auto && y != Overflow.Scroll && !(stable && scrollable(overflowForAxis(style, !inlineHorizontal))) { return box }
+  if x != Overflow.Auto && x != Overflow.Scroll && y != Overflow.Auto && y != Overflow.Scroll && !(stable && scrollable(overflowForAxis(style, !inlineHorizontal))) { return box.* }
   output.hasAutoScrollbars = output.hasAutoScrollbars || x == Overflow.Auto || y == Overflow.Auto
   let mut available = box.size
   if available.widthDefinite { available.width = max(0.0, available.width - box.border.horizontal() - box.padding.horizontal()) }
@@ -62,11 +62,11 @@ fn configureScrollbars<M: Measure>(style: &Style, output: &mut LayoutPass, measu
   let metrics = Measure.scrollbars(&mut measurer, ScrollbarRequest { width: style.scrollbarWidth, gutter: style.scrollbarGutter, writingMode: style.writingMode, direction: style.usedDirection(), available: available })
   let horizontal = x == Overflow.Scroll || output.selected(id, true)
   let vertical = y == Overflow.Scroll || output.selected(id, false)
-  let mut result = withGutter(box, scrollbarGutter(style, metrics, horizontal, vertical))
+  let mut result = withGutter(&box, scrollbarGutter(style, metrics, horizontal, vertical))
   result.scrollbarMetrics = metrics
   return result
 }
-fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, bfc: &BfcState) -> Layout {
+fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, bfc: &BfcState) -> Layout {
   let mut known = box.size
   if known.widthDefinite { known.width = max(0.0, known.width - box.inset.horizontal()) }
   if known.heightDefinite { known.height = max(0.0, known.height - box.inset.vertical()) }
@@ -105,7 +105,7 @@ fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: 
   layout.lastBaselines = result.lastBaselines.translated(baselineInset)
   layout.hasFirstBaseline = result.hasBaseline
   layout.hasLastBaseline = result.hasBaseline
-  if !result.hasLineBoxes && !input.blockRoot && !nodes.style(id).replaced && writingMode == input.parentWritingMode && !establishesContext(nodes.style(id), input) {
+  if !result.hasLineBoxes && !input.blockRoot && !nodes.style(id).replaced && writingMode == input.parentWritingMode && !establishesContext(nodes.style(id), &input) {
     let mut minimumBlock = box.min.height
     let mut insetBlock = box.inset.vertical()
     let mut inlineDefinite = box.size.widthDefinite
@@ -121,17 +121,17 @@ fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: 
   return layout
 }
 
-effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  let mut resolved = box
-  let mut request = input
+effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut resolved = box.*
+  let mut request = input.*
   if input.performLayout && input.fragmentation.active {
-    resolved = FragmentBox.current(nodes.style(id), box, output.resumes.get(id), input.fragmentation, output.frames.writingMode)
+    resolved = FragmentBox.current(nodes.style(id), &box, &output.resumes.get(id), &input.fragmentation, output.frames.writingMode)
     // Slice defers the ending decoration, but does not make descendant
     // margins adjoining the eventual end of the fragmentation context.
-    if Axes.make(output.frames.writingMode).box(box).inset.bottom != 0.0 {
+    if Axes.make(output.frames.writingMode).box(box.*).inset.bottom != 0.0 {
       request.fragmentation.marginEnd = false
     }
-    let full = Axes.make(output.frames.writingMode).box(box)
+    let full = Axes.make(output.frames.writingMode).box(box.*)
     let style = nodes.style(id)
     // The synthetic frame root supplies available space, not an authored CSS
     // size tail separating the document's contents from the context endpoint.
@@ -148,13 +148,13 @@ effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       retained.fragmentation.marginStart = false
       retained.fragmentation.marginEnd = false
       retained.fragmentation.marginEndChosen = false
-      let mut trial = run contentAlgorithm(nodes, &mut output, &mut measurer, id, retained, resolved, natural, &mut bfc)
+      let mut trial = run contentAlgorithm(nodes, &mut output, &mut measurer, id, &retained, &resolved, natural, &mut bfc)
       let mut state = output.resumes.get(id)
       if !state.blocked && !state.skipped {
         let axes = Axes.make(output.frames.writingMode)
         let naturalExtent = max(0.0, axes.size(trial.size).height - axes.box(resolved).inset.vertical())
         let complete = state.normalContentComplete
-        let finished = FragmentBox.finish(style, request, box, resolved, &mut state, &mut trial, output.frames.writingMode)
+        let finished = FragmentBox.finish(style, &request, &box, &resolved, &mut state, &mut trial, output.frames.writingMode)
         let extent = max(0.0, axes.size(trial.size).height - axes.box(finished).inset.vertical())
         let free = extent - naturalExtent
         let offset = blockContentOffset(style, free)
@@ -167,19 +167,19 @@ effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
     }
     if !request.fragmentation.marginEnd { request.fragmentation.marginEndChosen = false }
   }
-  return run contentAlgorithm(nodes, &mut output, &mut measurer, id, request, resolved, natural, &mut bfc)
+  return run contentAlgorithm(nodes, &mut output, &mut measurer, id, &request, &resolved, natural, &mut bfc)
 }
 
-effect fn contentAlgorithm<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, request: Input, resolved: ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  if nodes.node(id).kind == BoxKind.InlineFormatting { return run layoutInline(nodes, &mut output, &mut measurer, id, request, resolved, &mut bfc) }
-  if nodes.node(id).measurement == Measurement.Content { return measureLeaf(nodes, &mut measurer, id, request, resolved, &bfc) }
-  if nodes.style(id).replaced { return layoutReplaced(nodes.style(id), request, resolved, natural) }
-  if isFlex(nodes.style(id)) { return run layoutFlex(nodes, &mut output, &mut measurer, id, request, resolved) }
-  return run layoutBlock(nodes, &mut output, &mut measurer, id, nodes.style(id), request, resolved, &mut bfc)
+effect fn contentAlgorithm<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, request: &Input, resolved: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if nodes.node(id).kind == BoxKind.InlineFormatting { return run layoutInline(nodes, &mut output, &mut measurer, id, &request, &resolved, &mut bfc) }
+  if nodes.node(id).measurement == Measurement.Content { return measureLeaf(nodes, &mut measurer, id, &request, &resolved, &bfc) }
+  if nodes.style(id).replaced { return layoutReplaced(nodes.style(id), &request, &resolved, natural) }
+  if isFlex(nodes.style(id)) { return run layoutFlex(nodes, &mut output, &mut measurer, id, &request, &resolved) }
+  return run layoutBlock(nodes, &mut output, &mut measurer, id, nodes.style(id), &request, &resolved, &mut bfc)
 }
 
-effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, natural: NaturalDimensions, horizontal: bool, minimum: bool) -> f64 ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  let mut request = input
+effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, natural: NaturalDimensions, horizontal: bool, minimum: bool) -> f64 ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut request = input.*
   request.performLayout = false
   request.fragmentation.active = false
   if horizontal {
@@ -201,9 +201,9 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     }
     Option<Layout>.None => {}
   }
-  let box = configureScrollbars(nodes.style(id), &mut output, &mut measurer, id, request, resolveBox(nodes.style(id), request))
+  let box = configureScrollbars(nodes.style(id), &mut output, &mut measurer, id, &request, &resolveBox(nodes.style(id), &request))
   let mut bfc = BfcState.make()
-  let result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+  let result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
   run output.remember(id, request, CacheKind.IntrinsicContents, result)
   if horizontal { return result.size.width }
   return result.size.height
@@ -238,7 +238,7 @@ fn addFlow(base: Rect, rect: Rect, padding: ResolvedEdges, limits: ResolvedEdges
 // Capture normal-flow extents before relative/sticky/scroll translations.
 // Keep the full extent separately: clipping a union's bounding rectangle
 // would let wholly unreachable boxes spuriously enlarge its other axis.
-fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: ResolvedBox, result: &mut Layout) {
+fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &ResolvedBox, result: &mut Layout) {
   let padding = Rect { x: box.border.left + box.gutter.left, y: box.border.top + box.gutter.top, width: max(0.0, result.size.width - box.border.horizontal() - box.gutter.horizontal()), height: max(0.0, result.size.height - box.border.vertical() - box.gutter.vertical()) }
   let mut flow = Rect { x: box.inset.left, y: box.inset.top, width: result.contentSize.width, height: result.contentSize.height }
   let measured = nodes.node(id).measurement == Measurement.Content || nodes.node(id).kind == BoxKind.InlineFormatting
@@ -275,7 +275,7 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: Resolv
   result.scrollableOverflow = overflow
 }
 
-fn orthogonalAvailable(input: Input, available: AvailableSpace, horizontal: bool) -> AvailableSpace {
+fn orthogonalAvailable(input: &Input, available: AvailableSpace, horizontal: bool) -> AvailableSpace {
   let mut limit = min(input.parentMaxSize.width, input.scrollportSize.width)
   let mut initial = input.initialContainingBlock.width
   let mut initialDefinite = input.initialContainingBlock.widthDefinite
@@ -297,9 +297,9 @@ fn orthogonalAvailable(input: Input, available: AvailableSpace, horizontal: bool
 
 // CSS Sizing: known dimensions are border-box constraints, not a rewritten style.
 // Intrinsic probes preserve the original percentage containing block.
-pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if !input.performLayout {
-    match output.lookup(id, input, CacheKind.IndependentBox) {
+    match output.lookup(id, input.*, CacheKind.IndependentBox) {
       Option<Layout>.Some { value: cached } => {
         run output.store(id, cached, false)
         return cached
@@ -308,18 +308,18 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     }
   }
   let mut bfc = BfcState.make()
-  let mut request = input
+  let mut request = input.*
   request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
-  let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, request, &mut bfc)
-  if !input.performLayout { run output.remember(id, input, CacheKind.IndependentBox, result) }
+  let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
+  if !input.performLayout { run output.remember(id, input.*, CacheKind.IndependentBox, result) }
   return result
 }
 
 // Ordinary block descendants share exclusions; independent formatting contexts
 // and intrinsic probes enter through layoutNode instead.
-pub effect fn layoutInBfc<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+pub effect fn layoutInBfc<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if !incoming.performLayout || !incoming.fragmentation.active {
-    return run layoutBox(nodes, &mut output, &mut measurer, id, incoming, &mut bfc)
+    return run layoutBox(nodes, &mut output, &mut measurer, id, &incoming, &mut bfc)
   }
   let checkpoint = output.checkpoint()
   let exclusions = bfc.checkpoint()
@@ -351,7 +351,7 @@ pub effect fn layoutInBfc<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     return Layout.zero()
   }
   run output.resumes.set(id, state)
-  let result = run layoutBox(nodes, &mut output, &mut measurer, id, incoming, &mut bfc)
+  let result = run layoutBox(nodes, &mut output, &mut measurer, id, &incoming, &mut bfc)
   let finished = output.resumes.get(id)
   let discovered = finished.before.forced.active(incoming.fragmentation.activeKinds())
   let lateForced = !state.started && !state.beforeHandled && discovered.kinds.any()
@@ -383,16 +383,16 @@ struct BoxSizing {
   ratioInsetHeight: f64,
 }
 
-effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, fragmented: bool, monolithic: bool) -> BoxSizing ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, fragmented: bool, monolithic: bool) -> BoxSizing ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let node = nodes.node(id)
-  let display = effectiveDisplay(style, input)
+  let display = effectiveDisplay(style, &input)
   // Only flex-item blockification suppresses a declared in-flow float.
   let floating = style.float != Float.None && !input.blockify && !outOfFlow(style)
   let mut natural = NaturalDimensions.none()
   if node.measurement == Measurement.Natural { natural = Measure.natural(&mut measurer, node.measureKey) }
-  let mut box = resolveBox(style, input)
-  let mut request = input
+  let mut box = resolveBox(style, &input)
+  let mut request = input.*
   if !input.known.widthDefinite && !input.intrinsicWidth {
     if style.width.kind == DimensionKind.MinContent { request.availableWidth = AvailableSpace.minContent() }
     if style.width.kind == DimensionKind.MaxContent { request.availableWidth = AvailableSpace.maxContent() }
@@ -403,21 +403,21 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   }
   if !input.intrinsicWidth {
     if style.minWidth.kind == DimensionKind.MinContent || style.minWidth.kind == DimensionKind.MaxContent {
-      box.min.width = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, true, style.minWidth.kind == DimensionKind.MinContent)
+      box.min.width = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, style.minWidth.kind == DimensionKind.MinContent)
     }
     if style.maxWidth.kind == DimensionKind.MinContent || style.maxWidth.kind == DimensionKind.MaxContent {
-      box.max.width = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, true, style.maxWidth.kind == DimensionKind.MinContent)
+      box.max.width = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, style.maxWidth.kind == DimensionKind.MinContent)
     }
   }
   if !input.intrinsicHeight {
     if style.minHeight.kind == DimensionKind.MinContent || style.minHeight.kind == DimensionKind.MaxContent {
-      box.min.height = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, false, style.minHeight.kind == DimensionKind.MinContent)
+      box.min.height = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, style.minHeight.kind == DimensionKind.MinContent)
     }
     if style.maxHeight.kind == DimensionKind.MinContent || style.maxHeight.kind == DimensionKind.MaxContent {
-      box.max.height = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, false, style.maxHeight.kind == DimensionKind.MinContent)
+      box.max.height = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, style.maxHeight.kind == DimensionKind.MinContent)
     }
   }
-  let justification = blockJustification(style, input)
+  let justification = blockJustification(style, &input)
   let parentInlineHorizontal = input.parentWritingMode == WritingMode.HorizontalTb
   let mut autoInlineMargin = style.margin.left.kind == DimensionKind.Auto || style.margin.right.kind == DimensionKind.Auto
   if !parentInlineHorizontal { autoInlineMargin = style.margin.top.kind == DimensionKind.Auto || style.margin.bottom.kind == DimensionKind.Auto }
@@ -452,8 +452,8 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   }
   let orthogonalWidth = orthogonal && horizontal && !box.size.widthDefinite && !input.intrinsicWidth && (autoWidth || style.width.kind == DimensionKind.FitContent) && request.availableWidth.kind != AvailableKind.MinContent && (node.kind == BoxKind.Block || request.availableWidth.kind == AvailableKind.MaxContent)
   let orthogonalHeight = orthogonal && !horizontal && !box.size.heightDefinite && !input.intrinsicHeight && !(ratio > 0.0 && box.size.widthDefinite) && (autoHeight || style.height.kind == DimensionKind.FitContent) && request.availableHeight.kind != AvailableKind.MinContent && (node.kind == BoxKind.Block || request.availableHeight.kind == AvailableKind.MaxContent)
-  if orthogonalWidth { request.availableWidth = orthogonalAvailable(input, request.availableWidth, true) }
-  if orthogonalHeight { request.availableHeight = orthogonalAvailable(input, request.availableHeight, false) }
+  if orthogonalWidth { request.availableWidth = orthogonalAvailable(&input, request.availableWidth, true) }
+  if orthogonalHeight { request.availableHeight = orthogonalAvailable(&input, request.availableHeight, false) }
   let ordinaryBlock = display.outsideIs(DisplayOutside.Block) && !style.replaced && !floating && !outOfFlow(style)
   let fillWidth = !orthogonalWidth && ((!input.shrinkToFit && style.writingMode == WritingMode.HorizontalTb && !(fitInline && parentInlineHorizontal)) || (stretchInline && parentInlineHorizontal))
   if !box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && (ordinaryBlock || (stretchInline && parentInlineHorizontal)) && request.availableWidth.kind == AvailableKind.Definite && fillWidth {
@@ -472,24 +472,24 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   }
   let fitWidth = orthogonalWidth || (!style.replaced && (input.shrinkToFit || display.outsideIs(DisplayOutside.Inline) || floating || outOfFlow(style))) || style.width.kind == DimensionKind.FitContent || (fitInline && parentInlineHorizontal)
   if !box.size.widthDefinite && !input.intrinsicWidth && fitWidth && request.availableWidth.kind == AvailableKind.Definite {
-    let smallest = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, true, true)
-    let largest = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, true, false)
+    let smallest = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, true)
+    let largest = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, false)
     box.size.width = max(smallest, min(max(0.0, request.availableWidth.value - box.margin.horizontal()), largest))
     box.size.widthDefinite = true
   }
   if !box.size.heightDefinite && !input.intrinsicHeight && (orthogonalHeight || style.height.kind == DimensionKind.FitContent || (fitInline && !parentInlineHorizontal)) && request.availableHeight.kind == AvailableKind.Definite {
-    let smallest = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, false, true)
-    let largest = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, false, false)
+    let smallest = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, true)
+    let largest = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, false)
     box.size.height = max(smallest, min(max(0.0, request.availableHeight.value - box.margin.vertical()), largest))
     box.size.heightDefinite = true
   }
   if fragmented && !monolithic {
     if horizontal && !box.size.widthDefinite {
-      box.size.width = run intrinsic(nodes, &mut output, &mut measurer, id, request, natural, true, request.availableWidth.kind == AvailableKind.MinContent)
+      box.size.width = run intrinsic(nodes, &mut output, &mut measurer, id, &request, natural, true, request.availableWidth.kind == AvailableKind.MinContent)
       box.size.widthDefinite = true
     }
     if !horizontal && !box.size.heightDefinite {
-      box.size.height = run intrinsic(nodes, &mut output, &mut measurer, id, request, natural, false, request.availableHeight.kind == AvailableKind.MinContent)
+      box.size.height = run intrinsic(nodes, &mut output, &mut measurer, id, &request, natural, false, request.availableHeight.kind == AvailableKind.MinContent)
       box.size.heightDefinite = true
     }
   }
@@ -506,26 +506,26 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
     if ratioWidth && style.minWidth.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, true)) {
       let mut minimumInput = request
       minimumInput.known = box.size
-      let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, minimumInput, natural, true, true)
+      let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, &minimumInput, natural, true, true)
       box.min.width = max(box.min.width, min(minimum, box.max.width))
       box.size.width = clamp(box.size.width, box.min.width, box.max.width)
     }
     if ratioHeight && style.minHeight.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, false)) {
       let mut minimumInput = request
       minimumInput.known = box.size
-      let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, minimumInput, natural, false, true)
+      let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, &minimumInput, natural, false, true)
       box.min.height = max(box.min.height, min(minimum, box.max.height))
       box.size.height = clamp(box.size.height, box.min.height, box.max.height)
     }
   }
-  box = configureScrollbars(style, &mut output, &mut measurer, id, request, box)
+  box = configureScrollbars(style, &mut output, &mut measurer, id, &request, &box)
   return BoxSizing { box: box, request: request, natural: natural, ratio: ratio, ratioBorder: ratioBorder, ratioInsetWidth: ratioInsetWidth, ratioInsetHeight: ratioInsetHeight }
 }
 
-fn boxInput(nodes: &BoxTree, id: usize, incoming: Input) -> Input {
+fn boxInput(nodes: &BoxTree, id: usize, incoming: &Input) -> Input {
   let style = nodes.style(id)
   let node = nodes.node(id)
-  let mut input = incoming
+  let mut input = incoming.*
   input.blockRoot = input.blockRoot || node.independentRoot
   if node.parent != NO_NODE && nodes.node(node.parent).kind == BoxKind.Flex { input.blockify = true }
   input.atomicInline = node.kind == BoxKind.Block && !style.replaced && style.display.outsideIs(DisplayOutside.Inline) && style.display.insideIs(DisplayInside.Flow)
@@ -533,21 +533,21 @@ fn boxInput(nodes: &BoxTree, id: usize, incoming: Input) -> Input {
 }
 
 // Resolve continuation geometry without replaying already-consumed normal flow.
-pub effect fn resolveFragmentBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: Input) -> ResolvedBox ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  let mut input = boxInput(nodes, id, incoming)
+pub effect fn resolveFragmentBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input) -> ResolvedBox ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut input = boxInput(nodes, id, &incoming)
   input.performLayout = false
   input.fragmentation.active = false
   let checkpoint = output.checkpoint()
-  let sizing = run prepareSizing(nodes, &mut output, &mut measurer, id, input, true, false)
+  let sizing = run prepareSizing(nodes, &mut output, &mut measurer, id, &input, true, false)
   output.restoreCheckpoint(checkpoint)
   output.closeCheckpoint(checkpoint)
   return sizing.box
 }
 
-effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let node = nodes.node(id)
-  let mut input = boxInput(nodes, id, incoming)
+  let mut input = boxInput(nodes, id, &incoming)
   let fragmented = incoming.performLayout && incoming.fragmentation.active
   let monolithic = fragmented && node.fragmentMonolithic
   if !input.performLayout || monolithic { input.fragmentation.active = false }
@@ -558,7 +558,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     wasStarted = previous.started
     wasNormalComplete = previous.normalComplete
   }
-  let sizing = run prepareSizing(nodes, &mut output, &mut measurer, id, input, fragmented, monolithic)
+  let sizing = run prepareSizing(nodes, &mut output, &mut measurer, id, &input, fragmented, monolithic)
   let mut box = sizing.box
   let mut request = sizing.request
   let natural = sizing.natural
@@ -603,7 +603,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       let mut probe = request
       probe.fragmentation.active = false
       probe.fragmentation.boundaryProbe = BoundaryProbe.After
-      drop run layoutBox(nodes, &mut output, &mut measurer, id, probe, &mut bfc)
+      drop run layoutBox(nodes, &mut output, &mut measurer, id, &probe, &mut bfc)
       let after = output.resumes.get(id).after
       output.restoreCheckpoint(trial)
       output.closeCheckpoint(trial)
@@ -614,7 +614,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     }
   }
   let passCheckpoint = output.checkpoint()
-  let mut result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+  let mut result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
   if fragmented {
     let state = output.resumes.get(id)
     if state.blocked || state.skipped {
@@ -636,10 +636,10 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       box.size.widthDefinite = true }
     if height != result.size.height { box.size.height = height
       box.size.heightDefinite = true }
-    box = configureScrollbars(style, &mut output, &mut measurer, id, request, box)
+    box = configureScrollbars(style, &mut output, &mut measurer, id, &request, &box)
     bfc.restore(checkpoint)
     output.restoreCheckpoint(passCheckpoint)
-    result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+    result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
   }
   // An intrinsic inline size can become the ratio-determining size only
   // after contents have been measured. Transfer the allotted size (including
@@ -655,7 +655,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
           let mut probe = request
           probe.known.width = result.size.width
           probe.known.widthDefinite = true
-          contentMinimum = run intrinsic(nodes, &mut output, &mut measurer, id, probe, natural, false, true)
+          contentMinimum = run intrinsic(nodes, &mut output, &mut measurer, id, &probe, natural, false, true)
         }
         height = max(height, contentMinimum)
       }
@@ -672,7 +672,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
           let mut probe = request
           probe.known.height = result.size.height
           probe.known.heightDefinite = true
-          contentMinimum = run intrinsic(nodes, &mut output, &mut measurer, id, probe, natural, true, true)
+          contentMinimum = run intrinsic(nodes, &mut output, &mut measurer, id, &probe, natural, true, true)
         }
         width = max(width, contentMinimum)
       }
@@ -682,17 +682,17 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       transferred = true
     }
     if transferred {
-      box = configureScrollbars(style, &mut output, &mut measurer, id, request, box)
+      box = configureScrollbars(style, &mut output, &mut measurer, id, &request, &box)
       bfc.restore(checkpoint)
       output.restoreCheckpoint(passCheckpoint)
-      result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+      result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
     }
   }
   // Block/flex algorithms can enforce an intrinsic min/max internally.
   // Inform the host when that creates an allotted area, without turning an
   // indefinite CSS percentage basis into a definite one. Each iteration
   // marks at least one previously intrinsic axis constrained.
-  if scrollbarApplies(style, input) && !box.scrollbarMetrics.overlay && (box.scrollbarMetrics.horizontal > 0.0 || box.scrollbarMetrics.vertical > 0.0) {
+  if scrollbarApplies(style, &input) && !box.scrollbarMetrics.overlay && (box.scrollbarMetrics.horizontal > 0.0 || box.scrollbarMetrics.vertical > 0.0) {
     let mut available = box.size
     while true {
       let constrainWidth = !available.widthDefinite && ((box.min.width > box.border.horizontal() + box.padding.horizontal() && result.size.width <= box.min.width) || result.size.width >= box.max.width)
@@ -705,12 +705,12 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       let originalSize = box.size
       let previous = box.gutter
       box.size = available
-      box = configureScrollbars(style, &mut output, &mut measurer, id, request, box)
+      box = configureScrollbars(style, &mut output, &mut measurer, id, &request, &box)
       box.size = originalSize
       if previous.top == box.gutter.top && previous.right == box.gutter.right && previous.bottom == box.gutter.bottom && previous.left == box.gutter.left { break }
       bfc.restore(checkpoint)
       output.restoreCheckpoint(passCheckpoint)
-      result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+      result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
     }
   }
   if input.performLayout && output.frame != NO_NODE {
@@ -754,9 +754,9 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       state.normalComplete = state.normalContentComplete
       state.contentComplete = state.descendantsComplete
     } else {
-      let current = FragmentBox.current(style, box, state, incoming.fragmentation, output.frames.writingMode)
+      let current = FragmentBox.current(style, &box, &state, &incoming.fragmentation, output.frames.writingMode)
       naturalContent = max(0.0, previousExtent - frameAxes.box(current).inset.vertical())
-      box = FragmentBox.finish(style, incoming, box, current, &mut state, &mut result, output.frames.writingMode)
+      box = FragmentBox.finish(style, &incoming, &box, &current, &mut state, &mut result, output.frames.writingMode)
     }
     run output.resumes.set(id, state)
     let delta = frameAxes.size(result.size).height - previousExtent
@@ -815,7 +815,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   // extents. Normalize after constraints and every layout algorithm.
   result.contentSize = Size { width: max(0.0, result.size.width - box.inset.horizontal()), height: max(0.0, result.size.height - box.inset.vertical()) }
   result.scrollbarGutter = box.gutter
-  if scrollbarApplies(style, input) {
+  if scrollbarApplies(style, &input) {
     result.setScrollbarMetrics(box.scrollbarMetrics)
     result.horizontalScrollbar = overflowForAxis(style, true) == Overflow.Scroll || output.selected(id, true)
     result.verticalScrollbar = overflowForAxis(style, false) == Overflow.Scroll || output.selected(id, false)
@@ -858,7 +858,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   result.preferredRatio = ratio
   result.ratioBorderBox = ratioBorder
   exportScrollBaselines(style, node.kind, &mut result)
-  if input.performLayout { overflowGeometry(nodes, &output, id, box, &mut result) }
+  if input.performLayout { overflowGeometry(nodes, &output, id, &box, &mut result) }
   run output.store(id, result, input.performLayout)
   output.closeCheckpoint(passCheckpoint)
   output.fragmentParent = previousParent
@@ -875,7 +875,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   input.known = viewport
   input.blockRoot = true
   while true {
-    let viewportLayout = run layoutNode(&nodes, &mut boxes, &mut measurer, 0, input)
+    let viewportLayout = run layoutNode(&nodes, &mut boxes, &mut measurer, 0, &input)
     drop viewportLayout
     let overflow = run positionTree(&nodes, &mut boxes, &mut measurer, viewport, tree.viewportScrollOffset)
     if !boxes.needsRelayout {

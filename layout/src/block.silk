@@ -54,19 +54,19 @@ fn normalChild(nodes: &BoxTree, candidate: usize) -> usize {
   }
   return NO_NODE
 }
-fn topMargins(layout: Layout) -> Margins {
+fn topMargins(layout: &Layout) -> Margins {
   return Margins { positive: layout.marginTopPositive, negative: layout.marginTopNegative }
 }
-fn bottomMargins(layout: Layout) -> Margins {
+fn bottomMargins(layout: &Layout) -> Margins {
   return Margins { positive: layout.marginBottomPositive, negative: layout.marginBottomNegative }
 }
-pub fn inlineOffset(style: &Style, input: Input, axes: Axes, direction: Direction, margin: ResolvedEdges, width: f64, available: f64) -> f64 {
-  let alignment = blockJustification(style, input)
+pub fn inlineOffset(style: &Style, input: &Input, axes: &Axes, direction: Direction, margin: ResolvedEdges, width: f64, available: f64) -> f64 {
+  let alignment = blockJustification(style, &input)
   if alignment == Align.Normal || axes.lowAuto(style) || axes.highAuto(style) {
     return blockInlineOffset(margin.left, margin.right, axes.lowAuto(style), axes.highAuto(style), direction == Direction.Rtl, width, available)
   }
   let reverseSelf = selfStartReversed(style, !axes.vertical) != axes.reverseLine
-  return margin.left + alignmentOffset(alignment, blockJustificationSafety(style, input), direction == Direction.Rtl, reverseSelf, axes.reverseLine, available - width - margin.horizontal())
+  return margin.left + alignmentOffset(alignment, blockJustificationSafety(style, &input), direction == Direction.Rtl, reverseSelf, axes.reverseLine, available - width - margin.horizontal())
 }
 
 
@@ -88,9 +88,9 @@ fn settleCandidate(output: &mut LayoutPass, previous: Option<Candidate>, trial: 
   }
 }
 
-fn prepareChild(nodes: &BoxTree, id: usize, base: Input, axes: Axes, box: &ResolvedBox, availableInline: AvailableSpace, parallel: bool) -> Child {
+fn prepareChild(nodes: &BoxTree, id: usize, base: &Input, axes: Axes, box: &ResolvedBox, availableInline: AvailableSpace, parallel: bool) -> Child {
   let style = nodes.style(id)
-  let mut input = base
+  let mut input = base.*
   input.blockRoot = nodes.node(id).independentRoot || style.writingMode != base.parentWritingMode
   if axes.vertical {
     input.availableWidth = AvailableSpace.maxContent()
@@ -105,20 +105,20 @@ fn prepareChild(nodes: &BoxTree, id: usize, base: Input, axes: Axes, box: &Resol
     input.shrinkToFit = true
     input.blockRoot = true
   }
-  let child = axes.box(resolveBox(style, input))
+  let child = axes.box(resolveBox(style, &input))
   let mut width = max(child.inset.horizontal(), box.size.width - box.inset.horizontal() - child.margin.horizontal())
   if child.size.widthDefinite { width = child.size.width }
   width = clamp(width, child.min.width, child.max.width)
   return Child { id: id, margin: child.margin, inset: child.inset, input: input, width: width, parallel: parallel }
 }
 
-pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: Input, physicalBox: ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if !input.performLayout || !input.fragmentation.active {
-    return run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, input, physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
+    return run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
   }
   let pass = output.checkpoint()
   let floats = bfc.checkpoint()
-  let mut result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, input, physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
+  let mut result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
   let state = output.resumes.get(id)
   let mut cut = NO_NODE
   match state.cursor {
@@ -141,19 +141,19 @@ pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     let forced = output.resumes.get(cut).requested
     output.restoreCheckpoint(pass)
     bfc.restore(floats)
-    result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, input, physicalBox, &mut bfc, cut, forced)
+    result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, cut, forced)
   }
   output.closeCheckpoint(pass)
   return result
 }
 
-effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: Input, physicalBox: ResolvedBox, bfc: &mut BfcState, endBefore: usize, endBreak: ForcedBreaks) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState, endBefore: usize, endBreak: ForcedBreaks) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let axes = Axes.make(style.writingMode)
-  let box = axes.box(physicalBox)
+  let box = axes.box(physicalBox.*)
   let fragmented = input.performLayout && input.fragmentation.active
   let afterProbe = input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After && nodes.node(id).dynamicAfter
   let origin = input.bfcContentOrigin
-  let formattingRoot = input.blockRoot || establishesContext(style, input) || style.writingMode != input.parentWritingMode
+  let formattingRoot = input.blockRoot || establishesContext(style, &input) || style.writingMode != input.parentWritingMode
   let collapseTop = !formattingRoot && box.inset.top == 0.0
   let collapseBottom = !formattingRoot && box.inset.bottom == 0.0 && !box.size.heightDefinite
   let mut parent = OptionalSize.none()
@@ -185,16 +185,16 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   let mut parallel = pendingTail != NO_NODE
   let mut childId = nextChild
   if parallel { childId = run output.popPending(id) }
-  let childBase = childrenInput(input, style, physicalBox, parent)
+  let childBase = childrenInput(&input, style, &physicalBox, parent)
   let lazy = fragmented && box.size.widthDefinite
   while childId != NO_NODE && !lazy {
-    let mut child = prepareChild(nodes, childId, childBase, axes, &box, availableInline, parallel)
+    let mut child = prepareChild(nodes, childId, &childBase, axes, &box, availableInline, parallel)
     // A definite inline size needs no whole-subtree measurement pass. Only
     // intrinsic sizing probes children before their source-order placement.
     if !box.size.widthDefinite {
       let mut probeInput = child.input
       probeInput.performLayout = false
-      let measured = run layoutNode(nodes, &mut output, &mut measurer, childId, probeInput)
+      let measured = run layoutNode(nodes, &mut output, &mut measurer, childId, &probeInput)
       child.width = axes.size(measured.size).width
       let contribution = child.width + child.margin.horizontal()
       if nodes.style(childId).float != Float.None && availableInline.kind != AvailableKind.MinContent {
@@ -253,7 +253,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       if stopped && !parallel { break }
       // Only visited children need preparation or final-axis conversion.
       // The old pending tail prevents consuming continuations queued here.
-      run children.append(prepareChild(nodes, childId, childBase, axes, &box, availableInline, parallel))
+      run children.append(prepareChild(nodes, childId, &childBase, axes, &box, availableInline, parallel))
       if parallel {
         if childId == pendingTail { parallel = false
           childId = nextChild }
@@ -313,14 +313,14 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       item.input.parent = parent
       if axes.vertical { item.input.availableHeight = AvailableSpace.definite(contentWidth) }
       else { item.input.availableWidth = AvailableSpace.definite(contentWidth) }
-      let childBox = axes.box(resolveBox(childStyle, item.input))
+      let childBox = axes.box(resolveBox(childStyle, &item.input))
       item.margin = childBox.margin
       item.inset = childBox.inset
       item.width = max(childBox.inset.horizontal(), contentWidth - childBox.margin.horizontal())
       if childBox.size.widthDefinite { item.width = childBox.size.width }
       item.width = clamp(item.width, childBox.min.width, childBox.max.width)
     }
-    let independent = item.input.blockRoot || establishesContext(childStyle, item.input) || childStyle.replaced
+    let independent = item.input.blockRoot || establishesContext(childStyle, &item.input) || childStyle.replaced
     let mut testFloatEnd = fragmented && item.input.fragmentation.marginEnd && !item.input.fragmentation.marginEndChosen
       && formattingRoot && childStyle.float == Float.None && bfc.count != 0
     if testFloatEnd { item.input.fragmentation.marginEnd = false }
@@ -350,7 +350,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       }
     }
     let mut childLayout = Layout.zero()
-    let mut x = inlineOffset(childStyle, item.input, axes, style.usedDirection(), item.margin, item.width, contentWidth)
+    let mut x = inlineOffset(childStyle, &item.input, &axes, style.usedDirection(), item.margin, item.width, contentWidth)
     let mut y = cursor
     let mut inlineStart = 0.0
     let mut inlineSpace = contentWidth
@@ -375,7 +375,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
         let mut probe = item.input
         probe.fragmentation.active = false
         probe.fragmentation.boundaryProbe = BoundaryProbe.After
-        drop run layoutNode(nodes, &mut output, &mut measurer, item.id, probe)
+        drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &probe)
         floatAfter.merge(output.resumes.get(item.id).after)
         output.restoreCheckpoint(trial)
       }
@@ -389,7 +389,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
           request.fragmentation.offset = input.fragmentation.offset + box.inset.top + y + item.margin.top
           request.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || y > 0.0
         }
-        childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+        childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
         childLayout.size = axes.size(childLayout.size)
         if fragmented {
           let state = output.resumes.get(item.id)
@@ -476,9 +476,9 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
         childInput.bfcContentOrigin = Point { x: origin.x + x + item.inset.left, y: origin.y + y + item.inset.top }
         bfc.sourceFloor = max(bfc.sourceFloor, origin.y + y - item.margin.top)
         if independent {
-          childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, childInput)
+          childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &childInput)
         } else {
-          childLayout = run layoutInBfc(nodes, &mut output, &mut measurer, item.id, childInput, &mut bfc)
+          childLayout = run layoutInBfc(nodes, &mut output, &mut measurer, item.id, &childInput, &mut bfc)
         }
         childLayout.size = axes.size(childLayout.size)
         if fragmented {
@@ -491,20 +491,20 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
           // A contained float may establish the BFC's end below normal flow.
           // Compare the retained margin envelope, not the already-trimmed
           // border rectangle. Actual chosen sibling breaks remain adjoining.
-          if bfc.bottom(origin) <= y + childLayout.size.height + bottomMargins(childLayout).value() {
+          if bfc.bottom(origin) <= y + childLayout.size.height + bottomMargins(&childLayout).value() {
             item.input.fragmentation.marginEnd = true
             bfc.restore(checkpoint)
             output.restoreCheckpoint(fragmentCheckpoint)
             continue
           }
         }
-        childTop = topMargins(childLayout)
+        childTop = topMargins(&childLayout)
         joined = pending.join(childTop)
         let mut nextY = cursor
         if item.parallel { nextY = 0.0 }
         else if !(leading && collapseTop) { nextY = cursor + joined.value() }
         nextY = max(nextY, clearMinimum)
-        let nextX = inlineOffset(childStyle, item.input, axes, style.usedDirection(), item.margin, childLayout.size.width, contentWidth)
+        let nextX = inlineOffset(childStyle, &item.input, &axes, style.usedDirection(), item.margin, childLayout.size.width, contentWidth)
         let moved = nextX != x || nextY != y
         if moved && ((fragmented && nextY != y) || (!independent && checkpoint.count != 0)) {
           // Fragment capacity changes with the collapsed block position even
@@ -526,7 +526,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       let accepted = !fragmented || (!output.resumes.get(item.id).blocked && !output.resumes.get(item.id).skipped)
       if independent && bfc.count != 0 && accepted {
         let mut band = bfc.band(origin, contentWidth, y, childLayout.size.height)
-        let justification = blockJustification(childStyle, item.input)
+        let justification = blockJustification(childStyle, &item.input)
         let autoWidth = axes.autoInline(childStyle) && (!childStyle.replaced || justification == Align.Stretch)
         let stretch = justification == Align.Normal || (justification == Align.Stretch && !axes.lowAuto(childStyle) && !axes.highAuto(childStyle))
         let mut fits = false
@@ -556,7 +556,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
               bfcInput.fragmentation.limit = input.fragmentation.limit - box.inset.bottom
             }
             output.restoreCheckpoint(fragmentCheckpoint)
-            childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, bfcInput)
+            childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &bfcInput)
             childLayout.size = axes.size(childLayout.size)
             layoutY = y
             if fragmented {
@@ -578,7 +578,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
             }
           }
         }
-        x = band.left + inlineOffset(childStyle, item.input, axes, style.usedDirection(), item.margin, childLayout.size.width, band.right - band.left)
+        x = band.left + inlineOffset(childStyle, &item.input, &axes, style.usedDirection(), item.margin, childLayout.size.width, band.right - band.left)
         inlineStart = band.left
         inlineSpace = band.right - band.left
       }
@@ -663,7 +663,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
           continue
         }
       }
-      let childBottom = bottomMargins(childLayout)
+      let childBottom = bottomMargins(&childLayout)
       if fragmented && !item.parallel {
         let child = output.resumes.get(item.id)
         let mut own = output.resumes.get(id)
@@ -731,7 +731,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       usedMargin.bottom = used.bottom
     }
     if childStyle.float == Float.None {
-      let alignment = blockJustification(childStyle, item.input)
+      let alignment = blockJustification(childStyle, &item.input)
       if alignment == Align.Normal || axes.lowAuto(childStyle) || axes.highAuto(childStyle) {
         usedMargin.left = x - inlineStart
         usedMargin.right = inlineSpace - childLayout.size.width - usedMargin.left

@@ -145,6 +145,11 @@ pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     if boxChild(nodes, nodes.node(id).firstChild) == NO_NODE { return leafBlock(style, &input, &physicalBox, &bfc) }
     return run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none(), false)
   }
+  return run layoutFragmentedBlock(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc)
+}
+
+// layoutBlock in a fragmented pass, kept out of line so the common path's code stays small.
+effect fn layoutFragmentedBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator with Intrinsic.inlineNever() {
   let pass = output.checkpoint()
   let floats = bfc.checkpoint()
   let mut result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none(), true)

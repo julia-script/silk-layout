@@ -9,7 +9,7 @@ import flex { layoutFlex }
 import positioned { positionTree, reachableLimits, addOverflow }
 import bfc { BfcState }
 import silk.option { Option }
-import layout_pass { LayoutPass, CacheKind, FullBoxGeometry }
+import layout_pass { LayoutPass, CacheKind, FullBoxGeometry, REUSE_INDEPENDENT, REUSE_IN_FLOW }
 import layout_cache { LayoutCache, Snapshot }
 import incremental as Incremental
 import replaced { layoutReplaced, preferredRatio, borderRatio }
@@ -312,7 +312,7 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     }
   }
   if input.performLayout {
-    match run output.reuseFinal(nodes, id, input.*) {
+    match run output.reuseFinal(nodes, id, input.*, REUSE_INDEPENDENT) {
       Option<Layout>.Some { value: reused } => { return reused }
       Option<Layout>.None => {}
     }
@@ -324,6 +324,24 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
   if !input.performLayout { run output.remember(id, input.*, CacheKind.IndependentBox, result) }
   else if output.frame == NO_NODE { run output.recordFinal(id, input.*, result, start) }
+  return result
+}
+
+// An in-flow block child of a shared BFC. While no exclusion reaches below
+// the top of its content box, and its subtree adds none and has no negative
+// margins to rise into one, its layout depends only on its request, so a
+// clean child is copied like an independent formatting context.
+pub effect fn layoutInFlow<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let reusable = input.performLayout && !input.fragmentation.active && output.frame == NO_NODE && bfc.clearBelow(input.bfcContentOrigin.y)
+  if reusable {
+    match run output.reuseFinal(nodes, id, input.*, REUSE_IN_FLOW) {
+      Option<Layout>.Some { value: reused } => { return reused }
+      Option<Layout>.None => {}
+    }
+  }
+  let start = output.fragments.checkpoint()
+  let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
+  if reusable && bfc.clearBelow(input.bfcContentOrigin.y) { run output.recordFinal(id, input.*, result, start) }
   return result
 }
 

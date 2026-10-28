@@ -24,6 +24,16 @@ impl BfcState {
     self.rightDeferred = checkpoint.rightDeferred
     self.pendingFloat = checkpoint.pendingFloat
   }
+  // No exclusions extend below `top`, and none are deferred or pending.
+  pub fn clearBelow(self: &Self, top: f64) -> bool {
+    if self.leftDeferred || self.rightDeferred || self.pendingFloat { return false }
+    let mut index: usize = 0
+    while index < self.count {
+      if self.floats.get(index).bottom > top { return false }
+      index = index + 1
+    }
+    return true
+  }
   pub fn deferred(self: &Self, side: Float) -> bool {
     return (side == Float.Left && self.leftDeferred) || (side == Float.Right && self.rightDeferred)
   }

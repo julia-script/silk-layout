@@ -7,7 +7,7 @@ import silk.option { Option }
 import text { TextMeasure, TextError, TextContext, TextTokenKind, TextCursor, TextBreak, TextBreakKind, TextLevel, TextAnalysis, TextShapeRequest, TextRun }
 import silk.effect { Effect }
 import silk.testing { Testing, AssertionError }
-import style { Style, Dimension, DimensionKind, Edges, Display, DisplayOutside, DisplayInside, Position, BoxSizing, TextAlign, TextWrap, Direction, WhiteSpaceCollapse, TabSize, BoxDecorationBreak }
+import style { Style, Dimension, DimensionKind, Edges, Float, Display, DisplayOutside, DisplayInside, Position, BoxSizing, TextAlign, TextWrap, Direction, WhiteSpaceCollapse, TabSize, BoxDecorationBreak }
 import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize, AvailableKind, max, min, abs }
 import tree { Tree, LayoutTree, InvalidNode, NO_NODE }
 import engine { compute }
@@ -649,4 +649,40 @@ test effect fn cleanSubtreesAreCopiedNotLaidOut() ! OutOfMemoryError | TextError
   run Testing.expect(moved.x == 60.0 && moved.width == 100.0, "a sibling change moves the sibling")
   run Testing.expect(output.stats.reusedLayouts == 1, "a sibling change re-lays the root and copies the clean panel")
   run Testing.expect(output.fragments.values.length() == fragments, "copied fragments replace, not add to, the panel")
+}
+
+test effect fn blockFlowChildrenBelowFloatsAreCopied() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.width = Dimension.px(300.0)
+  let mut tree = run Tree.make(move style) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut floatStyle = Style.make()
+  floatStyle.float = Float.Left
+  floatStyle.width = Dimension.px(100.0)
+  floatStyle.height = Dimension.px(50.0)
+  drop run tree.append(root, move floatStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut besideStyle = Style.make()
+  besideStyle.height = Dimension.px(30.0)
+  let beside = run tree.append(root, move besideStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut belowStyle = Style.make()
+  belowStyle.height = Dimension.px(40.0)
+  let below = run tree.append(root, move belowStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut liftedStyle = Style.make()
+  liftedStyle.height = Dimension.px(10.0)
+  liftedStyle.margin.top = Dimension.px(-30.0)
+  let lifted = run tree.append(root, move liftedStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 20.0, maximum: 60.0, height: 18.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut taller = Style.make()
+  taller.height = Dimension.px(45.0)
+  run tree.setStyle(beside, move taller)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let moved = run output.sourceBounds(below)
+  let raised = run output.sourceBounds(lifted)
+  run Testing.expect(moved.y == 45.0 && moved.height == 40.0 && raised.y == 55.0, "siblings follow the taller block")
+  // The float ends at 50, above the 40px block's new top; the negative
+  // margin could lift the last block into it, so that one is laid out.
+  run Testing.expect(output.stats.reusedLayouts == 1, "only the block clear of the float and without negative margins is copied")
 }

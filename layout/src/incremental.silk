@@ -1,9 +1,10 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import context { outOfFlow }
+import style { Float, Dimension, Edges }
 import tree { Tree, NO_NODE }
 import box_tree { BoxTree, BoxNode }
-import layout_cache { LayoutCache }
+import layout_cache { LayoutCache, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW }
 
 // Kept results are addressed by generated box index, so they survive only
 // while box construction yields the same boxes. Scroll offsets only move
@@ -62,22 +63,37 @@ pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, 
   }
 }
 
-// Which boxes head a subtree whose finished layout may be copied into the
-// next compute: no box in it is out of flow or lifts inline interruptions,
-// since positioning, not normal-flow layout, completes those.
-pub effect fn reusableSubtrees(nodes: &BoxTree) -> List<bool> ! OutOfMemoryError ? &mut Allocator {
+fn nonNegativeDimension(value: &Dimension) -> bool { return value.value >= 0.0 && value.percent >= 0.0 }
+fn nonNegative(edges: &Edges) -> bool {
+  return nonNegativeDimension(&edges.top) && nonNegativeDimension(&edges.right) && nonNegativeDimension(&edges.bottom) && nonNegativeDimension(&edges.left)
+}
+
+// How much of a box's previous layout may be copied into the next compute.
+// A subtree with out-of-flow boxes or inline interruptions is never copied:
+// positioning, not normal-flow layout, completes those. One with floats is
+// copied only where it starts a formatting context, since its floats would
+// otherwise join exclusions it shares with its siblings. So is one with
+// negative margins, which could lift a box into the floats above it.
+pub effect fn reusableSubtrees(nodes: &BoxTree) -> List<u8> ! OutOfMemoryError ? &mut Allocator {
   let count = nodes.boxes.length()
-  let mut result = List<bool>.make()
+  let mut result = List<u8>.make()
   run result.reserveExact(count)
-  while result.length() < count { run result.append(true) }
+  while result.length() < count { run result.append(REUSE_IN_FLOW) }
   // Generated parents precede their children.
   let mut index = count
   while index > 0 {
     index = index - 1
     let node = nodes.node(index)
-    let ok = result.get(index) && !outOfFlow(nodes.style(index)) && node.interruptionFirst == NO_NODE
-    result.set(index, ok)
-    if !ok && node.parent != NO_NODE { result.set(node.parent, false) }
+    let style = nodes.style(index)
+    let mut level = result.get(index)
+    if outOfFlow(style) || node.interruptionFirst != NO_NODE { level = REUSE_NONE }
+    else if level > REUSE_INDEPENDENT && !nonNegative(&style.margin) { level = REUSE_INDEPENDENT }
+    result.set(index, level)
+    if node.parent != NO_NODE {
+      let mut inherited = level
+      if style.float != Float.None && inherited > REUSE_INDEPENDENT { inherited = REUSE_INDEPENDENT }
+      if inherited < result.get(node.parent) { result.set(node.parent, inherited) }
+    }
   }
   return move result
 }

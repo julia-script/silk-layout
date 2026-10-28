@@ -161,24 +161,30 @@ impl LayoutCache {
   }
   pub fn sameRequest(a: &Input, b: &Input) -> bool { return sameInput(a, b) }
   pub fn lookup(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Layout> {
-    if id >= self.heads.length() { return Option<Layout>.None }
+    let index = self.find(id, input, kind)
+    if index == ABSENT { return Option<Layout>.None }
+    return Option<Layout>.Some { value: self.entries.asSlice()[index].layout }
+  }
+  // The entry index of a cached result, or usize.MAX; read it with layoutAt.
+  pub fn find(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> usize {
+    if id >= self.heads.length() { return ABSENT }
     let mut index = self.heads.get(id)
     while index != ABSENT {
       let entries = self.entries.asSlice()
       let entry = &entries[index]
       if entry.kind == kind && sameInput(&entry.input, input) {
-        let layout = entry.layout
         if entry.generation != self.generation {
           let mutable = self.entries.asMutSlice()
           mutable[index].generation = self.generation
           self.touched = self.touched + 1
         }
-        return Option<Layout>.Some { value: layout }
+        return index
       }
       index = entry.next
     }
-    return Option<Layout>.None
+    return ABSENT
   }
+  pub fn layoutAt(self: &Self, index: usize) -> &Layout with Intrinsic.inlineAlways() { return &self.entries.asSlice()[index].layout }
   pub effect fn remember(self: &mut Self, id: usize, input: &Input, kind: CacheKind, layout: &Layout) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.heads.length() {
       let missing = id + 1 - self.heads.length()

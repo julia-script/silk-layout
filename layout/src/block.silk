@@ -9,7 +9,7 @@ import tree { NO_NODE }
 import box_tree { BoxTree, BoxKind }
 import axes { Axes }
 import context { Input, ResolvedBox, resolveBox, childrenInput, outOfFlow, establishesContext, selfCollapsingSize, blockContentOffset, blockInlineOffset, blockJustification, blockJustificationSafety, selfStartReversed, alignmentOffset }
-import engine { layoutNode, layoutInFlow }
+import engine { layoutNode, layoutInFlow, probeNode }
 import bfc { BfcState, FloatBox, Checkpoint }
 import layout_pass { LayoutPass, PassCheckpoint }
 import text { TextMeasure, TextError }
@@ -194,8 +194,8 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     if !box.size.widthDefinite {
       let mut probeInput = child.input
       probeInput.performLayout = false
-      let measured = run layoutNode(nodes, &mut output, &mut measurer, childId, &probeInput)
-      child.width = axes.size(measured.size).width
+      run probeNode(nodes, &mut output, &mut measurer, childId, &probeInput)
+      child.width = axes.size(output.boxes[childId].size).width
       let contribution = child.width + child.margin.horizontal()
       if nodes.style(childId).float != Float.None && availableInline.kind != AvailableKind.MinContent {
         floatRun = floatRun + contribution

@@ -2,15 +2,35 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import silk.usize
 import grid_placement { GridItem, GridBounds }
-import grid_tracks { TrackState }
+import grid_tracks { TrackState, TrackContribution }
+
+pub struct GridAxisScratch {
+  pub tracks: List<TrackState>,
+  pub contributions: List<TrackContribution>,
+}
+
+impl GridAxisScratch {
+  pub fn make() -> GridAxisScratch {
+    return GridAxisScratch {
+      tracks: List<TrackState>.make(),
+      contributions: List<TrackContribution>.make(),
+    }
+  }
+
+  pub fn clear(self: &mut Self) {
+    self.tracks.clear()
+    self.contributions.clear()
+  }
+}
 
 // Placement is shared by this compute's probes and final layout. Track sizes
 // are request-dependent and are initialized again before each sizing pass.
 pub struct GridScratch {
   pub items: List<GridItem>,
   pub bounds: GridBounds,
-  pub columns: List<TrackState>,
-  pub rows: List<TrackState>,
+  pub columns: GridAxisScratch,
+  pub rows: GridAxisScratch,
+  pub trackWork: List<usize>,
 }
 
 impl GridScratch {
@@ -18,8 +38,9 @@ impl GridScratch {
     return GridScratch {
       items: List<GridItem>.make(),
       bounds: GridBounds.empty(),
-      columns: List<TrackState>.make(),
-      rows: List<TrackState>.make(),
+      columns: GridAxisScratch.make(),
+      rows: GridAxisScratch.make(),
+      trackWork: List<usize>.make(),
     }
   }
 }

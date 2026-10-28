@@ -1,0 +1,514 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.ownership { Copy }
+import silk.usize
+import geometry {
+  Measure,
+  Size,
+  OptionalSize,
+  ResolvedEdges,
+  AvailableSpace,
+  AvailableKind,
+  max,
+  min,
+  clamp
+}
+import style { Style, Dimension, DimensionKind, BoxSizing, WritingMode, FlexWrap, FlexDirection }
+import box_tree { BoxTree }
+import context {
+  Input,
+  resolveBox,
+  resolve,
+  resolves,
+  isFlex,
+  isGrid,
+  scrollable,
+  overflowForAxis,
+  UNBOUNDED
+}
+import engine { normalizeKey, probeFresh }
+import layout_pass { LayoutPass, CacheKind }
+import text { TextMeasure, TextError }
+import fragmentation { FragmentationError }
+
+// Grid 2 §§6.6, 12.5. Contributions are margin-box sizes; usedMinimum is
+// border-box sized so final item layout can apply it without counting edges twice.
+pub struct ItemContribution {
+  pub minimum: f64,
+  pub minContent: f64,
+  pub maxContent: f64,
+  pub usedMinimum: f64,
+}
+
+impl Copy for ItemContribution {}
+
+struct Probe {
+  size: Size,
+  preferredRatio: f64,
+  ratioBorderBox: bool
+}
+
+impl Copy for Probe {}
+
+fn axisSize(size: Size, horizontal: bool) -> f64 {
+  if horizontal {
+    return size.width
+  }
+  return size.height
+}
+
+fn optionalSize(size: OptionalSize, horizontal: bool) -> f64 {
+  if horizontal {
+    return size.width
+  }
+  return size.height
+}
+
+fn definite(size: OptionalSize, horizontal: bool) -> bool {
+  if horizontal {
+    return size.widthDefinite
+  }
+  return size.heightDefinite
+}
+
+fn edges(value: ResolvedEdges, horizontal: bool) -> f64 {
+  if horizontal {
+    return value.horizontal()
+  }
+  return value.vertical()
+}
+
+fn preferred(style: &Style, horizontal: bool) -> Dimension {
+  if horizontal {
+    return style.width
+  }
+  return style.height
+}
+
+fn minimum(style: &Style, horizontal: bool) -> Dimension {
+  if horizontal {
+    return style.minWidth
+  }
+  return style.minHeight
+}
+
+fn maximum(style: &Style, horizontal: bool) -> Dimension {
+  if horizontal {
+    return style.maxWidth
+  }
+  return style.maxHeight
+}
+
+fn percentage(value: Dimension) -> bool {
+  return value.kind == DimensionKind.Percent || value.kind == DimensionKind.Calc
+}
+
+fn needsMin(value: Dimension) -> bool {
+  return value.kind == DimensionKind.MinContent || value.kind == DimensionKind.FitContent
+}
+
+fn needsMax(value: Dimension) -> bool {
+  return value.kind == DimensionKind.MaxContent || value.kind == DimensionKind.FitContent
+}
+
+fn intrinsicValue(value: Dimension, fallback: f64, smallest: f64, largest: f64, fit: f64) -> f64 {
+  if value.kind == DimensionKind.MinContent {
+    return smallest
+  }
+  if value.kind == DimensionKind.MaxContent {
+    return largest
+  }
+  if value.kind == DimensionKind.FitContent {
+    return fit
+  }
+  return fallback
+}
+
+fn transfer(
+  cross: f64,
+  ratio: f64,
+  horizontal: bool,
+  inset: f64,
+  crossInset: f64,
+  borderBox: bool,
+) -> f64 {
+  if cross >= UNBOUNDED {
+    return UNBOUNDED
+  }
+  let mut value = cross
+  if !borderBox {
+    value = max(0.0, value - crossInset)
+  }
+  if horizontal {
+    value = value * ratio
+  } else {
+    value = value / ratio
+  }
+  if !borderBox {
+    value = value + inset
+  }
+  return max(inset, value)
+}
+
+// Sizing 3 §5.1: block min-content equals max-content for ordinary blocks,
+// not for Grid §5.2 or a wrapping block-main-axis flex container.
+fn minConstraint(style: &Style, horizontal: bool) -> AvailableSpace {
+  if horizontal == (style.writingMode == WritingMode.HorizontalTb) {
+    return AvailableSpace.minContent()
+  }
+  if isGrid(style) {
+    return AvailableSpace.minContent()
+  }
+  if isFlex(style) && style.flexWrap != FlexWrap.NoWrap
+    && (style.flexDirection == FlexDirection.Column
+      || style.flexDirection == FlexDirection.ColumnReverse) {
+    return AvailableSpace.minContent()
+  }
+  return AvailableSpace.maxContent()
+}
+
+fn probeInput(input: &Input, horizontal: bool, constraint: AvailableSpace) -> Input {
+  let mut request = input.*
+  request.performLayout = false
+  request.baselines = false
+  request.fragmentation.active = false
+  if horizontal {
+    request.intrinsicWidth = true
+    request.known.widthDefinite = false
+    request.availableWidth = constraint
+  } else {
+    request.intrinsicHeight = true
+    request.known.heightDefinite = false
+    request.availableHeight = constraint
+  }
+  return request
+}
+
+effect fn probe<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  id: usize,
+  input: &Input,
+  horizontal: bool,
+  constraint: AvailableSpace,
+) -> Probe
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
+  let mut key = probeInput(input, horizontal, constraint)
+  normalizeKey(output.keyShape(id), &mut key, output.viewportFree(id))
+  let found = output.cache.find(id, &key, CacheKind.IndependentBox)
+  if found != usize.MAX {
+    output.stats.cacheHits = output.stats.cacheHits + 1
+    let cached = output.cache.layoutAt(found)
+    return Probe {
+      size: cached.size,
+      preferredRatio: cached.preferredRatio,
+      ratioBorderBox: cached.ratioBorderBox,
+    }
+  }
+  let request = probeInput(input, horizontal, constraint)
+  run probeFresh(nodes, &mut output, &mut measurer, id, &request, &key)
+  let result = &output.boxes[id]
+  return Probe {
+    size: result.size,
+    preferredRatio: result.preferredRatio,
+    ratioBorderBox: result.ratioBorderBox,
+  }
+}
+
+// The caller supplies physical-axis requests and fixed-only track caps. Neither
+// known stretch sizes nor an estimated area establishes a specified suggestion.
+// Masks omit unused intrinsic contributions, not the minimum needed by §12.5.
+pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  id: usize,
+  input: &Input,
+  horizontal: bool,
+  autoMinimumAllowed: bool,
+  fixedMaximum: f64,
+  crossFixedMaximum: f64,
+  needMinContent: bool,
+  needMaxContent: bool,
+) -> ItemContribution
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
+  let style = nodes.style(id)
+  let sizeDimension = preferred(style, horizontal)
+  let minDimension = minimum(style, horizontal)
+  let maxDimension = maximum(style, horizontal)
+  let crossDimension = preferred(style, !horizontal)
+  let crossMinDimension = minimum(style, !horizontal)
+  let crossMaxDimension = maximum(style, !horizontal)
+  let basis = optionalSize(input.parent, horizontal)
+  let basisDefinite = definite(input.parent, horizontal)
+  let crossBasis = optionalSize(input.parent, !horizontal)
+  let crossBasisDefinite = definite(input.parent, !horizontal)
+
+  // Author constraints must survive an incoming intrinsic or stretched request.
+  let mut propertyInput = input.*
+  propertyInput.intrinsicWidth = false
+  propertyInput.intrinsicHeight = false
+  propertyInput.known = OptionalSize.none()
+  let box = resolveBox(style, &propertyInput)
+  let inset = edges(box.inset, horizontal)
+  let crossInset = edges(box.inset, !horizontal)
+  let margin = edges(box.margin, horizontal)
+  let crossMargin = edges(box.margin, !horizontal)
+  let mut add = inset
+  let mut crossAdd = crossInset
+  if style.boxSizing == BoxSizing.BorderBox {
+    add = 0.0
+    crossAdd = 0.0
+  }
+  let preferredDefinite = resolves(sizeDimension, basisDefinite)
+  let preferredSize = max(inset, resolve(sizeDimension, basis, basisDefinite, 0.0) + add)
+  let crossPreferredDefinite = resolves(crossDimension, crossBasisDefinite)
+  let crossPreferred = max(
+    crossInset,
+    resolve(crossDimension, crossBasis, crossBasisDefinite, 0.0) + crossAdd,
+  )
+  let autoMinimum = autoMinimumAllowed && minDimension.kind == DimensionKind.Auto
+    && !scrollable(overflowForAxis(style, horizontal))
+  let cyclicPreferred = percentage(sizeDimension) && !basisDefinite
+  let cyclicMaximum = percentage(maxDimension) && !basisDefinite
+  let specifiedSuggestion = preferredDefinite || (style.replaced && cyclicPreferred)
+  let minimumUsesPreferred = sizeDimension.kind != DimensionKind.Auto
+    && sizeDimension.kind != DimensionKind.Content
+    && sizeDimension.kind != DimensionKind.FitContent
+    && !percentage(sizeDimension)
+  if !needMinContent && !needMaxContent && !minimumUsesPreferred && !autoMinimum
+    && !needsMin(minDimension)
+    && !needsMax(minDimension) {
+    let used = axisSize(box.min, horizontal)
+    return ItemContribution {
+      minimum: used + margin,
+      minContent: 0.0,
+      maxContent: 0.0,
+      usedMinimum: used,
+    }
+  }
+  let requireMinContribution = needMinContent || minimumUsesPreferred
+  let mut ratio = style.aspectRatio
+  let mut borderRatio = style.boxSizing == BoxSizing.BorderBox && ratio > 0.0
+    && !style.aspectRatioAuto
+
+  // A declared non-auto ratio is sufficient for transfer; natural ratios come
+  // only from cached engine probes, never a second measurement-provider path.
+  let knownTransfer = style.replaced && ratio > 0.0 && !style.aspectRatioAuto
+    && crossPreferredDefinite
+  let contentMinimum = autoMinimum && !specifiedSuggestion && !knownTransfer
+  let cyclicRatioFloor = autoMinimum && style.replaced && (cyclicPreferred || cyclicMaximum)
+    && (crossMinDimension.kind == DimensionKind.Length || percentage(crossMinDimension))
+    && (ratio <= 0.0 || style.aspectRatioAuto)
+  let minProbeNeeded = needsMin(minDimension) || needsMin(maxDimension) || needsMin(sizeDimension)
+    || contentMinimum
+    || cyclicRatioFloor
+    || (requireMinContribution && !preferredDefinite
+      && sizeDimension.kind != DimensionKind.MaxContent)
+  let maxProbeNeeded = needsMax(minDimension) || needsMax(maxDimension) || needsMax(sizeDimension)
+    || (needMaxContent && !preferredDefinite && sizeDimension.kind != DimensionKind.MinContent)
+  let mut smallest = inset
+  let mut largest = inset
+  if minProbeNeeded {
+    let measured = run probe(
+      nodes,
+      &mut output,
+      &mut measurer,
+      id,
+      input,
+      horizontal,
+      minConstraint(style, horizontal),
+    )
+    smallest = max(inset, axisSize(measured.size, horizontal))
+    ratio = measured.preferredRatio
+    borderRatio = measured.ratioBorderBox
+  }
+  if maxProbeNeeded {
+    let measured = run probe(
+      nodes,
+      &mut output,
+      &mut measurer,
+      id,
+      input,
+      horizontal,
+      AvailableSpace.maxContent(),
+    )
+    largest = max(inset, axisSize(measured.size, horizontal))
+    ratio = measured.preferredRatio
+    borderRatio = measured.ratioBorderBox
+  }
+  let mut available = input.availableHeight
+  if horizontal {
+    available = input.availableWidth
+  }
+  let mut fit = largest
+  if available.kind == AvailableKind.MinContent {
+    fit = smallest
+  }
+  if available.kind == AvailableKind.Definite {
+    fit = clamp(available.value - margin, smallest, largest)
+  }
+  let mut usedMinimum = intrinsicValue(
+    minDimension,
+    axisSize(box.min, horizontal),
+    smallest,
+    largest,
+    fit,
+  )
+  let usedMaximum = intrinsicValue(
+    maxDimension,
+    axisSize(box.max, horizontal),
+    smallest,
+    largest,
+    fit,
+  )
+  let mut crossMinimum = crossInset
+  let mut crossMaximum = UNBOUNDED
+  if resolves(crossMinDimension, crossBasisDefinite) {
+    crossMinimum = axisSize(box.min, !horizontal)
+  }
+  if resolves(crossMaxDimension, crossBasisDefinite) {
+    crossMaximum = axisSize(box.max, !horizontal)
+  }
+  if autoMinimum {
+    let mut suggestion = smallest
+    let mut fixedCapApplies = true
+    if specifiedSuggestion {
+      suggestion = preferredSize
+      if cyclicPreferred {
+        suggestion = max(inset, sizeDimension.value + add)
+      }
+    } else if style.replaced && ratio > 0.0 && crossPreferredDefinite {
+      let cross = min(
+        clamp(crossPreferred, crossMinimum, crossMaximum),
+        max(crossInset, crossFixedMaximum - crossMargin),
+      )
+      suggestion = transfer(cross, ratio, horizontal, inset, crossInset, borderRatio)
+      fixedCapApplies = false
+    } else if ratio > 0.0 {
+      suggestion = clamp(
+        suggestion,
+        transfer(crossMinimum, ratio, horizontal, inset, crossInset, borderRatio),
+        transfer(crossMaximum, ratio, horizontal, inset, crossInset, borderRatio),
+      )
+    }
+    if fixedCapApplies {
+      suggestion = min(suggestion, max(inset, fixedMaximum - margin))
+    }
+
+    // Grid 6.6 caps suggestions by definite maxima, not intrinsic maxima.
+    if resolves(maxDimension, basisDefinite) {
+      suggestion = min(suggestion, axisSize(box.max, horizontal))
+    }
+    if style.replaced {
+      if cyclicPreferred {
+        suggestion = min(suggestion, max(inset, sizeDimension.value + add))
+      }
+      if cyclicMaximum {
+        suggestion = min(suggestion, max(inset, maxDimension.value + add))
+      }
+
+      // Sizing 3 §5.2.1 applies its transferred minimum floor to the
+      // content-based automatic minimum as well as min-content contribution.
+      if (cyclicPreferred || cyclicMaximum) && ratio > 0.0
+        && (crossMinDimension.kind == DimensionKind.Length || percentage(crossMinDimension)) {
+        let crossFloor = max(crossInset, crossMinDimension.value + crossAdd)
+        suggestion = max(
+          suggestion,
+          transfer(crossFloor, ratio, horizontal, inset, crossInset, borderRatio),
+        )
+      }
+    }
+    usedMinimum = max(inset, suggestion)
+  }
+  let mut minContribution = smallest
+  let mut maxContribution = largest
+  if preferredDefinite {
+    minContribution = preferredSize
+    maxContribution = preferredSize
+  } else if needsMin(sizeDimension) || needsMax(sizeDimension) {
+    let value = intrinsicValue(sizeDimension, smallest, smallest, largest, fit)
+    minContribution = value
+    maxContribution = value
+  } else if ratio > 0.0 && (crossPreferredDefinite || definite(input.known, !horizontal)) {
+    let mut cross = crossPreferred
+    if definite(input.known, !horizontal) {
+      cross = optionalSize(input.known, !horizontal)
+    }
+    let value = transfer(
+      clamp(cross, crossMinimum, crossMaximum),
+      ratio,
+      horizontal,
+      inset,
+      crossInset,
+      borderRatio,
+    )
+    minContribution = value
+    maxContribution = value
+  }
+
+  // Sizing 4 §4.4 transfers definite opposite constraints without letting a
+  // transferred minimum defeat an authored definite maximum in this axis.
+  if ratio > 0.0 && !preferredDefinite {
+    let mut transferredMinimum = transfer(
+      crossMinimum,
+      ratio,
+      horizontal,
+      inset,
+      crossInset,
+      borderRatio,
+    )
+    if resolves(maxDimension, basisDefinite) {
+      transferredMinimum = min(transferredMinimum, axisSize(box.max, horizontal))
+    }
+    let mut transferredMaximum = max(
+      transferredMinimum,
+      transfer(crossMaximum, ratio, horizontal, inset, crossInset, borderRatio),
+    )
+    if resolves(minDimension, basisDefinite) {
+      transferredMaximum = max(transferredMaximum, axisSize(box.min, horizontal))
+    }
+    minContribution = clamp(minContribution, transferredMinimum, transferredMaximum)
+    maxContribution = clamp(maxContribution, transferredMinimum, transferredMaximum)
+  }
+
+  // Sizing 3 §5.2.1: cyclic replaced preferred/max percentages compress only
+  // the min-content contribution; the max-content contribution treats them auto.
+  if style.replaced && (cyclicPreferred || cyclicMaximum) {
+    if cyclicPreferred {
+      minContribution = max(inset, sizeDimension.value + add)
+    }
+    if cyclicMaximum {
+      minContribution = min(minContribution, max(inset, maxDimension.value + add))
+    }
+    if ratio > 0.0
+      && (crossMinDimension.kind == DimensionKind.Length || percentage(crossMinDimension)) {
+      let crossFloor = max(crossInset, crossMinDimension.value + crossAdd)
+      minContribution = max(
+        minContribution,
+        transfer(crossFloor, ratio, horizontal, inset, crossInset, borderRatio),
+      )
+    }
+  }
+  minContribution = clamp(minContribution, usedMinimum, usedMaximum) + margin
+  maxContribution = max(minContribution, clamp(maxContribution, usedMinimum, usedMaximum) + margin)
+  let mut minimumContribution = usedMinimum + margin
+  if minimumUsesPreferred {
+    minimumContribution = minContribution
+  }
+  if !needMinContent {
+    minContribution = 0.0
+  }
+  if !needMaxContent {
+    maxContribution = 0.0
+  }
+  let result = ItemContribution {
+    minimum: minimumContribution,
+    minContent: minContribution,
+    maxContent: maxContribution,
+    usedMinimum: usedMinimum,
+  }
+  return result
+}

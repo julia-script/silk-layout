@@ -368,6 +368,11 @@ effect fn keyShapes(nodes: &BoxTree, result: &mut List<u8>) ! OutOfMemoryError ?
 
 fn cacheKey(shape: u8, input: &Input, viewportFree: bool) -> Input {
   let mut key = input.*
+  normalizeKey(shape, &mut key, viewportFree)
+  return key
+}
+// Turns a request into its cache key in place; see cacheKey.
+pub fn normalizeKey(shape: u8, key: &mut Input, viewportFree: bool) {
   // Only replaced boxes and orthogonal flows read the initial containing
   // block and the scrollport limits; see Incremental.markSubtrees.
   if viewportFree {
@@ -378,14 +383,14 @@ fn cacheKey(shape: u8, input: &Input, viewportFree: bool) -> Input {
   if key.known.widthDefinite { key.availableWidth = AvailableSpace.maxContent() }
   if key.known.heightDefinite { key.availableHeight = AvailableSpace.maxContent() }
   // Inline formatting boxes and replaced boxes keep the rest of the request.
-  if shape & KEY_FIXED != 0 { return key }
+  if shape & KEY_FIXED != 0 { return }
   // An empty box has the same min- and max-content contribution, and a
   // fixed length leaves it nothing to do with available space on that axis.
   if shape & KEY_EMPTY != 0 {
     if key.intrinsicWidth || shape & KEY_WIDTH_LENGTH != 0 { key.availableWidth = AvailableSpace.maxContent() }
     if key.intrinsicHeight || shape & KEY_HEIGHT_LENGTH != 0 { key.availableHeight = AvailableSpace.maxContent() }
   }
-  let parentHorizontal = input.parentWritingMode == WritingMode.HorizontalTb
+  let parentHorizontal = key.parentWritingMode == WritingMode.HorizontalTb
   // A length size in the parent's writing mode leaves available space
   // nothing to size on that axis.
   if shape & KEY_PERCENT == 0 && (shape & KEY_HORIZONTAL != 0) == parentHorizontal {
@@ -397,9 +402,8 @@ fn cacheKey(shape: u8, input: &Input, viewportFree: bool) -> Input {
   // fit-content block sizing in a horizontal parent.
   if shape & KEY_BLOCK != 0 && parentHorizontal { key.availableHeight = AvailableSpace.maxContent() }
   // Orthogonal flows and percentage-sized boxes read the parent size.
-  if (shape & KEY_HORIZONTAL != 0) != parentHorizontal || shape & KEY_PERCENT != 0 { return key }
+  if (shape & KEY_HORIZONTAL != 0) != parentHorizontal || shape & KEY_PERCENT != 0 { return }
   key.parent = OptionalSize.none()
-  return key
 }
 
 // CSS Sizing: known dimensions are border-box constraints, not a rewritten style.
@@ -436,22 +440,6 @@ effect fn layoutFinal<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<
 // A size probe (a request without performLayout) of an independent box. Its
 // result is left in output.boxes[id] rather than returned, so callers that
 // read a few fields skip copying the whole Layout.
-// probeNode's result size and ratio. A cached result is read where the
-// cache keeps it instead of being stored in output.boxes[id] first.
-pub struct ProbedSize { pub size: Size, pub preferredRatio: f64, pub ratioBorderBox: bool }
-pub effect fn probeSize<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input) -> ProbedSize ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
-  let index = output.cache.find(id, &key, CacheKind.IndependentBox)
-  if index != usize.MAX {
-    output.stats.cacheHits = output.stats.cacheHits + 1
-    let cached = output.cache.layoutAt(index)
-    return ProbedSize { size: cached.size, preferredRatio: cached.preferredRatio, ratioBorderBox: cached.ratioBorderBox }
-  }
-  run probeFresh(nodes, &mut output, &mut measurer, id, &input, &key)
-  let layout = &output.boxes[id]
-  return ProbedSize { size: layout.size, preferredRatio: layout.preferredRatio, ratioBorderBox: layout.ratioBorderBox }
-}
-
 pub effect fn probeNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
   if run output.storeCached(id, &key, CacheKind.IndependentBox) { return }
@@ -459,7 +447,7 @@ pub effect fn probeNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
 }
 
 // probeNode after a cache miss for `key`.
-effect fn probeFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, key: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+pub effect fn probeFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, key: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut bfc = BfcState.make()
   // layoutBox stores every unfragmented result in output.boxes[id].
   if input.bfcContentOrigin.x == 0.0 && input.bfcContentOrigin.y == 0.0 {

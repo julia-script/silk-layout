@@ -9,8 +9,8 @@ import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrie
 import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
 import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, isFlex, scrollable, overflowForAxis, UNBOUNDED }
-import engine { layoutNode, probeNode, probeSize }
-import layout_pass { LayoutPass }
+import engine { layoutNode, probeNode, probeFresh, normalizeKey }
+import layout_pass { LayoutPass, CacheKind }
 import text { TextMeasure, TextError }
 import fragmentation { FlowCursor, FragmentationError, BoundaryProbe }
 import breaks { BreakBoundary, ForcedBreaks, FractionalProgress, BreakRelaxation }
@@ -187,6 +187,22 @@ fn blockAxisConstraint(style: &Style, horizontal: bool, constraint: AvailableSpa
   return AvailableSpace.maxContent()
 }
 effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f64) -> Probe ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  // Most probes hit the cache: build the key in place and build the request
+  // only on a miss.
+  let mut key = probeInput(childInput, horizontal, constraint, crossKnown, cross)
+  normalizeKey(output.keyShape(id), &mut key, output.viewportFree(id))
+  let index = output.cache.find(id, &key, CacheKind.IndependentBox)
+  if index != usize.MAX {
+    output.stats.cacheHits = output.stats.cacheHits + 1
+    let cached = output.cache.layoutAt(index)
+    return Probe { size: cached.size, preferredRatio: cached.preferredRatio, ratioBorderBox: cached.ratioBorderBox }
+  }
+  let input = probeInput(childInput, horizontal, constraint, crossKnown, cross)
+  run probeFresh(nodes, &mut output, &mut measurer, id, &input, &key)
+  let layout = &output.boxes[id]
+  return Probe { size: layout.size, preferredRatio: layout.preferredRatio, ratioBorderBox: layout.ratioBorderBox }
+}
+fn probeInput(childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f64) -> Input {
   let mut input = childInput.*
   input.performLayout = false
   input.baselines = false
@@ -195,8 +211,7 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sourc
     input.known.heightDefinite = false }
   setAvailable(&mut input, horizontal, constraint)
   if crossKnown { setKnown(&mut input, !horizontal, cross) }
-  let probed = run probeSize(nodes, &mut output, &mut measurer, id, &input)
-  return Probe { size: probed.size, preferredRatio: probed.preferredRatio, ratioBorderBox: probed.ratioBorderBox }
+  return input
 }
 effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let id = item.id
@@ -535,6 +550,16 @@ fn fixedCross(nodes: &BoxTree, item: &Item, parentStyle: &Style) -> bool {
   let style = nodes.style(item.id)
   return item.knownCrossDefinite && !item.crossAuto && !style.replaced && style.aspectRatio == 0.0 && style.writingMode == parentStyle.writingMode && nodes.node(item.id).measurement == Measurement.None
 }
+fn crossProbeInput(input: &Input, item: &Item, axis: &Axes) -> Input {
+  let mut childInput = input.*
+  childInput.performLayout = false
+  // Baseline alignment reads the item's baselines; a probed container's
+  // own baselines come from its items' stored probe results.
+  childInput.baselines = item.align == Align.Baseline || item.align == Align.LastBaseline || input.baselines && !input.performLayout
+  setKnown(&mut childInput, axis.horizontal, item.target)
+  setIndefinite(&mut childInput, axis.horizontal, !item.mainDefinite)
+  return childInput
+}
 effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: &Line, input: &Input, axis: &Axes, parentStyle: &Style, collapsed: bool, lineKnown: bool) -> Line ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut result = line.*
   // §9.4 floors the line size at zero, not the signed distances of its items.
@@ -565,14 +590,13 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       item.lastBaseline = 0.0
       result.cross = max(result.cross, item.cross + item.crossStart + item.crossEnd)
     } else if active(&item.*, collapsed) {
-      let mut childInput = input.*
-      childInput.performLayout = false
-      // Baseline alignment reads the item's baselines; a probed container's
-      // own baselines come from its items' stored probe results.
-      childInput.baselines = item.align == Align.Baseline || item.align == Align.LastBaseline || input.baselines && !input.performLayout
-      setKnown(&mut childInput, axis.horizontal, item.target)
-      setIndefinite(&mut childInput, axis.horizontal, !item.mainDefinite)
-      run probeNode(nodes, &mut output, &mut measurer, item.id, &childInput)
+      // probeNode, with the request built again only on a cache miss.
+      let mut key = crossProbeInput(input, &item.*, axis)
+      normalizeKey(output.keyShape(item.id), &mut key, output.viewportFree(item.id))
+      if !run output.storeCached(item.id, &key, CacheKind.IndependentBox) {
+        let request = crossProbeInput(input, &item.*, axis)
+        run probeFresh(nodes, &mut output, &mut measurer, item.id, &request, &key)
+      }
       let layout = &output.boxes[item.id]
       item.cross = axisSize(layout.size, !axis.horizontal)
       item.baseline = baselineDistance(layout, nodes.style(item.id), input.parentWritingMode, input.parentTextOrientation, &axis, false)

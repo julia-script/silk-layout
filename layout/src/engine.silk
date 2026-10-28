@@ -775,13 +775,15 @@ effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
       let frame = output.frame
       output.fragmentParent = run output.ensureFrameRoot(frame)
     } else if node.kind != BoxKind.InlineFormatting || node.anonymousBlock {
-      let mut fragment = output.fragment(id, node.source, FragmentKind.Box)
-      fragment.parent = previousParent
+      let mut first = true
+      let mut last = true
       if node.source != NO_NODE {
-        fragment.first = node.firstForSource
-        fragment.last = node.lastForSource
+        first = node.firstForSource
+        last = node.lastForSource
       }
-      let emitted = run output.fragments.append(move fragment)
+      let mut fragmentainer: usize = 0
+      if output.frame != NO_NODE { fragmentainer = output.frame }
+      let emitted = run output.fragments.appendBox(id, node.source, FragmentKind.Box, previousParent, fragmentainer, first, last)
       output.fragmentParent = emitted.index
     }
   }

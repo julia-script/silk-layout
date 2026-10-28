@@ -1177,9 +1177,13 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   // A row's inline extent is already known; avoid measuring cross sizes
   // that the percentage-resolution pass would immediately discard.
   let resolveInlineBeforeCross = axis.row && !mainKnown && !intrinsicInline
+  // A size probe of a single line with a known cross size has its size
+  // already: the lines would only feed placement and baselines, which
+  // placeFlexLines skips for it.
+  let sizeOnly = !input.performLayout && !input.baselines && crossKnown && style.flexWrap == FlexWrap.NoWrap && !input.fragmentation.active
   scratch.lines.clear()
   let mut collapsed = false
-  while !resolveInlineBeforeCross {
+  while !resolveInlineBeforeCross && !sizeOnly {
     if input.fragmentation.active && input.performLayout && count > 0 && output.resumes.get(scratch.items.get(0).id).flexLine != NO_NODE {
       run collectOwnedLines(scratch.items.asSlice(), &output, &mut scratch.lines, collapsed)
     } else {

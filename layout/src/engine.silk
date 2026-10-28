@@ -10,7 +10,7 @@ import positioned { positionTree, reachableLimits, addOverflow }
 import bfc { BfcState }
 import silk.option { Option }
 import layout_pass { LayoutPass, CacheKind, FullBoxGeometry, REUSE_INDEPENDENT, REUSE_IN_FLOW }
-import layout_cache { LayoutCache, Snapshot }
+import layout_cache { LayoutCache, Snapshot, BoxFacts }
 import incremental as Incremental
 import replaced { layoutReplaced, preferredRatio, borderRatio }
 import box_tree as Boxes
@@ -342,16 +342,15 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u8 {
   return shape
 }
 
-effect fn keyShapes(nodes: &BoxTree) -> List<u8> ! OutOfMemoryError ? &mut Allocator {
+effect fn keyShapes(nodes: &BoxTree, result: &mut List<u8>) ! OutOfMemoryError ? &mut Allocator {
   let count = nodes.boxes.length()
-  let mut result = List<u8>.make()
+  result.clear()
   run result.reserveExact(count)
   let mut id: usize = 0
   while id < count {
     run result.append(keyShape(nodes, id))
     id = id + 1
   }
-  return move result
 }
 
 fn cacheKey(shape: u8, input: &Input, viewportFree: bool) -> Input {
@@ -1050,7 +1049,10 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   let nodes = run boxesFor(tree, &mut output, since, restoring)
   // The previous output becomes the snapshot reused subtrees are copied from.
   output.snapshot.takeOutput(&mut output.fragments, &mut output.boxes)
+  let mut facts = Intrinsic.replace(output.facts, BoxFacts.make())
+  let mut sameBoxes = false
   if restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice())) {
+    sameBoxes = true
     run output.cache.rotateFinals()
     Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
     run output.cache.compact()
@@ -1074,8 +1076,22 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
   boxes.cache = move cache
   boxes.previous = move snapshot
-  run Incremental.markSubtrees(&nodes, &mut boxes.reusable, &mut boxes.viewportFrees)
-  boxes.keyShapes = run keyShapes(&nodes)
+  // Style facts of the same boxes need refreshing only where styles changed.
+  if sameBoxes && facts.covers(nodes.boxes.length()) {
+    let restyled = run Incremental.remarkSubtrees(tree, &nodes, since, &mut facts)
+    let shapes = facts.keyShapes.asMutSlice()
+    let mut at: usize = 0
+    while at < restyled.length() {
+      shapes[restyled.get(at)] = keyShape(&nodes, restyled.get(at))
+      at = at + 1
+    }
+  } else {
+    run Incremental.markSubtrees(&nodes, &mut facts)
+    run keyShapes(&nodes, &mut facts.keyShapes)
+  }
+  boxes.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
+  boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
+  boxes.keyShapes = Intrinsic.replace(facts.keyShapes, List<u8>.make())
   let mut input = Input.make(viewport)
   input.known = viewport
   input.blockRoot = true
@@ -1094,9 +1110,13 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       captured.boxes = Intrinsic.replace(boxes.previous.boxes, List<Layout>.make())
       // Auto scrollbar selection is not part of a cache key.
       let settled = !boxes.hasAutoScrollbars
+      facts.reusable = Intrinsic.replace(boxes.reusable, List<u8>.make())
+      facts.viewportFree = Intrinsic.replace(boxes.viewportFrees, List<bool>.make())
+      facts.keyShapes = Intrinsic.replace(boxes.keyShapes, List<u8>.make())
       drop boxes
       output.cache = move kept
       output.snapshot = move captured
+      output.facts = move facts
       output.keep(tree.revision(), settled)
       output.keptViewport = viewport
       output.keptScroll = tree.viewportScrollOffset

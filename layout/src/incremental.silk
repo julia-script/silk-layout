@@ -4,7 +4,7 @@ import context { outOfFlow }
 import style { Float, Dimension, Edges, Position, WritingMode }
 import tree { Tree, NO_NODE }
 import box_tree { BoxTree, BoxNode }
-import layout_cache { LayoutCache, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW, REUSE_LEVEL, REUSE_STATIC }
+import layout_cache { LayoutCache, BoxFacts, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW, REUSE_LEVEL, REUSE_STATIC, FACT_FREE }
 
 // Kept results are addressed by generated box index, so they survive only
 // while box construction yields the same boxes. Scroll offsets only move
@@ -195,7 +195,7 @@ pub fn invalidateUnmatched(nodes: &BoxTree, cache: &mut LayoutCache, changed: &[
   }
 }
 
-// Two flags per box, filled in one pass over the tree.
+// Two flags per box, from each box's own facts and its subtree's.
 //
 // reusable: how much of a box's previous layout may be copied into the next
 // compute. A subtree with out-of-flow boxes or inline interruptions is never
@@ -211,43 +211,141 @@ pub fn invalidateUnmatched(nodes: &BoxTree, cache: &mut LayoutCache, changed: &[
 // initial containing block or the scrollport limits passed down for
 // orthogonal flows: no box in it is replaced, fixed, or orthogonal to its
 // parent.
-pub effect fn markSubtrees(nodes: &BoxTree, reusable: &mut List<u8>, viewportFree: &mut List<bool>) ! OutOfMemoryError ? &mut Allocator {
+pub effect fn markSubtrees(nodes: &BoxTree, facts: &mut BoxFacts) ! OutOfMemoryError ? &mut Allocator {
   let count = nodes.boxes.length()
-  reusable.clear()
-  viewportFree.clear()
-  run reusable.reserveExact(count)
-  run viewportFree.reserveExact(count)
-  run reusable.appendRepeated(REUSE_IN_FLOW | REUSE_STATIC, count)
-  run viewportFree.appendRepeated(true, count)
-  let levels = reusable.asMutSlice()
-  let frees = viewportFree.asMutSlice()
+  facts.own.clear()
+  facts.reusable.clear()
+  facts.viewportFree.clear()
+  run facts.own.reserveExact(count)
+  run facts.reusable.reserveExact(count)
+  run facts.viewportFree.reserveExact(count)
+  let mut index: usize = 0
+  while index < count {
+    run facts.own.append(ownFacts(nodes, index))
+    index = index + 1
+  }
+  run facts.reusable.appendRepeated(REUSE_IN_FLOW | REUSE_STATIC, count)
+  run facts.viewportFree.appendRepeated(true, count)
+  let own = facts.own.asSlice()
+  let levels = facts.reusable.asMutSlice()
+  let frees = facts.viewportFree.asMutSlice()
   // Generated parents precede their children.
-  let mut index = count
+  index = count
   while index > 0 {
     index = index - 1
-    let node = nodes.node(index)
-    let style = nodes.style(index)
     let mut level = levels[index] & REUSE_LEVEL
-    let mut still = levels[index] & REUSE_STATIC
-    if outOfFlow(style) || node.interruptionFirst != NO_NODE { level = REUSE_NONE }
-    else if level > REUSE_INDEPENDENT && !nonNegative(&style.margin) { level = REUSE_INDEPENDENT }
-    if style.position == Position.Relative || style.position == Position.Sticky { still = 0 }
+    if (own[index] & REUSE_LEVEL) < level { level = own[index] & REUSE_LEVEL }
+    let still = levels[index] & own[index] & REUSE_STATIC
+    let free = frees[index] && (own[index] & FACT_FREE) != 0
     levels[index] = level | still
-    let horizontal = style.writingMode == WritingMode.HorizontalTb
-    let mut free = frees[index] && !style.replaced && style.position != Position.Fixed
-    if node.parent == NO_NODE {
-      if !horizontal { free = false }
-      frees[index] = free
-    } else {
-      if horizontal != (nodes.style(node.parent).writingMode == WritingMode.HorizontalTb) { free = false }
-      frees[index] = free
-      if !free { frees[node.parent] = false }
-      let mut inherited = level
-      if style.float != Float.None && inherited > REUSE_INDEPENDENT { inherited = REUSE_INDEPENDENT }
-      let parentLevel = levels[node.parent] & REUSE_LEVEL
-      let parentStill = levels[node.parent] & still
-      if inherited < parentLevel { levels[node.parent] = inherited | parentStill }
-      else { levels[node.parent] = parentLevel | parentStill }
+    frees[index] = free
+    let parent = nodes.node(index).parent
+    if parent != NO_NODE {
+      if !free { frees[parent] = false }
+      let inherited = passedUp(nodes, index, level)
+      let parentLevel = levels[parent] & REUSE_LEVEL
+      let parentStill = levels[parent] & still
+      if inherited < parentLevel { levels[parent] = inherited | parentStill }
+      else { levels[parent] = parentLevel | parentStill }
     }
   }
+}
+
+// The reuse level a subtree allows its parent: a float's is at most
+// independent, since its float joins exclusions it shares with its siblings.
+fn passedUp(nodes: &BoxTree, id: usize, level: u8) -> u8 {
+  if nodes.style(id).float != Float.None && level > REUSE_INDEPENDENT { return REUSE_INDEPENDENT }
+  return level
+}
+
+fn ownFacts(nodes: &BoxTree, index: usize) -> u8 {
+  let node = nodes.node(index)
+  let style = nodes.style(index)
+  let mut facts = REUSE_IN_FLOW
+  if outOfFlow(style) || node.interruptionFirst != NO_NODE { facts = REUSE_NONE }
+  else if !nonNegative(&style.margin) { facts = REUSE_INDEPENDENT }
+  if style.position != Position.Relative && style.position != Position.Sticky { facts = facts | REUSE_STATIC }
+  let horizontal = style.writingMode == WritingMode.HorizontalTb
+  let mut free = !style.replaced && style.position != Position.Fixed
+  if node.parent == NO_NODE { free = free && horizontal }
+  else { free = free && horizontal == (nodes.style(node.parent).writingMode == WritingMode.HorizontalTb) }
+  if free { facts = facts | FACT_FREE }
+  return facts
+}
+
+// The tree node whose style a box takes: text shares its parent's.
+fn styleSource(tree: &Tree, nodes: &BoxTree, id: usize) -> usize {
+  let node = nodes.node(id)
+  if node.anonymousStyle != NO_NODE { return nodes.anonymousOrigins.get(node.anonymousStyle) }
+  let owner = node.styleOwner
+  if owner != NO_NODE && tree.nodes.asSlice()[owner].isText() { return tree.nodes.asSlice()[owner].parent }
+  return owner
+}
+
+fn changedSince(tree: &Tree, source: usize, since: usize) -> bool {
+  return source != NO_NODE && source < tree.nodes.length() && tree.changedAt(source) > since
+}
+
+// Refreshes kept facts for the same boxes after style changes since the
+// compute they reflect: the own facts of every box whose style or parent's
+// style changed, then the subtree facts of those boxes and their ancestors.
+// Returns the boxes whose own facts were refreshed.
+pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, facts: &mut BoxFacts) -> List<usize> ! OutOfMemoryError ? &mut Allocator {
+  let count = nodes.boxes.length()
+  let mut changed = List<usize>.make()
+  let mut marked = List<bool>.make()
+  run marked.appendRepeated(false, count)
+  let mut id: usize = 0
+  while id < count {
+    let node = nodes.node(id)
+    let mut restyled = changedSince(tree, styleSource(tree, nodes, id), since) || changedSince(tree, node.source, since)
+    if !restyled && node.parent != NO_NODE && marked.get(node.parent) {
+      let parent = nodes.node(node.parent)
+      restyled = changedSince(tree, styleSource(tree, nodes, node.parent), since) || changedSince(tree, parent.source, since)
+    }
+    if restyled {
+      run changed.append(id)
+      marked.set(id, true)
+    }
+    id = id + 1
+  }
+  if changed.length() == 0 { return move changed }
+  let mut order = List<usize>.make()
+  let mut at: usize = 0
+  while at < changed.length() {
+    let box = changed.get(at)
+    facts.own.set(box, ownFacts(nodes, box))
+    run order.append(box)
+    let mut ancestor = nodes.node(box).parent
+    while ancestor != NO_NODE && !marked.get(ancestor) {
+      marked.set(ancestor, true)
+      run order.append(ancestor)
+      ancestor = nodes.node(ancestor).parent
+    }
+    at = at + 1
+  }
+  run order.sort()
+  // Children before parents.
+  let own = facts.own.asSlice()
+  let levels = facts.reusable.asMutSlice()
+  let frees = facts.viewportFree.asMutSlice()
+  at = order.length()
+  while at > 0 {
+    at = at - 1
+    let box = order.get(at)
+    let mut level = own[box] & REUSE_LEVEL
+    let mut still = own[box] & REUSE_STATIC
+    let mut free = (own[box] & FACT_FREE) != 0
+    let mut child = nodes.node(box).firstChild
+    while child != NO_NODE {
+      let inherited = passedUp(nodes, child, levels[child] & REUSE_LEVEL)
+      if inherited < level { level = inherited }
+      still = still & levels[child]
+      free = free && frees[child]
+      child = nodes.node(child).nextSibling
+    }
+    levels[box] = level | still
+    frees[box] = free
+  }
+  return move changed
 }

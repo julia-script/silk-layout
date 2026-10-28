@@ -35,27 +35,49 @@ impl BoxFacts {
     return self.own.length() == count && self.reusable.length() == count && self.viewportFree.length() == count && self.keyShapes.length() == count && self.parents.length() == count
   }
 }
+// What placing a stored box and positioning write of its layout.
+pub struct Placement { pub location: Point, pub usedMargin: ResolvedEdges, pub scrollableOverflow: Rect, pub hasClearance: bool, pub horizontalScrollbar: bool, pub verticalScrollbar: bool }
+impl Copy for Placement {}
+impl Placement {
+  pub fn of(layout: &Layout) -> Placement {
+    return Placement { location: layout.location, usedMargin: layout.usedMargin, scrollableOverflow: layout.scrollableOverflow, hasClearance: layout.hasClearance, horizontalScrollbar: layout.horizontalScrollbar, verticalScrollbar: layout.verticalScrollbar }
+  }
+  pub fn restore(self: &Self, layout: &mut Layout) {
+    layout.location = self.location
+    layout.usedMargin = self.usedMargin
+    layout.scrollableOverflow = self.scrollableOverflow
+    layout.hasClearance = self.hasClearance
+    layout.horizontalScrollbar = self.horizontalScrollbar
+    layout.verticalScrollbar = self.verticalScrollbar
+  }
+}
 // Box layouts rewritten during a compute that keeps the previous compute's
 // box layouts in place: `stamps[id] == generation` marks a box rewritten in
-// this compute, whose previous layout is `saved[slots[id]]`. In any compute,
+// this compute, whose previous layout is `saved[slots[id]]`, or, when
+// `partial[id] == generation`, the box's layout with the placement
+// `placed[slots[id]]`: a box only placed so far keeps the rest in place.
+// In any compute,
 // a box whose `written` entry is `generation` had its layout written, one
 // whose `relaid` entry is had its subtree laid out again, and one whose
 // `below` entry is has a descendant with either.
-pub struct BoxWrites { pub generation: usize, pub stamps: List<usize>, pub slots: List<usize>, pub saved: List<Layout>, pub written: List<usize>, pub relaid: List<usize>, pub below: List<usize> }
+pub struct BoxWrites { pub generation: usize, pub stamps: List<usize>, pub slots: List<usize>, pub saved: List<Layout>, pub partial: List<usize>, pub placed: List<Placement>, pub written: List<usize>, pub relaid: List<usize>, pub below: List<usize> }
 impl BoxWrites {
-  pub fn make() -> BoxWrites { return BoxWrites { generation: 0, stamps: List<usize>.make(), slots: List<usize>.make(), saved: List<Layout>.make(), written: List<usize>.make(), relaid: List<usize>.make(), below: List<usize>.make() } }
+  pub fn make() -> BoxWrites { return BoxWrites { generation: 0, stamps: List<usize>.make(), slots: List<usize>.make(), saved: List<Layout>.make(), partial: List<usize>.make(), placed: List<Placement>.make(), written: List<usize>.make(), relaid: List<usize>.make(), below: List<usize>.make() } }
   // Starts a compute over `count` boxes.
   pub effect fn begin(self: &mut Self, count: usize) ! OutOfMemoryError ? &mut Allocator {
     self.generation = self.generation + 1
     self.saved.clear()
+    self.placed.clear()
     if self.stamps.length() != count {
       self.stamps.clear()
       self.slots.clear()
+      self.partial.clear()
       self.written.clear()
       self.relaid.clear()
       self.below.clear()
       run self.stamps.appendRepeated(0, count)
       run self.slots.appendRepeated(0, count)
+      run self.partial.appendRepeated(0, count)
       run self.written.appendRepeated(0, count)
       run self.relaid.appendRepeated(0, count)
       run self.below.appendRepeated(0, count)

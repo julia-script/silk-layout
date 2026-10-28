@@ -207,7 +207,10 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sourc
   }
   // Most probes hit the cache: build the key in place and build the request
   // only on a miss.
+  // Items read a width probe's height only through a preferred aspect ratio.
+  let fullSize = !horizontal || nodes.style(id).aspectRatio > 0.0 || nodes.node(id).measurement == Measurement.Natural
   let mut key = probeInput(childInput, horizontal, constraint, crossKnown, cross)
+  key.fullSize = fullSize
   normalizeKey(output.keyShape(id), &mut key, output.viewportFree(id))
   let index = output.cache.find(id, &key, CacheKind.IndependentBox)
   if index != usize.MAX {
@@ -215,7 +218,8 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sourc
     let cached = output.cache.layoutAt(index)
     return Probe { size: cached.size, preferredRatio: cached.preferredRatio, ratioBorderBox: cached.ratioBorderBox }
   }
-  let input = probeInput(childInput, horizontal, constraint, crossKnown, cross)
+  let mut input = probeInput(childInput, horizontal, constraint, crossKnown, cross)
+  input.fullSize = fullSize
   run probeFresh(nodes, &mut output, &mut measurer, id, &input, &key)
   let layout = &output.boxes[id]
   return Probe { size: layout.size, preferredRatio: layout.preferredRatio, ratioBorderBox: layout.ratioBorderBox }
@@ -1215,7 +1219,10 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   // A size probe of a single line with a known cross size has its size
   // already: the lines would only feed placement and baselines, which
   // placeFlexLines skips for it.
-  let sizeOnly = !input.performLayout && !input.baselines && crossKnown && style.flexWrap == FlexWrap.NoWrap && !input.fragmentation.active
+  // So does a horizontal container's width probe whose caller reads no height:
+  // its width comes from the item contributions alone.
+  let sizeOnly = !input.performLayout && !input.baselines && !input.fragmentation.active
+    && ((crossKnown && style.flexWrap == FlexWrap.NoWrap) || (!input.fullSize && input.intrinsicWidth && axis.horizontal && inlineHorizontal))
   scratch.lines.clear()
   let mut collapsed = false
   while !resolveInlineBeforeCross && !sizeOnly {
@@ -1264,6 +1271,9 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     }
     collapsed = true
   }
+  // A width probe's unread cross size still honors its min and max, so the
+  // min/max relayout never runs for a height it did not measure.
+  if sizeOnly && !crossKnown { cross = max(0.0, clamp(crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
   // Sizing §5.2.1: intrinsic contributions ignore cyclic percentages, but
   // final contents resolve them against the established inline size.
   // Keep auto block sizes indefinite, and do not resolve cycles during probes.

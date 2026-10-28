@@ -16,7 +16,7 @@ import breaks { ForcedBreaks, PageSide, BreakKinds }
 import inline_prepared { PreparedInline, KeptText }
 
 pub import layout_cache { REUSE_INDEPENDENT, REUSE_IN_FLOW, CacheKind }
-import layout_cache { LayoutCache, Snapshot, FinalRange }
+import layout_cache { LayoutCache, Snapshot, FinalRange, REUSE_LEVEL, REUSE_STATIC }
 
 struct ScrollbarSelection { horizontal: bool, vertical: bool }
 impl Copy for ScrollbarSelection {}
@@ -71,7 +71,7 @@ pub struct LayoutPass<'a, 'source> {
   // Floats beside the in-flow box being reused or recorded (see layoutInFlow).
   pub floatContext: List<FloatBox>,
   // Boxes whose subtree never reads the initial containing block or the
-  // scrollport limits (see Incremental.viewportFreeSubtrees).
+  // scrollport limits (see Incremental.markSubtrees).
   pub viewportFrees: List<bool>,
   pub keyShapes: List<u8>,
   anchors: List<StaticAnchor>,
@@ -532,25 +532,27 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   }
   // Restores the box records of a copied subtree's descendants and carries
   // their kept ranges forward, moved to where the copy put their fragments.
-  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize) ! OutOfMemoryError ? &mut Allocator {
+  // A settled subtree keeps their final overflow.
+  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize, settled: bool) ! OutOfMemoryError ? &mut Allocator {
     self.boxes[id] = self.previous.boxes.asSlice()[id]
-    self.boxes[id].scrollableOverflow = self.previous.boxOverflow.get(id)
+    if !settled { self.boxes[id].scrollableOverflow = self.previous.boxOverflow.get(id) }
     let mut child = nodes.node(id).firstChild
     while child != NO_NODE {
       let kept = self.cache.keptRange(child)
       if kept.valid && kept.start > from.start && kept.end <= from.end {
         run self.cache.carryFinal(child, kept, kept.start - from.start + base, kept.end - from.start + base)
       }
-      run self.restoreBoxes(nodes, child, from, base)
+      run self.restoreBoxes(nodes, child, from, base, settled)
       child = nodes.node(child).nextSibling
     }
   }
   // Blink LayoutNG / Servo style result reuse: a clean box laid out with the
   // same request as in the previous compute gets a copy of that compute's
   // fragments and box records instead of a layout. `level` says which kind
-  // of subtree the caller can take (see Incremental.reusableSubtrees).
+  // of subtree the caller can take (see Incremental.markSubtrees).
   pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
-    if self.frame != NO_NODE || id >= self.reusable.length() || self.reusable.get(id) < level { return Option<Layout>.None }
+    if self.frame != NO_NODE || id >= self.reusable.length() || (self.reusable.get(id) & REUSE_LEVEL) < level { return Option<Layout>.None }
+    let settled = (self.reusable.get(id) & REUSE_STATIC) != 0
     let slot = self.cache.keptRange(id)
     if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return Option<Layout>.None }
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }
@@ -567,8 +569,8 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       index = index + 1
     }
     let base = self.fragments.checkpoint()
-    run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent, self.previous.fragmentOverflow.asSlice())
-    run self.restoreBoxes(nodes, id, slot, base)
+    run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent, self.previous.fragmentOverflow.asSlice(), settled)
+    run self.restoreBoxes(nodes, id, slot, base, settled)
     let layout = self.cache.result(id).layout
     run self.store(id, &layout, true)
     run self.cache.carryFinal(id, slot, base, self.fragments.checkpoint())

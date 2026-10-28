@@ -68,10 +68,19 @@ impl Fragment {
   }
 }
 
+// A range copied from the previous compute whose fragments already hold
+// their final scrollable overflow: positioning moves nothing inside it, so
+// overflow propagation can skip from its last fragment to its first.
+// `overflow` is the first fragment's final value.
+pub struct SettledRange { pub start: usize, pub end: usize, pub overflow: Rect }
+impl Copy for SettledRange {}
+
 pub struct FragmentArena {
   pub values: List<Fragment>,
   pub texts: List<TextFragment>,
   firstByBox: List<usize>, lastByBox: List<usize>,
+  // Ascending and disjoint.
+  pub settled: List<SettledRange>,
 }
 impl FragmentArena {
   pub fn make() -> FragmentArena {
@@ -79,6 +88,7 @@ impl FragmentArena {
       values: List<Fragment>.make(),
       texts: List<TextFragment>.make(),
       firstByBox: List<usize>.make(), lastByBox: List<usize>.make(),
+      settled: List<SettledRange>.make(),
     }
   }
 
@@ -86,6 +96,7 @@ impl FragmentArena {
   pub effect fn prepare(self: &mut Self, boxCount: usize) ! OutOfMemoryError ? &mut Allocator {
     self.values.clear()
     self.texts.clear()
+    self.settled.clear()
     self.firstByBox.clear()
     self.lastByBox.clear()
     run self.firstByBox.reserveExact(boxCount)
@@ -164,6 +175,9 @@ impl FragmentArena {
       }
     }
     self.values.truncate(checkpoint)
+    let mut kept = self.settled.length()
+    while kept > 0 && self.settled.get(kept - 1).end > checkpoint { kept = kept - 1 }
+    self.settled.truncate(kept)
   }
   // Parents precede children in the arena. Resolve final visual coordinates
   // once, rather than repeatedly walking ancestors for source-bound queries.
@@ -192,8 +206,9 @@ impl FragmentArena {
   // Appends a copy of the source's fragments [start, end), whose parents all
   // lie inside the range except the first's, which becomes `parent`. Links
   // are rebuilt as append would; visual offsets and world locations reset,
-  // and scrollable overflow is taken from `overflow`, indexed like the source.
-  pub effect fn appendRange(self: &mut Self, source: &FragmentArena, start: usize, end: usize, parent: usize, overflow: &[Rect]) ! OutOfMemoryError ? &mut Allocator {
+  // and scrollable overflow is taken from `overflow`, indexed like the source,
+  // unless `settled` keeps the source's final values and records the range.
+  pub effect fn appendRange(self: &mut Self, source: &FragmentArena, start: usize, end: usize, parent: usize, overflow: &[Rect], settled: bool) ! OutOfMemoryError ? &mut Allocator {
     let base = self.values.length()
     let sourceValues = source.values.asSlice()
     // Text records of a laid-out range are usually contiguous: copy them in
@@ -214,6 +229,7 @@ impl FragmentArena {
       index = index + 1
     }
     run self.values.reserve(end - start)
+    if settled { run self.settled.reserve(1) }
     run self.texts.reserve(texts)
     run self.values.appendSlice(Slice.view(sourceValues, start, end - start))
     let textBase = self.texts.length()
@@ -226,7 +242,7 @@ impl FragmentArena {
       let values = self.values.asMutSlice()
       values[at].visualOffset = Point { x: 0.0, y: 0.0 }
       values[at].worldLocation = Point { x: 0.0, y: 0.0 }
-      values[at].scrollableOverflow = overflow[start + (at - base)]
+      if !settled { values[at].scrollableOverflow = overflow[start + (at - base)] }
       if values[at].textData != NO_NODE {
         if bulk { values[at].textData = textBase + (values[at].textData - firstText) }
         else {
@@ -255,6 +271,7 @@ impl FragmentArena {
       self.linkBox(at)
       at = at + 1
     }
+    if settled { run self.settled.append(SettledRange { start: base, end: stop, overflow: sourceValues[start].scrollableOverflow }) }
   }
   // Links an appended range's first fragment after its parent's last child.
   fn linkParent(self: &mut Self, index: usize) {

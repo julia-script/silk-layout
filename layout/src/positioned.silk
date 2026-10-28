@@ -1648,56 +1648,73 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
   // Physical parents precede children, including CB-owned absolute subtrees.
   // Line/inline fragments pass overflow through; only actual box fragments clip.
   let mut index = output.fragments.values.length()
+  // Settled ranges already hold their final overflow: skip to their first fragment.
+  let mut settled = output.fragments.settled.length()
+  if output.frame != NO_NODE { settled = 0 }
   while index > 0 {
     index = index - 1
-    let fragment = output.fragments.values.get(index)
+    if settled > 0 && index + 1 == output.fragments.settled.get(settled - 1).end {
+      let range = output.fragments.settled.get(settled - 1)
+      settled = settled - 1
+      index = range.start
+      let values = output.fragments.values.asMutSlice()
+      values[index].scrollableOverflow = range.overflow
+    }
+    let fragment = &output.fragments.values.asSlice()[index]
     // Nonpainting scopes contribute no own rectangle, but CB-owned absolute
     // descendants still propagate their overflow through that physical scope.
     let id = fragment.box
+    let kind = fragment.kind
+    let nonpainting = fragment.nonpainting
+    let parentId = fragment.parent
+    let single = fragment.previousForBox == NO_NODE && fragment.nextForBox == NO_NODE
+    let position = Point { x: fragment.location.x + fragment.visualOffset.x, y: fragment.location.y + fragment.visualOffset.y }
+    let border = Rect { x: position.x, y: position.y, width: fragment.size.width, height: fragment.size.height }
+    let bounds = fragment.layoutBounds
+    let paddingRect = fragment.paddingRect
     let mut positioned = false
     let mut fixed = false
     let mut overflow = fragment.scrollableOverflow
     if id != NO_NODE {
-      positioned = outOfFlow(nodes.style(id))
-      fixed = nodes.style(id).position == Position.Fixed && fragment.kind == FragmentKind.Box
-      if fragment.kind == FragmentKind.Box {
+      let style = nodes.style(id)
+      positioned = outOfFlow(style)
+      fixed = style.position == Position.Fixed && kind == FragmentKind.Box
+      if kind == FragmentKind.Box {
         // A single physical fragment has unambiguous scalar used metrics.
         // Multi-fragment boxes keep their per-fragment overflow authoritative.
-        if output.frame == NO_NODE || fragment.previousForBox == NO_NODE && fragment.nextForBox == NO_NODE {
+        if output.frame == NO_NODE || single {
           output.boxes[id].scrollableOverflow = overflow
         }
-        overflow = propagatedOverflow(nodes.style(id), overflow, fragment.paddingRect)
+        overflow = propagatedOverflow(style, overflow, paddingRect)
       }
     }
     if !fixed {
-      let position = Point { x: fragment.location.x + fragment.visualOffset.x, y: fragment.location.y + fragment.visualOffset.y }
-      let border = Rect { x: position.x, y: position.y, width: fragment.size.width, height: fragment.size.height }
       overflow = overflow.translated(position)
-      let parentId = fragment.parent
       if parentId == NO_NODE {
-        if !fragment.nonpainting { result = addOverflow(result, border, viewportLimits) }
+        if !nonpainting { result = addOverflow(result, border, viewportLimits) }
         result = addOverflow(result, overflow, viewportLimits)
       } else {
-        let parent = output.fragments.values.get(parentId)
+        let parent = &output.fragments.values.asSlice()[parentId]
         let cb = parent.box
+        let parentBox = parent.kind == FragmentKind.Box
+        let mut combined = parent.scrollableOverflow
         let mut limits = unlimited
-        if cb != NO_NODE && parent.kind == FragmentKind.Box {
+        if cb != NO_NODE && parentBox {
           let mut normal = parent.contentRect
           if output.frame == NO_NODE { normal = output.boxes[cb].normalFlowOverflow() }
           limits = reachableLimits(nodes.style(cb), parent.paddingRect, normal, cb == 0)
         }
-        let mut combined = parent.scrollableOverflow
-        if !fragment.nonpainting { combined = addOverflow(combined, border, limits) }
-        if !positioned && !fragment.nonpainting {
-          let mut margin = fragment.layoutBounds.translated(position)
-          if output.frame == NO_NODE && fragment.kind == FragmentKind.Box && parent.kind == FragmentKind.Box && id != NO_NODE && cb != NO_NODE {
-            let layout = output.boxes[id]
+        if !nonpainting { combined = addOverflow(combined, border, limits) }
+        if !positioned && !nonpainting {
+          let mut margin = bounds.translated(position)
+          if output.frame == NO_NODE && kind == FragmentKind.Box && parentBox && id != NO_NODE && cb != NO_NODE {
+            let layout = &output.boxes[id]
             if isFlex(nodes.style(cb)) {
               margin = Rect { x: position.x - layout.usedMargin.left, y: position.y - layout.usedMargin.top, width: max(0.0, layout.size.width + layout.usedMargin.horizontal()), height: max(0.0, layout.size.height + layout.usedMargin.vertical()) }
             } else {
-              margin = flowMarginRect(nodes, cb, id, &layout, &output.boxes[cb]).translated(Point { x: position.x - layout.location.x, y: position.y - layout.location.y })
+              margin = flowMarginRect(nodes, cb, id, layout, &output.boxes[cb]).translated(Point { x: position.x - layout.location.x, y: position.y - layout.location.y })
             }
-          } else if output.frame != NO_NODE && fragment.kind == FragmentKind.Box && parent.kind == FragmentKind.Box
+          } else if output.frame != NO_NODE && kind == FragmentKind.Box && parentBox
             && id != NO_NODE && cb != NO_NODE && !isFlex(nodes.style(cb)) {
             margin = fragmentFlowMargin(nodes, &output, parentId, index).translated(position)
           }

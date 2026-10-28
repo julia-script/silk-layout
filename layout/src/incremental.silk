@@ -4,7 +4,7 @@ import context { outOfFlow }
 import style { Float, Dimension, Edges, Position, WritingMode }
 import tree { Tree, NO_NODE }
 import box_tree { BoxTree, BoxNode }
-import layout_cache { LayoutCache, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW }
+import layout_cache { LayoutCache, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW, REUSE_LEVEL, REUSE_STATIC }
 
 // Kept results are addressed by generated box index, so they survive only
 // while box construction yields the same boxes. Scroll offsets only move
@@ -66,36 +66,6 @@ pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, 
 fn nonNegativeDimension(value: &Dimension) -> bool { return value.value >= 0.0 && value.percent >= 0.0 }
 fn nonNegative(edges: &Edges) -> bool {
   return nonNegativeDimension(&edges.top) && nonNegativeDimension(&edges.right) && nonNegativeDimension(&edges.bottom) && nonNegativeDimension(&edges.left)
-}
-
-// How much of a box's previous layout may be copied into the next compute.
-// A subtree with out-of-flow boxes or inline interruptions is never copied:
-// positioning, not normal-flow layout, completes those. One with floats is
-// copied only where it starts a formatting context, since its floats would
-// otherwise join exclusions it shares with its siblings. So is one with
-// negative margins, which could lift a box into the floats above it.
-pub effect fn reusableSubtrees(nodes: &BoxTree) -> List<u8> ! OutOfMemoryError ? &mut Allocator {
-  let count = nodes.boxes.length()
-  let mut result = List<u8>.make()
-  run result.reserveExact(count)
-  run result.appendRepeated(REUSE_IN_FLOW, count)
-  // Generated parents precede their children.
-  let mut index = count
-  while index > 0 {
-    index = index - 1
-    let node = nodes.node(index)
-    let style = nodes.style(index)
-    let mut level = result.get(index)
-    if outOfFlow(style) || node.interruptionFirst != NO_NODE { level = REUSE_NONE }
-    else if level > REUSE_INDEPENDENT && !nonNegative(&style.margin) { level = REUSE_INDEPENDENT }
-    result.set(index, level)
-    if node.parent != NO_NODE {
-      let mut inherited = level
-      if style.float != Float.None && inherited > REUSE_INDEPENDENT { inherited = REUSE_INDEPENDENT }
-      if inherited < result.get(node.parent) { result.set(node.parent, inherited) }
-    }
-  }
-  return move result
 }
 
 // Generated boxes of the previous compute matched to this compute's after a
@@ -225,24 +195,59 @@ pub fn invalidateUnmatched(nodes: &BoxTree, cache: &mut LayoutCache, changed: &[
   }
 }
 
-// Which boxes head a subtree whose layout never reads the initial containing
-// block or the scrollport limits passed down for orthogonal flows: no box in
-// it is replaced, fixed, or orthogonal to its parent.
-pub effect fn viewportFreeSubtrees(nodes: &BoxTree) -> List<bool> ! OutOfMemoryError ? &mut Allocator {
+// Two flags per box, filled in one pass over the tree.
+//
+// reusable: how much of a box's previous layout may be copied into the next
+// compute. A subtree with out-of-flow boxes or inline interruptions is never
+// copied: positioning, not normal-flow layout, completes those. One with
+// floats is copied only where it starts a formatting context, since its
+// floats would otherwise join exclusions it shares with its siblings. So is
+// one with negative margins, which could lift a box into the floats above it.
+//
+// It also carries REUSE_STATIC where no box in the subtree is relatively or
+// sticky positioned, so positioning moves none of its fragments.
+//
+// viewportFree: which boxes head a subtree whose layout never reads the
+// initial containing block or the scrollport limits passed down for
+// orthogonal flows: no box in it is replaced, fixed, or orthogonal to its
+// parent.
+pub effect fn markSubtrees(nodes: &BoxTree, reusable: &mut List<u8>, viewportFree: &mut List<bool>) ! OutOfMemoryError ? &mut Allocator {
   let count = nodes.boxes.length()
-  let mut result = List<bool>.make()
-  run result.reserveExact(count)
-  run result.appendRepeated(true, count)
+  reusable.clear()
+  viewportFree.clear()
+  run reusable.reserveExact(count)
+  run viewportFree.reserveExact(count)
+  run reusable.appendRepeated(REUSE_IN_FLOW | REUSE_STATIC, count)
+  run viewportFree.appendRepeated(true, count)
+  let levels = reusable.asMutSlice()
+  let frees = viewportFree.asMutSlice()
+  // Generated parents precede their children.
   let mut index = count
   while index > 0 {
     index = index - 1
     let node = nodes.node(index)
     let style = nodes.style(index)
-    let mut free = result.get(index) && !style.replaced && style.position != Position.Fixed
-    if node.parent != NO_NODE && (style.writingMode == WritingMode.HorizontalTb) != (nodes.style(node.parent).writingMode == WritingMode.HorizontalTb) { free = false }
-    if node.parent == NO_NODE && style.writingMode != WritingMode.HorizontalTb { free = false }
-    result.set(index, free)
-    if !free && node.parent != NO_NODE { result.set(node.parent, false) }
+    let mut level = levels[index] & REUSE_LEVEL
+    let mut still = levels[index] & REUSE_STATIC
+    if outOfFlow(style) || node.interruptionFirst != NO_NODE { level = REUSE_NONE }
+    else if level > REUSE_INDEPENDENT && !nonNegative(&style.margin) { level = REUSE_INDEPENDENT }
+    if style.position == Position.Relative || style.position == Position.Sticky { still = 0 }
+    levels[index] = level | still
+    let horizontal = style.writingMode == WritingMode.HorizontalTb
+    let mut free = frees[index] && !style.replaced && style.position != Position.Fixed
+    if node.parent == NO_NODE {
+      if !horizontal { free = false }
+      frees[index] = free
+    } else {
+      if horizontal != (nodes.style(node.parent).writingMode == WritingMode.HorizontalTb) { free = false }
+      frees[index] = free
+      if !free { frees[node.parent] = false }
+      let mut inherited = level
+      if style.float != Float.None && inherited > REUSE_INDEPENDENT { inherited = REUSE_INDEPENDENT }
+      let parentLevel = levels[node.parent] & REUSE_LEVEL
+      let parentStill = levels[node.parent] & still
+      if inherited < parentLevel { levels[node.parent] = inherited | parentStill }
+      else { levels[node.parent] = parentLevel | parentStill }
+    }
   }
-  return move result
 }

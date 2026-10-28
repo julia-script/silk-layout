@@ -741,7 +741,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       if first != NO_NODE {
         let kind = self.fragments.values.asSlice()[first].kind
         if kind == FragmentKind.Box {
-          run self.fragments.editPlacement(first)
+          run self.fragments.editPosition(first)
           let size = self.boxes[id].size
           let fragments = self.fragments.values.asMutSlice()
           fragments[first].location = location

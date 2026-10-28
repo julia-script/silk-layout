@@ -54,6 +54,22 @@ fn normalChild(nodes: &BoxTree, candidate: usize) -> usize {
   }
   return NO_NODE
 }
+// Unfragmented, a child's layout call stores its result in `boxes`: copy just
+// the fields the block pass reads instead of the whole returned Layout.
+fn readStored(layout: &mut Layout, stored: &Layout) with Intrinsic.inlineAlways() {
+  layout.size = stored.size
+  layout.usedMargin = stored.usedMargin
+  layout.marginTopPositive = stored.marginTopPositive
+  layout.marginTopNegative = stored.marginTopNegative
+  layout.marginBottomPositive = stored.marginBottomPositive
+  layout.marginBottomNegative = stored.marginBottomNegative
+  layout.collapsesThrough = stored.collapsesThrough
+  layout.hasClearance = stored.hasClearance
+  layout.hasFirstBaseline = stored.hasFirstBaseline
+  layout.hasLastBaseline = stored.hasLastBaseline
+  if stored.hasFirstBaseline { layout.firstBaselines = stored.firstBaselines }
+  if stored.hasLastBaseline { layout.lastBaselines = stored.lastBaselines }
+}
 fn topMargins(layout: &Layout) -> Margins {
   return Margins { positive: layout.marginTopPositive, negative: layout.marginTopNegative }
 }
@@ -445,7 +461,11 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
           request.fragmentation.offset = input.fragmentation.offset + box.inset.top + y + item.margin.top
           request.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || y > 0.0
         }
-        childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
+        if fragmented { childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &request) }
+        else {
+          drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
+          readStored(&mut childLayout, &output.boxes[item.id])
+        }
         childLayout.size = axes.size(childLayout.size)
         if fragmented {
           let state = output.resumes.get(item.id)
@@ -532,10 +552,19 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
         }
         item.input.bfcContentOrigin = Point { x: origin.x + x + item.inset.left, y: origin.y + y + item.inset.top }
         bfc.sourceFloor = max(bfc.sourceFloor, origin.y + y - item.margin.top)
-        if independent {
-          childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &item.input)
+        if fragmented {
+          if independent {
+            childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &item.input)
+          } else {
+            childLayout = run layoutInFlow(nodes, &mut output, &mut measurer, item.id, &item.input, &mut bfc)
+          }
         } else {
-          childLayout = run layoutInFlow(nodes, &mut output, &mut measurer, item.id, &item.input, &mut bfc)
+          if independent {
+            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &item.input)
+          } else {
+            drop run layoutInFlow(nodes, &mut output, &mut measurer, item.id, &item.input, &mut bfc)
+          }
+          readStored(&mut childLayout, &output.boxes[item.id])
         }
         childLayout.size = axes.size(childLayout.size)
         if fragmented {
@@ -614,7 +643,11 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
               bfcInput.fragmentation.limit = input.fragmentation.limit - box.inset.bottom
             }
             output.restoreCheckpoint(fragmentCheckpoint)
-            childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &bfcInput)
+            if fragmented { childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &bfcInput) }
+            else {
+              drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &bfcInput)
+              readStored(&mut childLayout, &output.boxes[item.id])
+            }
             childLayout.size = axes.size(childLayout.size)
             layoutY = y
             if fragmented {

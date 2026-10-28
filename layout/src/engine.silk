@@ -231,16 +231,17 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
 }
 
 pub fn flowMarginRect(nodes: &BoxTree, id: usize, child: usize, layout: &Layout, parent: &Layout) -> Rect {
-  if !layout.hasBox() || outOfFlow(nodes.style(child)) { return Rect.zero() }
+  let style = nodes.style(child)
+  if !layout.hasBox() || outOfFlow(style) { return Rect.zero() }
   let mut margin = layout.usedMargin
-  if !isFlex(nodes.style(id)) {
+  let parentStyle = nodes.style(id)
+  if !isFlex(parentStyle) {
     let mut basis = parent.contentSize.width
     let mut definite = parent.widthDefinite
-    if nodes.style(id).writingMode != WritingMode.HorizontalTb { basis = parent.contentSize.height
+    if parentStyle.writingMode != WritingMode.HorizontalTb { basis = parent.contentSize.height
       definite = parent.heightDefinite }
     // Optional block margins use declared lengths, with resolved auto margins.
     // CSS2's overconstraint correction is not an extra scrollable margin area.
-    let style = nodes.style(child)
     let declared = edges(style.margin, basis, definite)
     if style.margin.left.kind != DimensionKind.Auto { margin.left = declared.left }
     if style.margin.right.kind != DimensionKind.Auto { margin.right = declared.right }

@@ -4,7 +4,7 @@ import silk.list { List }
 import silk.option { Option }
 import silk.ownership { Copy }
 import silk.usize
-import geometry { Measure, Layout, BaselineSet, FontRequest, Size, OptionalSize, AvailableSpace, AvailableKind, ResolvedEdges, max, min, clamp, abs }
+import geometry { Measure, Layout, BaselineSet, FontRequest, Size, Point, OptionalSize, AvailableSpace, AvailableKind, ResolvedEdges, max, min, clamp, abs }
 import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, BoxSizing, Visibility, MarginBreak, BoxDecorationBreak }
 import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
@@ -416,12 +416,11 @@ effect fn deferredMinimums<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   index = line.start
   while index < line.end {
     if items[index].minimumPending {
-      let mut item = items[index]
-      let measured = run probe(nodes, &mut output, &mut measurer, item.id, &childInput, axis.horizontal, AvailableSpace.minContent(), item.knownCrossDefinite, item.knownCross)
+      let measured = run probe(nodes, &mut output, &mut measurer, items[index].id, &childInput, axis.horizontal, AvailableSpace.minContent(), items[index].knownCrossDefinite, items[index].knownCross)
+      let item = &mut items[index]
       let minimum = min(axisSize(measured.size, axis.horizontal), item.pendingPreferred)
       item.minimum = max(item.inset, min(minimum, item.maximum))
       item.minimumPending = false
-      items[index] = item
     }
     index = index + 1
   }
@@ -1041,6 +1040,28 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   return run placeFlexLines(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, &axis, move scratch, main, cross, mainGap, crossGap, collapsed)
 }
 
+// An item's location within its container, with auto margins resolved
+// into usedMargin. cursor is the main position before the item's margin.
+fn itemLocation(nodes: &BoxTree, item: &Item, line: &Line, style: &Style, axis: &Axes, box: &ResolvedBox, size: Size, usedMargin: &mut ResolvedEdges, autoShare: f64, cursor: f64, crossCursor: f64, main: f64, cross: f64) -> Point {
+  let childCross = axisSize(size, !axis.horizontal)
+  let crossOffset = fragmentCrossOffset(nodes, item, line, style, axis, childCross)
+  if item.autoStart { setEdge(&mut usedMargin, axis.horizontal, axis.mainReverse, autoShare) }
+  if item.autoEnd { setEdge(&mut usedMargin, axis.horizontal, !axis.mainReverse, autoShare) }
+  if item.autoCrossStart || item.autoCrossEnd {
+    // Auto cross margins absorb all remaining space, including the
+    // end-side overflow required by Flexbox §9.6.
+    setEdge(&mut usedMargin, !axis.horizontal, axis.crossReverse, crossOffset)
+    setEdge(&mut usedMargin, !axis.horizontal, !axis.crossReverse, line.cross - childCross - crossOffset)
+  }
+  let mut mainPosition = cursor + item.marginStart
+  if item.autoStart { mainPosition = mainPosition + autoShare }
+  let mut crossPosition = crossCursor + crossOffset
+  if axis.mainReverse { mainPosition = main - mainPosition - item.target }
+  if axis.crossReverse { crossPosition = cross - crossPosition - childCross }
+  if axis.horizontal { return Point { x: box.inset.left + mainPosition, y: box.inset.top + crossPosition } }
+  return Point { x: box.inset.left + crossPosition, y: box.inset.top + mainPosition }
+}
+
 // layoutFlexPass's line and item placement, returning one local so the result
 // is built in the caller's slot.
 effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: &Axes, scratch: FlexScratch, main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
@@ -1112,30 +1133,21 @@ effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
         }
         // Hypothetical cross sizing needs only metrics. Materialize descendants
         // once, with the final cross constraint and percentage definiteness.
-        let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &finalInput)
-        childCross = axisSize(childLayout.size, !axis.horizontal)
-        let crossOffset = fragmentCrossOffset(nodes, item, &line, style, &axis, childCross)
-        if item.autoStart { setEdge(&mut childLayout.usedMargin, axis.horizontal, axis.mainReverse, autoShare) }
-        if item.autoEnd { setEdge(&mut childLayout.usedMargin, axis.horizontal, !axis.mainReverse, autoShare) }
-        if item.autoCrossStart || item.autoCrossEnd {
-          // Auto cross margins absorb all remaining space, including the
-          // end-side overflow required by Flexbox §9.6.
-          setEdge(&mut childLayout.usedMargin, !axis.horizontal, axis.crossReverse, crossOffset)
-          setEdge(&mut childLayout.usedMargin, !axis.horizontal, !axis.crossReverse, line.cross - childCross - crossOffset)
+        if input.performLayout && input.fragmentation.active {
+          let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &finalInput)
+          childLayout.location = itemLocation(nodes, item, &line, style, &axis, box, childLayout.size, &mut childLayout.usedMargin, autoShare, cursor, crossCursor, main, cross)
+          run output.store(item.id, &childLayout, input.performLayout)
+        } else {
+          // Unfragmented, layoutNode already stored the child's layout: place
+          // it there instead of copying the whole result out.
+          drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &finalInput)
+          let mut usedMargin = output.boxes[item.id].usedMargin
+          let location = itemLocation(nodes, item, &line, style, &axis, box, output.boxes[item.id].size, &mut usedMargin, autoShare, cursor, crossCursor, main, cross)
+          let hasClearance = output.boxes[item.id].hasClearance
+          run output.place(item.id, location, usedMargin, hasClearance, input.performLayout)
         }
         cursor = cursor + item.marginStart
         if item.autoStart { cursor = cursor + autoShare }
-        let mut mainPosition = cursor
-        let mut crossPosition = crossCursor + crossOffset
-        if axis.mainReverse { mainPosition = main - mainPosition - item.target }
-        if axis.crossReverse { crossPosition = cross - crossPosition - childCross }
-        if axis.horizontal { childLayout.location.x = box.inset.left + mainPosition
-          childLayout.location.y = box.inset.top + crossPosition }
-        else { childLayout.location.x = box.inset.left + crossPosition
-          childLayout.location.y = box.inset.top + mainPosition }
-        // Unfragmented, layoutNode already stored childLayout.
-        if input.performLayout && input.fragmentation.active { run output.store(item.id, &childLayout, input.performLayout) }
-        else { run output.place(item.id, childLayout.location, childLayout.usedMargin, childLayout.hasClearance, input.performLayout) }
         cursor = cursor + item.target + item.marginEnd + mainGap + distribution.between
         if item.autoEnd { cursor = cursor + autoShare }
       }

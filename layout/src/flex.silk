@@ -550,6 +550,16 @@ fn fixedCross(nodes: &BoxTree, item: &Item, parentStyle: &Style) -> bool {
   let style = nodes.style(item.id)
   return item.knownCrossDefinite && !item.crossAuto && !style.replaced && style.aspectRatio == 0.0 && style.writingMode == parentStyle.writingMode && nodes.node(item.id).measurement == Measurement.None
 }
+fn crossProbeInput(input: &Input, item: &Item, axis: &Axes) -> Input {
+  let mut childInput = input.*
+  childInput.performLayout = false
+  // Baseline alignment reads the item's baselines; a probed container's
+  // own baselines come from its items' stored probe results.
+  childInput.baselines = item.align == Align.Baseline || item.align == Align.LastBaseline || input.baselines && !input.performLayout
+  setKnown(&mut childInput, axis.horizontal, item.target)
+  setIndefinite(&mut childInput, axis.horizontal, !item.mainDefinite)
+  return childInput
+}
 effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: &Line, input: &Input, axis: &Axes, parentStyle: &Style, collapsed: bool, lineKnown: bool) -> Line ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut result = line.*
   // §9.4 floors the line size at zero, not the signed distances of its items.
@@ -580,14 +590,13 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       item.lastBaseline = 0.0
       result.cross = max(result.cross, item.cross + item.crossStart + item.crossEnd)
     } else if active(&item.*, collapsed) {
-      let mut childInput = input.*
-      childInput.performLayout = false
-      // Baseline alignment reads the item's baselines; a probed container's
-      // own baselines come from its items' stored probe results.
-      childInput.baselines = item.align == Align.Baseline || item.align == Align.LastBaseline || input.baselines && !input.performLayout
-      setKnown(&mut childInput, axis.horizontal, item.target)
-      setIndefinite(&mut childInput, axis.horizontal, !item.mainDefinite)
-      run probeNode(nodes, &mut output, &mut measurer, item.id, &childInput)
+      // probeNode, with the request built again only on a cache miss.
+      let mut key = crossProbeInput(input, &item.*, axis)
+      normalizeKey(output.keyShape(item.id), &mut key, output.viewportFree(item.id))
+      if !run output.storeCached(item.id, &key, CacheKind.IndependentBox) {
+        let request = crossProbeInput(input, &item.*, axis)
+        run probeFresh(nodes, &mut output, &mut measurer, item.id, &request, &key)
+      }
       let layout = &output.boxes[item.id]
       item.cross = axisSize(layout.size, !axis.horizontal)
       item.baseline = baselineDistance(layout, nodes.style(item.id), input.parentWritingMode, input.parentTextOrientation, &axis, false)

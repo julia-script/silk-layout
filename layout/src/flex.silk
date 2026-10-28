@@ -1,6 +1,7 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.list { List }
+import silk.option { Option }
 import silk.ownership { Copy }
 import silk.usize
 import geometry { Measure, Layout, BaselineSet, FontRequest, Size, OptionalSize, AvailableSpace, AvailableKind, ResolvedEdges, max, min, clamp, abs }
@@ -813,10 +814,18 @@ fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
 }
 pub effect fn layoutFlex<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if nodes.node(id).firstChild == NO_NODE && !input.fragmentation.active && input.fragmentation.boundaryProbe == BoundaryProbe.None { return emptyFlex(nodes.style(id), &box) }
-  let mut items = List<Item>.make()
-  let mut lines = List<Line>.make()
-  return run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &box, false, &mut items, &mut lines)
+  let mut scratch = FlexScratch { items: List<Item>.make(), lines: List<Line>.make() }
+  match output.flexScratch.pop() {
+    Option<FlexScratch>.Some { value: spare } => { scratch = move spare }
+    Option<FlexScratch>.None => {}
+  }
+  let result = run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &box, false, &mut scratch.items, &mut scratch.lines)
+  run output.flexScratch.append(move scratch)
+  return result
 }
+
+// A flex pass's item and line lists, kept in LayoutPass between passes.
+pub struct FlexScratch { items: List<Item>, lines: List<Line> }
 effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, resolvedIntrinsicInline: bool, items: &mut List<Item>, lines: &mut List<Line>) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let axis = axes(style)

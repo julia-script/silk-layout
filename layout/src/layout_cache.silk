@@ -9,6 +9,7 @@ import fragments { FragmentArena, Shift }
 import bfc { FloatBox }
 import silk.slice { Slice }
 import inline_prepared { KeptText }
+import flex { FlexMemos }
 
 const ABSENT: usize = usize.MAX
 // Reuse levels of a subtree's kept layout; see Incremental.markSubtrees.
@@ -142,13 +143,16 @@ pub struct LayoutCache {
   floats: List<FloatBox>, floatsCompacted: usize,
   // Each box's prepared paragraph from the compute that last laid it out.
   texts: List<List<KeptText>>,
+  // Flex items as prepared before; see FlexMemos.
+  pub flexMemos: FlexMemos,
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), spare: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<FinalRange>.make(), rangeStamps: List<usize>.make(), rangeSlots: List<usize>.make(), keptRanges: List<FinalRange>.make(), rotatedRanges: List<FinalRange>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), spare: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<FinalRange>.make(), rangeStamps: List<usize>.make(), rangeSlots: List<usize>.make(), keptRanges: List<FinalRange>.make(), rotatedRanges: List<FinalRange>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
+    self.flexMemos.clear()
     self.heads.clear()
     self.entries.clear()
     self.dead = 0
@@ -165,6 +169,7 @@ impl LayoutCache {
   }
   // Starts a compute: the previous compute's final layouts become reusable.
   pub effect fn rotateFinals(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
+    self.flexMemos.rotate()
     self.generation = self.generation + 1
     self.rotatedTouched = self.previouslyTouched
     self.previouslyTouched = self.touched
@@ -290,6 +295,7 @@ impl LayoutCache {
     return true
   }
   pub fn clearBox(self: &mut Self, id: usize) {
+    self.flexMemos.dropBox(id)
     if id < self.texts.length() { self.texts.asMutSlice()[id].clear() }
     if id < self.ranges.length() { self.ranges.set(id, FinalRange.none()) }
     if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { self.keptRanges.set(self.rangeSlots.get(id), FinalRange.none()) }
@@ -393,6 +399,7 @@ impl LayoutCache {
   // `toOld[new]` is the matching previous box or ABSENT, `toNew` the reverse.
   // Results of previous boxes with no match become unreachable.
   pub effect fn remap(self: &mut Self, toOld: &[usize], toNew: &[usize]) ! OutOfMemoryError ? &mut Allocator {
+    self.flexMemos.clear()
     let mut old: usize = 0
     while old < self.heads.length() {
       if old >= toNew.length || toNew[old] == ABSENT {

@@ -4,10 +4,10 @@
 //! With --updates, one tree is kept: each iteration applies the next step of the cycle (a new
 //! viewport and/or node styles, as in the silk-layout CLI's "updates" field) and times one layout.
 //! Grid mapping is intentionally limited to numeric lines/spans, non-repeated tracks
-//! (fixed, percent, fr, auto and minmax), row flow, gaps and item/self alignment.
-//! Named placement/areas, repeat, calc, fit-content and intrinsic breadth keywords
-//! are rejected rather than approximated. Fixture wrapping models horizontal text
-//! without floats; it does not expose line boxes or baseline data to taffy.
+//! (fixed, percent, fr, auto, intrinsic keywords, minmax and fit-content), row flow,
+//! gaps and item/self alignment. Named placement/areas, repeat and calc are rejected
+//! rather than approximated. Fixture wrapping models horizontal text without
+//! floats; it does not expose line boxes or baseline data to taffy.
 use serde_json::Value;
 use std::time::Instant;
 use taffy::prelude::*;
@@ -108,6 +108,8 @@ fn grid_breadth(value: &Value) -> TrackSizingFunction {
     match value {
         Value::Number(_) => length(grid_nonnegative(value)),
         Value::String(s) if s == "auto" => auto(),
+        Value::String(s) if s == "min-content" => min_content(),
+        Value::String(s) if s == "max-content" => max_content(),
         Value::Object(o) if o.len() == 1 && o.contains_key("percent") => percent(grid_nonnegative(&o["percent"])),
         Value::Object(o) if o.len() == 1 && o.contains_key("fr") => fr(grid_nonnegative(&o["fr"])),
         _ => panic!("unsupported grid breadth {value}"),
@@ -115,7 +117,16 @@ fn grid_breadth(value: &Value) -> TrackSizingFunction {
 }
 
 fn grid_track(value: &Value) -> TrackSizingFunction {
-    if let Some(o) = value.as_object().filter(|o| o.contains_key("minmax")) {
+    if let Some(o) = value.as_object().filter(|o| o.contains_key("fitContent")) {
+        assert!(o.len() == 1, "unsupported grid track {value}");
+        let argument = match &o["fitContent"] {
+            Value::Number(_) => LengthPercentage::length(grid_nonnegative(&o["fitContent"])),
+            Value::Object(limit) if limit.len() == 1 && limit.contains_key("percent") =>
+                LengthPercentage::percent(grid_nonnegative(&limit["percent"])),
+            _ => panic!("unsupported fit-content argument {value}"),
+        };
+        fit_content(argument)
+    } else if let Some(o) = value.as_object().filter(|o| o.contains_key("minmax")) {
         assert!(o.len() == 1, "unsupported grid track {value}");
         let pair = o["minmax"].as_array().filter(|p| p.len() == 2)
             .unwrap_or_else(|| panic!("minmax requires two breadths: {value}"));

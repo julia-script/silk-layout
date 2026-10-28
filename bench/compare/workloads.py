@@ -7,8 +7,9 @@ yoga's column direction and zero flex-shrink) do not change the layout being mea
 Supported properties: display (block | flex | grid), boxSizing (always border-box),
 flexDirection, flexWrap, flexGrow, flexShrink, flexBasis, width, height, minWidth,
 minHeight, maxWidth, maxHeight, padding, margin, border, rowGap, columnGap,
-alignItems, justifyContent, plus numeric grid placement, fixed/percent/fr/minmax
-tracks, auto rows, and item/self alignment. Grid workloads compare only with taffy.
+alignItems, justifyContent, plus numeric grid placement, fixed/percent/fr/minmax,
+intrinsic and fit-content tracks, auto rows, and item/self alignment. Grid
+workloads compare only with taffy.
 Leaf "measure" fixtures {minWidth, maxWidth, height, wrap?} clamp available width
 to [minWidth, maxWidth]; wrap=true multiplies height by the synthetic line count.
 Dimensions are numbers (px), "auto", or {"percent": fraction}.
@@ -162,6 +163,60 @@ def grid_fr(count=10_000):
     return document(nodes, width, 800)
 
 
+def grid_intrinsic(count=10_000):
+    """Intrinsic columns, capped growth, spanning contributions and wrapping auto rows."""
+    columns = ["min-content", "max-content", {"fitContent": 120}, {"minmax": [40, "max-content"]}, "auto"] * 2
+    width = 1800
+    nodes = [{"parent": None, "style": {
+        "display": "grid", "boxSizing": "border-box", "width": width,
+        "gridTemplateColumns": columns, "gridAutoRows": "auto", "gridAutoFlow": "row",
+        "columnGap": 6, "rowGap": 4, "justifyItems": "stretch", "alignItems": "start",
+    }}]
+    for i in range(count):
+        row, column = divmod(i, len(columns))
+        span = 2 if i % 17 == 0 and column < len(columns) - 1 else 1
+        nodes.append({"parent": 0, "style": block(
+            gridColumnStart=column + 1, gridColumnEnd={"span": span},
+            gridRowStart=row + 1, gridRowEnd=row + 2,
+        ), "measure": {"minWidth": 16 + i % 17, "maxWidth": 120 + i % 181, "height": 12, "wrap": True}})
+    return document(nodes, width, 800)
+
+
+def grid_nested(count=1000):
+    """Three grid levels with intrinsic probes and separately retained scratch buffers."""
+    width = 1272
+    nodes = [{"parent": None, "style": {
+        "display": "grid", "boxSizing": "border-box", "width": width,
+        "gridTemplateColumns": [{"minmax": [0, {"fr": 1}]}] * 10,
+        "gridAutoRows": "auto", "gridAutoFlow": "row", "columnGap": 8, "rowGap": 8,
+        "justifyItems": "stretch", "alignItems": "stretch",
+    }}]
+    for i in range(count):
+        card = len(nodes)
+        nodes.append({"parent": 0, "style": {
+            "display": "grid", "boxSizing": "border-box",
+            "gridColumnStart": i % 10 + 1, "gridRowStart": i // 10 + 1,
+            "gridTemplateColumns": ["min-content", {"fitContent": 48}, {"minmax": [0, {"fr": 1}]}],
+            "gridAutoRows": "auto", "gridAutoFlow": "row", "columnGap": 4,
+            "justifyItems": "stretch", "alignItems": "start",
+        }})
+        for column, maximum in [(1, 80 + i % 21), (2, 48)]:
+            nodes.append({"parent": card, "style": block(gridColumnStart=column, gridRowStart=1),
+                          "measure": {"minWidth": 8, "maxWidth": maximum, "height": 8, "wrap": True}})
+        nested = len(nodes)
+        nodes.append({"parent": card, "style": {
+            "display": "grid", "boxSizing": "border-box", "minWidth": 0,
+            "gridColumnStart": 3, "gridRowStart": 1,
+            "gridTemplateColumns": ["auto", {"minmax": [0, {"fr": 1}]}],
+            "gridAutoRows": "auto", "gridAutoFlow": "row",
+            "justifyItems": "stretch", "alignItems": "start",
+        }})
+        for column, maximum in [(1, 32), (2, 64 + i % 17)]:
+            nodes.append({"parent": nested, "style": block(minWidth=0, gridColumnStart=column, gridRowStart=1),
+                          "measure": {"minWidth": 8, "maxWidth": maximum, "height": 12, "wrap": True}})
+    return document(nodes, width, 800)
+
+
 WORKLOADS = {
     "deep-random-1k": lambda: random_tree(1_000, 10, 1),
     "deep-random-10k": lambda: random_tree(10_000, 10, 2),
@@ -174,6 +229,8 @@ WORKLOADS = {
     "app-cards-500": lambda: app_cards(500),
     "grid-fixed": grid_fixed,
     "grid-fr": grid_fr,
+    "grid-intrinsic": grid_intrinsic,
+    "grid-nested": grid_nested,
 }
 
 

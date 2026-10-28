@@ -6,7 +6,7 @@ import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
 import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
 import block { layoutBlock }
 import flex { layoutFlex }
-import positioned { positionTree, reachableLimits, addOverflow }
+import positioned { positionTree, positionVisits, reachableLimits, addOverflow }
 import bfc { BfcState }
 import silk.option { Option }
 import layout_pass { LayoutPass, CacheKind, FullBoxGeometry, REUSE_INDEPENDENT, REUSE_IN_FLOW }
@@ -1090,13 +1090,16 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       shapes[restyled.get(at)] = keyShape(&nodes, restyled.get(at))
       at = at + 1
     }
+    if !restoring || restyled.length() != 0 { run positionVisits(&nodes, &mut facts.visits) }
   } else {
     run Incremental.markSubtrees(&nodes, &mut facts)
     run keyShapes(&nodes, &mut facts.keyShapes)
+    run positionVisits(&nodes, &mut facts.visits)
   }
   boxes.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
   boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
   boxes.keyShapes = Intrinsic.replace(facts.keyShapes, List<u8>.make())
+  boxes.visits = Intrinsic.replace(facts.visits, List<usize>.make())
   let mut input = Input.make(viewport)
   input.known = viewport
   input.blockRoot = true
@@ -1117,6 +1120,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       facts.reusable = Intrinsic.replace(boxes.reusable, List<u8>.make())
       facts.viewportFree = Intrinsic.replace(boxes.viewportFrees, List<bool>.make())
       facts.keyShapes = Intrinsic.replace(boxes.keyShapes, List<u8>.make())
+      facts.visits = Intrinsic.replace(boxes.visits, List<usize>.make())
       let usedWrites = Intrinsic.replace(boxes.writes, BoxWrites.make())
       drop boxes
       output.cache = move kept

@@ -136,7 +136,15 @@ impl Item {
 struct Line { start: usize, end: usize, count: usize, cross: f64, baseline: f64, lastBaseline: f64, baselineCross: f64, lastBaselineCross: f64 }
 impl Copy for Line {}
 effect fn collect(nodes: &BoxTree, id: usize, items: &mut List<Item>) ! OutOfMemoryError ? &mut Allocator {
+  // Size the list once instead of regrowing it for every large container.
+  let mut count: usize = 0
   let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    count = count + 1
+    child = nodes.node(child).nextSibling
+  }
+  run items.reserveExact(count)
+  child = nodes.node(id).firstChild
   while child != NO_NODE {
     if !outOfFlow(nodes.style(child)) { run items.append(Item.make(child)) }
     child = nodes.node(child).nextSibling

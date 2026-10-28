@@ -6,6 +6,7 @@ of a scenario's cycle and lays out again. Scenarios, for every workload:
   leaf       a leaf's padding toggles between 3 and 1
   container  a container halfway down the node list toggles its padding the same way
   resize     the viewport narrows by one pixel per step, so no width repeats
+  fluid-resize  the same with the root's width removed, so the resize reaches the boxes
 Geometry after the last step is compared on border boxes in absolute coordinates.
 
   python3 bench/compare/updates.py --silk build/.../release/silk_layout_cli \\
@@ -46,6 +47,13 @@ def scenarios(document):
     viewport = document["viewport"]
     result["resize"] = [{"viewport": {"width": viewport["width"] - step, "height": viewport["height"]}} for step in range(1, 41)]
     return result
+
+
+def fluid(document):
+    """The document with an auto-width root, which a resize reaches."""
+    nodes = [dict(node) for node in document["nodes"]]
+    nodes[0] = dict(nodes[0], style={key: value for key, value in nodes[0]["style"].items() if key != "width"})
+    return dict(document, nodes=nodes)
 
 
 def absolute(document, sources):
@@ -90,7 +98,13 @@ def main():
             document = W.WORKLOADS[name]()
             document_path = Path(tmp) / f"{name}.json"
             document_path.write_text(json.dumps(document))
-            for scenario, cycle in scenarios(document).items():
+            cases = [(scenario, cycle, document, document_path) for scenario, cycle in scenarios(document).items()]
+            if "width" in document["nodes"][0]["style"]:
+                fluid_document = fluid(document)
+                fluid_path = Path(tmp) / f"{name}-fluid.json"
+                fluid_path.write_text(json.dumps(fluid_document))
+                cases.append(("fluid-resize", scenarios(fluid_document)["resize"], fluid_document, fluid_path))
+            for scenario, cycle, document, document_path in cases:
                 cycle_path = Path(tmp) / f"{name}-{scenario}.json"
                 cycle_path.write_text(json.dumps(cycle))
                 silk_ns, silk_boxes = run_silk(args.silk, document, cycle, args.iterations)

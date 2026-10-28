@@ -365,6 +365,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
   sizing: &mut AxisSizing,
   crossSizing: &AxisSizing,
   template: &[GridTrack],
+  automatic: &[GridTrack],
   crossFinal: bool,
   work: &mut List<usize>,
 )
@@ -374,6 +375,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
   sizing.usedGap = max(0.0, resolve(sizing.gap, sizing.size, sizing.definite, sizing.gap.value))
   run initializeTracks(
     template,
+    automatic,
     sizing.origin,
     sizing.count,
     sizing.size,
@@ -399,10 +401,19 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     sizing.size = clamp(natural, sizing.minimum, sizing.maximum)
   }
   if sizing.resolveCyclic && !sizing.definite
-    && (sizing.gap.percent != 0.0 || cyclicTracks(template)) {
+    && (sizing.gap.percent != 0.0 || cyclicTracks(template)
+      || ((sizing.origin < 0 || sizing.count > template.length) && cyclicTracks(automatic))) {
     sizing.resolvedCyclic = true
     sizing.usedGap = max(0.0, resolve(sizing.gap, sizing.size, true, sizing.gap.value))
-    run initializeTracks(template, sizing.origin, sizing.count, sizing.size, true, &mut own.tracks)
+    run initializeTracks(
+      template,
+      automatic,
+      sizing.origin,
+      sizing.count,
+      sizing.size,
+      true,
+      &mut own.tracks,
+    )
     drop run collectContributions(
       nodes,
       &mut output,
@@ -485,7 +496,12 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   base.baselines = false
   let mut lease = run output.gridScratch.take(id, nodes.boxes.length())
   if lease.fresh {
-    lease.value.bounds = run collectItems(nodes, id, &mut lease.value.items)
+    lease.value.bounds = run collectItems(
+      nodes,
+      id,
+      &mut lease.value.items,
+      &mut lease.value.placement,
+    )
   }
   let bounds = lease.value.bounds
   let items = lease.value.items.asSlice()
@@ -533,6 +549,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   // §12.1's first column pass estimates rows using their definite maxima.
   run initializeTracks(
     template.rows.tracks.asSlice(),
+    template.autoRows.asSlice(),
     bounds.rowOrigin,
     bounds.rows,
     blockSize,
@@ -552,6 +569,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &mut columnSizing,
     &rowSizing,
     template.columns.tracks.asSlice(),
+    template.autoColumns.asSlice(),
     false,
     &mut lease.value.trackWork,
   )
@@ -568,6 +586,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &mut rowSizing,
     &columnSizing,
     template.rows.tracks.asSlice(),
+    template.autoRows.asSlice(),
     true,
     &mut lease.value.trackWork,
   )
@@ -599,6 +618,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       &mut columnSizing,
       &rowSizing,
       template.columns.tracks.asSlice(),
+      template.autoColumns.asSlice(),
       true,
       &mut lease.value.trackWork,
     )
@@ -630,6 +650,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
         &mut rowSizing,
         &columnSizing,
         template.rows.tracks.asSlice(),
+        template.autoRows.asSlice(),
         true,
         &mut lease.value.trackWork,
       )

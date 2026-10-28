@@ -1,0 +1,230 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.u64
+import silk.u32
+import silk.usize
+import grid_style { MAX_GRID_TRACKS }
+import tree { NO_NODE }
+
+struct Row {
+  slot: usize,
+  past: usize,
+}
+
+impl Copy for Row {}
+
+// Only rows actually reserved have bitmap words. The bounded row lookup is
+// separate from the flat bitmap, so a distant definite row costs no empty cells.
+pub struct Occupancy {
+  rows: List<Row>,
+  words: List<u64>,
+  stride: usize,
+  used: usize,
+  fullPrefix: usize,
+}
+
+fn mask(first: usize, end: usize) -> u64 {
+  return u64.bitAnd(
+    u64.shiftLeft(u64.MAX, usize.toU64(first)),
+    u64.shiftRight(u64.MAX, usize.toU64(64 - end)),
+  )
+}
+
+impl Occupancy {
+  pub fn make() -> Occupancy {
+    return Occupancy {
+      rows: List<Row>.make(),
+      words: List<u64>.make(),
+      stride: 1,
+      used: 0,
+      fullPrefix: 0,
+    }
+  }
+
+  pub fn clear(self: &mut Self) {
+    self.rows.clear()
+    self.words.clear()
+    self.stride = 1
+    self.used = 0
+    self.fullPrefix = 0
+  }
+
+  // Geometric minor-axis growth is needed while step 2 can extend columns.
+  // Repack backwards in the same retained allocation, without a second matrix.
+  effect fn widen(self: &mut Self, end: usize)
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    let required = (end + 63) / 64
+    if required <= self.stride {
+      return
+    }
+    let old = self.stride
+    let mut next = old
+    while next < required {
+      next = next * 2
+    }
+    let maximum = (MAX_GRID_TRACKS + 63) / 64
+    if next > maximum {
+      next = maximum
+    }
+    run self.words.appendRepeated(0, self.used * (next - old))
+    let words = self.words.asMutSlice()
+    let mut slot = self.used
+    while slot > 0 {
+      slot = slot - 1
+      let mut word = next
+      while word > 0 {
+        word = word - 1
+        if word < old {
+          words[slot * next + word] = words[slot * old + word]
+        } else {
+          words[slot * next + word] = 0
+        }
+      }
+    }
+    self.stride = next
+  }
+
+  pub effect fn reserve(
+    self: &mut Self,
+    firstRow: usize,
+    lastRow: usize,
+    firstColumn: usize,
+    lastColumn: usize,
+  )
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    run self.widen(lastColumn)
+    if lastRow > self.rows.length() {
+      let additional = lastRow - self.rows.length()
+      run self.rows.appendRepeated(Row { slot: NO_NODE, past: 0 }, additional)
+    }
+    let mut row = firstRow
+    while row < lastRow {
+      let mut slot = self.rows.asSlice()[row].slot
+      if slot == NO_NODE {
+        slot = self.used
+        run self.words.appendRepeated(0, self.stride)
+        self.used = self.used + 1
+        let rows = self.rows.asMutSlice()
+        rows[row].slot = slot
+      }
+      let mut column = firstColumn
+      while column < lastColumn {
+        let word = column / 64
+        let mut end = (word + 1) * 64
+        if end > lastColumn {
+          end = lastColumn
+        }
+        let at = slot * self.stride + word
+        let bits = mask(column % 64, end - word * 64)
+        let words = self.words.asMutSlice()
+        words[at] = u64.bitOr(words[at], bits)
+        column = end
+      }
+      row = row + 1
+    }
+  }
+
+  // Return the end of an occupied run intersecting the candidate, or its
+  // original start when free. A new candidate before that run's end must still
+  // overlap; skipping it avoids probing every cell in a wide occupied area.
+  pub fn blockedEnd(
+    self: &Self,
+    firstRow: usize,
+    lastRow: usize,
+    firstColumn: usize,
+    lastColumn: usize,
+  ) -> usize {
+    let mut row = firstRow
+    while row < lastRow && row < self.rows.length() {
+      let slot = self.rows.asSlice()[row].slot
+      if slot != NO_NODE {
+        let mut column = firstColumn
+        while column < lastColumn && column / 64 < self.stride {
+          let word = column / 64
+          let mut end = (word + 1) * 64
+          if end > lastColumn {
+            end = lastColumn
+          }
+          let occupied = u64.bitAnd(
+            self.words.asSlice()[slot * self.stride + word],
+            mask(column % 64, end - word * 64),
+          )
+          if occupied != 0 {
+            let mut runEnd = word * 64 + 64 - u32.toUsize(u64.leadingZeros(occupied))
+            while runEnd < MAX_GRID_TRACKS && runEnd / 64 < self.stride {
+              let nextWord = runEnd / 64
+              let offset = runEnd % 64
+              let free = u64.shiftRight(
+                u64.bitNot(self.words.asSlice()[slot * self.stride + nextWord]),
+                usize.toU64(offset),
+              )
+              let available = 64 - offset
+              let mut count = u32.toUsize(u64.trailingZeros(free))
+              if count > available {
+                count = available
+              }
+              runEnd = runEnd + count
+              if count < available {
+                break
+              }
+            }
+            if runEnd > MAX_GRID_TRACKS {
+              runEnd = MAX_GRID_TRACKS
+            }
+            return runEnd
+          }
+          column = end
+        }
+      }
+      row = row + 1
+    }
+    return firstColumn
+  }
+
+  // Step-2 sparse history is keyed by row start, separately from cell occupancy.
+  pub fn past(self: &Self, row: usize) -> usize {
+    if row < self.rows.length() {
+      return self.rows.asSlice()[row].past
+    }
+    return 0
+  }
+
+  pub fn remember(self: &mut Self, row: usize, end: usize) {
+    let rows = self.rows.asMutSlice()
+    if end > rows[row].past {
+      rows[row].past = end
+    }
+  }
+
+  // Valid only after step 3 fixes the minor extent. No nonempty rectangle can
+  // start in an entirely occupied leading row, even under dense packing.
+  pub fn denseStart(self: &mut Self, width: usize) -> usize {
+    while self.fullPrefix < self.rows.length() {
+      let slot = self.rows.asSlice()[self.fullPrefix].slot
+      if slot == NO_NODE {
+        break
+      }
+      let mut column: usize = 0
+      while column < width {
+        let word = column / 64
+        if word >= self.stride {
+          return self.fullPrefix
+        }
+        let mut end = (word + 1) * 64
+        if end > width {
+          end = width
+        }
+        let expected = mask(0, end - word * 64)
+        if u64.bitAnd(self.words.asSlice()[slot * self.stride + word], expected) != expected {
+          return self.fullPrefix
+        }
+        column = end
+      }
+      self.fullPrefix = self.fullPrefix + 1
+    }
+    return self.fullPrefix
+  }
+}

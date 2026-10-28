@@ -1,7 +1,7 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import silk.usize
-import grid_placement { GridItem, GridBounds }
+import grid_placement { GridItem, GridBounds, PlacementScratch }
 import grid_tracks { TrackState, TrackContribution }
 
 pub struct GridAxisScratch {
@@ -28,6 +28,7 @@ impl GridAxisScratch {
 pub struct GridScratch {
   pub items: List<GridItem>,
   pub bounds: GridBounds,
+  pub placement: PlacementScratch,
   pub columns: GridAxisScratch,
   pub rows: GridAxisScratch,
   pub trackWork: List<usize>,
@@ -38,6 +39,7 @@ impl GridScratch {
     return GridScratch {
       items: List<GridItem>.make(),
       bounds: GridBounds.empty(),
+      placement: PlacementScratch.make(),
       columns: GridAxisScratch.make(),
       rows: GridAxisScratch.make(),
       trackWork: List<usize>.make(),

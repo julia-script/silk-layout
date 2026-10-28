@@ -200,7 +200,7 @@ test effect fn gridInitializationPreservesCapsAndPercentageIndefiniteness()
     GridTrack.breadth(percent),
     GridTrack.fitContent(GridBreadth.fixed(27.0)),
   ]
-  run initializeTracks(&explicit, 0, 3, 100.0, false, &mut tracks)
+  run initializeTracks(&explicit, &[], 0, 3, 100.0, false, &mut tracks)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let values = tracks.asSlice()
   run Testing.expect(

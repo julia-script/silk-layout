@@ -122,6 +122,7 @@ fn initialize(track: &GridTrack, basis: f64, definite: bool) -> TrackState {
 
 pub effect fn initializeTracks(
   explicit: &[GridTrack],
+  automatic: &[GridTrack],
   origin: i32,
   count: usize,
   basis: f64,
@@ -146,10 +147,21 @@ pub effect fn initializeTracks(
     state.maximum = GridBreadthKind.Auto
     state.growthLimit = UNBOUNDED
     state.cap = UNBOUNDED
-    if index >= leading {
+    if index < leading {
+      if automatic.length > 0 {
+        let source = automatic.length - 1 - (leading - index - 1) % automatic.length
+        state = initialize(&automatic[source], basis, definite)
+      }
+    } else {
       let source = index - leading + explicitStart
       if source < explicit.length {
         state = initialize(&explicit[source], basis, definite)
+      } else if automatic.length > 0 {
+        state = initialize(
+          &automatic[(source - explicit.length) % automatic.length],
+          basis,
+          definite,
+        )
       }
     }
     run result.append(state)

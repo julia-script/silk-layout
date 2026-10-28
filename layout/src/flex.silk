@@ -814,19 +814,20 @@ fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
 }
 pub effect fn layoutFlex<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if nodes.node(id).firstChild == NO_NODE && !input.fragmentation.active && input.fragmentation.boundaryProbe == BoundaryProbe.None { return emptyFlex(nodes.style(id), &box) }
+  // placeFlexLines hands the scratch lists back, so the pass result is
+  // returned straight into the caller's slot.
   let mut scratch = FlexScratch { items: List<Item>.make(), lines: List<Line>.make() }
   match output.flexScratch.pop() {
     Option<FlexScratch>.Some { value: spare } => { scratch = move spare }
     Option<FlexScratch>.None => {}
   }
-  let result = run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &box, false, &mut scratch.items, &mut scratch.lines)
-  run output.flexScratch.append(move scratch)
-  return result
+  return run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &box, false, move scratch)
 }
 
 // A flex pass's item and line lists, kept in LayoutPass between passes.
 pub struct FlexScratch { items: List<Item>, lines: List<Line> }
-effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, resolvedIntrinsicInline: bool, items: &mut List<Item>, lines: &mut List<Line>) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, resolvedIntrinsicInline: bool, owned: FlexScratch) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut scratch = move owned
   let style = nodes.style(id)
   let axis = axes(style)
   let inlineHorizontal = style.writingMode == WritingMode.HorizontalTb
@@ -864,10 +865,10 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   // length-percentage expression: a calc() gap retains its length term.
   let mainGap = max(0.0, resolve(mainGapDimension, main, mainDefinite, mainGapDimension.value))
   let crossGap = max(0.0, resolve(crossGapDimension, cross, crossDefinite && !(resolvedIntrinsicInline && !axis.row), crossGapDimension.value))
-  items.clear()
-  run collect(nodes, id, &mut items)
-  let count = items.length()
-  sort(items.asMutSlice(), nodes, count)
+  scratch.items.clear()
+  run collect(nodes, id, &mut scratch.items)
+  let count = scratch.items.length()
+  sort(scratch.items.asMutSlice(), nodes, count)
   // §9.9.2: wrapped columns use the largest item contribution as their
   // intrinsic cross constraint, rather than an unconstrained width per line.
   let columnIntrinsic = !axis.row && style.flexWrap != FlexWrap.NoWrap && !crossKnown && crossConstraint.kind != AvailableKind.Definite
@@ -875,7 +876,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   if columnIntrinsic {
     let mut crossIndex: usize = 0
     while crossIndex < count {
-      let child = items.get(crossIndex).id
+      let child = scratch.items.get(crossIndex).id
       let childBox = resolveBox(nodes.style(child), &childInput)
       // §9.9.2 uses ordinary cross-size contributions (Sizing §5.2),
       // not §9.9.3's main-axis maximum of content and preferred sizes.
@@ -893,8 +894,8 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   let mut index: usize = 0
   let mut hasCollapsed = false
   while index < count {
-    run prepare(nodes, &mut output, &mut measurer, &mut items.asMutSlice()[index], &childInput, &axis, style, mainConstraint, !mainKnown, mainDefinite)
-    hasCollapsed = hasCollapsed || items.asSlice()[index].collapsed
+    run prepare(nodes, &mut output, &mut measurer, &mut scratch.items.asMutSlice()[index], &childInput, &axis, style, mainConstraint, !mainKnown, mainDefinite)
+    hasCollapsed = hasCollapsed || scratch.items.asSlice()[index].collapsed
     index = index + 1
   }
   if !mainKnown {
@@ -905,7 +906,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     let mut activeCount: usize = 0
     index = 0
     while index < count {
-      let item = &items.asSlice()[index]
+      let item = &scratch.items.asSlice()[index]
       if !item.collapsed {
         let mut contributionSize = item.maxContribution
         if mainConstraint.kind == AvailableKind.MinContent { contributionSize = item.minContribution }
@@ -929,49 +930,49 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   // A row's inline extent is already known; avoid measuring cross sizes
   // that the percentage-resolution pass would immediately discard.
   let resolveInlineBeforeCross = axis.row && !mainKnown && !intrinsicInline
-  lines.clear()
+  scratch.lines.clear()
   let mut collapsed = false
   while !resolveInlineBeforeCross {
-    if input.fragmentation.active && input.performLayout && count > 0 && output.resumes.get(items.get(0).id).flexLine != NO_NODE {
-      run collectOwnedLines(items.asSlice(), &output, &mut lines, collapsed)
+    if input.fragmentation.active && input.performLayout && count > 0 && output.resumes.get(scratch.items.get(0).id).flexLine != NO_NODE {
+      run collectOwnedLines(scratch.items.asSlice(), &output, &mut scratch.lines, collapsed)
     } else {
-      run collectLines(items.asSlice(), count, &mut lines, main, mainGap, style.flexWrap != FlexWrap.NoWrap && !(columnIntrinsic && crossConstraint.kind == AvailableKind.MinContent), collapsed)
+      run collectLines(scratch.items.asSlice(), count, &mut scratch.lines, main, mainGap, style.flexWrap != FlexWrap.NoWrap && !(columnIntrinsic && crossConstraint.kind == AvailableKind.MinContent), collapsed)
     }
     let mut lineIndex: usize = 0
-    let mut totalCross = gaps(lines.length(), crossGap)
-    while lineIndex < lines.length() {
-      let line = lines.get(lineIndex)
-      run deferredMinimums(nodes, &mut output, &mut measurer, items.asMutSlice(), &line, &childInput, &axis, main, mainGap, collapsed)
-      resolveFlexible(items.asMutSlice(), &line, main, mainGap, collapsed)
-      let mut measuredLine = run crossSizes(nodes, &mut output, &mut measurer, items.asMutSlice(), &line, &childInput, &axis, style, collapsed, style.flexWrap == FlexWrap.NoWrap && crossKnown && !input.fragmentation.active)
+    let mut totalCross = gaps(scratch.lines.length(), crossGap)
+    while lineIndex < scratch.lines.length() {
+      let line = scratch.lines.get(lineIndex)
+      run deferredMinimums(nodes, &mut output, &mut measurer, scratch.items.asMutSlice(), &line, &childInput, &axis, main, mainGap, collapsed)
+      resolveFlexible(scratch.items.asMutSlice(), &line, main, mainGap, collapsed)
+      let mut measuredLine = run crossSizes(nodes, &mut output, &mut measurer, scratch.items.asMutSlice(), &line, &childInput, &axis, style, collapsed, style.flexWrap == FlexWrap.NoWrap && crossKnown && !input.fragmentation.active)
       if style.flexWrap == FlexWrap.NoWrap {
         if crossKnown { measuredLine.cross = cross }
         else { measuredLine.cross = max(0.0, clamp(measuredLine.cross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
       }
       totalCross = totalCross + measuredLine.cross
-      lines.set(lineIndex, measuredLine)
+      scratch.lines.set(lineIndex, measuredLine)
       lineIndex = lineIndex + 1
     }
     if !crossKnown { cross = max(0.0, clamp(totalCross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
     if columnIntrinsic && crossConstraint.kind == AvailableKind.MinContent {
       cross = max(0.0, clamp(intrinsicCross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset)
     }
-    if (style.alignContent == Align.Stretch || style.alignContent == Align.Normal) && cross > totalCross && lines.length() > 0 {
-      let extra = (cross - totalCross) / usize.toF64(lines.length())
+    if (style.alignContent == Align.Stretch || style.alignContent == Align.Normal) && cross > totalCross && scratch.lines.length() > 0 {
+      let extra = (cross - totalCross) / usize.toF64(scratch.lines.length())
       lineIndex = 0
-      while lineIndex < lines.length() { let mut line = lines.get(lineIndex)
+      while lineIndex < scratch.lines.length() { let mut line = scratch.lines.get(lineIndex)
         line.cross = line.cross + extra
-        lines.set(lineIndex, line)
+        scratch.lines.set(lineIndex, line)
         lineIndex = lineIndex + 1 }
     }
     if !hasCollapsed || collapsed { break }
     lineIndex = 0
-    while lineIndex < lines.length() {
-      let line = lines.get(lineIndex)
+    while lineIndex < scratch.lines.length() {
+      let line = scratch.lines.get(lineIndex)
       index = line.start
-      while index < line.end { let mut item = items.get(index)
+      while index < line.end { let mut item = scratch.items.get(index)
         if item.collapsed { item.strut = line.cross }
-        items.set(index, item)
+        scratch.items.set(index, item)
         index = index + 1 }
       lineIndex = lineIndex + 1
     }
@@ -992,17 +993,19 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
       resolvedBox.size.height = inlineSize
       resolvedBox.size.heightDefinite = true
     }
-    return run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &resolvedBox, true, &mut items, &mut lines)
+    return run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &resolvedBox, true, move scratch)
   }
   if input.fragmentation.active && input.performLayout {
-    return run layoutFlexFragment(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, axis, items.asSlice(), lines.asSlice(), main, cross, mainGap, crossGap, collapsed)
+    return run layoutFlexFragment(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, axis, scratch.items.asSlice(), scratch.lines.asSlice(), main, cross, mainGap, crossGap, collapsed)
   }
-  return run placeFlexLines(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, &axis, items.asSlice(), lines.asSlice(), main, cross, mainGap, crossGap, collapsed)
+  return run placeFlexLines(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, &axis, move scratch, main, cross, mainGap, crossGap, collapsed)
 }
 
 // layoutFlexPass's line and item placement, returning one local so the result
 // is built in the caller's slot.
-effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: &Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: &Axes, scratch: FlexScratch, main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let items = scratch.items.asSlice()
+  let lines = scratch.lines.asSlice()
   let style = nodes.style(id)
   let mainInset = edgeTotal(box.inset, axis.horizontal)
   let crossInset = edgeTotal(box.inset, !axis.horizontal)
@@ -1029,7 +1032,10 @@ effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   }
   // A size probe that does not read baselines needs only the container size;
   // item placement and baselines would be discarded.
-  if !input.performLayout && !input.baselines { return result }
+  if !input.performLayout && !input.baselines {
+    run output.flexScratch.append(move scratch)
+    return result
+  }
   lineIndex = 0
   while lineIndex < lines.length {
     let line = lines[lineIndex]
@@ -1113,6 +1119,7 @@ effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     }
     run output.resumes.set(id, state)
   }
+  run output.flexScratch.append(move scratch)
   return result
 }
 

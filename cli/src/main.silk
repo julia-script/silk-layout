@@ -615,11 +615,48 @@ effect fn execute(document: &Value)
   run writeOutput(&tree, &output)
 }
 
+// Collects output writes so a document is a few write calls, not one per
+// value. Call flush before it goes out of scope.
+struct BufferedStdout {
+  inner: StdoutWriter,
+  bytes: [u8; 65536],
+  length: usize,
+}
+impl BufferedStdout {
+  fn make() -> BufferedStdout {
+    return BufferedStdout { inner: StdoutWriter.make(), bytes: [0; 65536], length: 0 }
+  }
+  effect fn drain(self: &mut Self) -> () ! WriterError {
+    if self.length == 0 { return () }
+    run Writer.writeAll(Slice.view<u8>(&self.bytes, 0, self.length)) |> Effect.provideMut<Writer>(&mut self.inner)
+    self.length = 0
+    return ()
+  }
+}
+impl Writer for BufferedStdout {
+  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
+    if val.length > 65536 - self.length {
+      run self.drain()
+      if val.length > 65536 {
+        run Writer.writeAll(val) |> Effect.provideMut<Writer>(&mut self.inner)
+        return ()
+      }
+    }
+    Slice.copyInto<u8>(&mut self.bytes, self.length, val)
+    self.length = self.length + val.length
+    return ()
+  }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
+    run self.drain()
+    return ()
+  }
+}
+
 effect fn application() -> i32
   ! StreamReadError | OutOfMemoryError | JsonError | WriterError | ProtocolError | InvalidNode | TextError | FragmentationError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut input = OsStandardInput.make()
-  let mut output = StdoutWriter.make()
+  let mut output = BufferedStdout.make()
   let bytes = run readDocument()
     |> Effect.provideMut<StandardInput>(&mut input)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -628,6 +665,7 @@ effect fn application() -> i32
   run execute(&document)
     |> Effect.provideMut<Allocator>(&mut allocator)
     |> Effect.provideMut<Writer>(&mut output)
+  run output.drain()
   return 0
 }
 

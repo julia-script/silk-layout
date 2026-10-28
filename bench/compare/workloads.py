@@ -4,11 +4,13 @@
 Each workload is a silk-layout CLI document (viewport + flat node list). Every style
 property the harnesses translate is written explicitly, so engine defaults (for example
 yoga's column direction and zero flex-shrink) do not change the layout being measured.
-Supported properties: display (block | flex), boxSizing (always border-box, the taffy and yoga default), flexDirection, flexWrap, flexGrow,
-flexShrink, flexBasis, width, height, minWidth, minHeight, maxWidth, maxHeight,
-padding, margin, border, rowGap, columnGap, alignItems, justifyContent, plus leaf
-"measure" fixtures {minWidth, maxWidth, height}: width is the available width clamped
-to [minWidth, maxWidth] (min-content = minWidth, max-content = maxWidth), height fixed.
+Supported properties: display (block | flex | grid), boxSizing (always border-box),
+flexDirection, flexWrap, flexGrow, flexShrink, flexBasis, width, height, minWidth,
+minHeight, maxWidth, maxHeight, padding, margin, border, rowGap, columnGap,
+alignItems, justifyContent, plus numeric grid placement, fixed/percent/fr/minmax
+tracks, auto rows, and item/self alignment. Grid workloads compare only with taffy.
+Leaf "measure" fixtures {minWidth, maxWidth, height, wrap?} clamp available width
+to [minWidth, maxWidth]; wrap=true multiplies height by the synthetic line count.
 Dimensions are numbers (px), "auto", or {"percent": fraction}.
 """
 import json
@@ -117,6 +119,49 @@ def app_cards(cards):
     return document(nodes, 1200, 800)
 
 
+def grid_fixed(count=10_000):
+    """Ten fixed columns and fixed 160px rows, with explicitly placed wrapping leaves."""
+    columns = [64, 96, 128, 160, 192] * 2
+    width = sum(columns) + 6 * (len(columns) - 1)
+    nodes = [{"parent": None, "style": {
+        "display": "grid", "boxSizing": "border-box", "width": width,
+        "gridTemplateColumns": columns,
+        "gridTemplateRows": [160] * ((count + len(columns) - 1) // len(columns)),
+        "gridAutoRows": 160, "gridAutoFlow": "row",
+        "columnGap": 6, "rowGap": 4,
+        "justifyItems": "stretch", "alignItems": "stretch",
+    }}]
+    for i in range(count):
+        row, column = divmod(i, len(columns))
+        nodes.append({"parent": 0, "style": block(
+            minWidth=0,
+            gridColumnStart=column + 1, gridColumnEnd={"span": 1},
+            gridRowStart=row + 1, gridRowEnd=row + 2,
+            alignSelf=("start", "end", "center", "stretch")[i % 4],
+        ), "measure": {"minWidth": 16, "maxWidth": 420 + i % 181, "height": 12, "wrap": True}})
+    return document(nodes, width, 800)
+
+
+def grid_fr(count=10_000):
+    """Ten 40/80/120/160/200px columns (twice), with wrapping text sizing auto rows."""
+    columns = [{"minmax": [0, {"fr": 1}]}, {"fr": 2}, {"fr": 3}, {"fr": 4}, {"fr": 5}] * 2
+    width = 1254  # (1254 - nine 6px gaps) / 30fr = 40px/fr.
+    nodes = [{"parent": None, "style": {
+        "display": "grid", "boxSizing": "border-box", "width": width,
+        "gridTemplateColumns": columns, "gridAutoRows": ["auto"], "gridAutoFlow": "row",
+        "columnGap": 6, "rowGap": 4,
+        "justifyItems": "stretch", "alignItems": "start",
+    }}]
+    for i in range(count):
+        row, column = divmod(i, len(columns))
+        nodes.append({"parent": 0, "style": block(
+            minWidth=0,
+            gridColumnStart={"line": column + 1}, gridColumnEnd=column + 2,
+            gridRowStart=row + 1, gridRowEnd={"span": 1},
+        ), "measure": {"minWidth": 16, "maxWidth": 720 + i % 241, "height": 12, "wrap": True}})
+    return document(nodes, width, 800)
+
+
 WORKLOADS = {
     "deep-random-1k": lambda: random_tree(1_000, 10, 1),
     "deep-random-10k": lambda: random_tree(10_000, 10, 2),
@@ -127,6 +172,8 @@ WORKLOADS = {
     "nested-chain-200": lambda: nested_chain(200),
     "measured-wrap-1k": lambda: measured_wrap(1_000),
     "app-cards-500": lambda: app_cards(500),
+    "grid-fixed": grid_fixed,
+    "grid-fr": grid_fr,
 }
 
 

@@ -689,3 +689,37 @@ test effect fn blockFlowChildrenBelowFloatsAreCopied() ! OutOfMemoryError | Text
   // margin could lift the last block into it, so that one is laid out.
   run Testing.expect(output.stats.reusedLayouts == 1, "only the block clear of the float and without negative margins is copied")
 }
+
+test effect fn insertedNodesKeepTheirSiblingsLayouts() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.width = Dimension.px(300.0)
+  let mut tree = run Tree.make(move style) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut panelStyle = Style.make()
+  panelStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  let panel = run tree.append(root, move panelStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let leaf = run tree.append(panel, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(leaf, 0)
+  let list = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let first = run tree.append(list, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(first, 0)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 20.0, maximum: 60.0, height: 18.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let added = run tree.append(list, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(added, 0)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.stats.reusedLayouts >= 1, "the untouched panel is copied after an insertion elsewhere")
+  let mut fresh = LayoutTree.make()
+  run compute(&tree, &mut fresh, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(fresh.fragments.values.length() == output.fragments.values.length(), "an insertion yields as many fragments as a fresh layout")
+  let sources = [leaf, first, added, panel, list]
+  let mut index: usize = 0
+  while index < sources.length {
+    let a = run output.sourceBounds(sources[index])
+    let b = run fresh.sourceBounds(sources[index])
+    run Testing.expect(a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height, "an insertion lays out like a fresh tree")
+    index = index + 1
+  }
+}

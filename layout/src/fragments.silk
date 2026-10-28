@@ -254,6 +254,38 @@ impl FragmentArena {
     }
   }
 
+  // Renumbers the boxes fragments belong to: `toNew[old]` is a box's new
+  // index or NO_NODE, `toOld[new]` the reverse.
+  pub effect fn remapBoxes(self: &mut Self, toOld: &[usize], toNew: &[usize]) ! OutOfMemoryError ? &mut Allocator {
+    let values = self.values.asMutSlice()
+    let mut index: usize = 0
+    while index < values.length {
+      let box = values[index].box
+      if box != NO_NODE {
+        if box < toNew.length { values[index].box = toNew[box] } else { values[index].box = NO_NODE }
+      }
+      index = index + 1
+    }
+    let mut first = List<usize>.make()
+    let mut last = List<usize>.make()
+    run first.reserveExact(toOld.length)
+    run last.reserveExact(toOld.length)
+    let mut id: usize = 0
+    while id < toOld.length {
+      let from = toOld[id]
+      if from != NO_NODE && from < self.firstByBox.length() {
+        run first.append(self.firstByBox.get(from))
+        run last.append(self.lastByBox.get(from))
+      } else {
+        run first.append(NO_NODE)
+        run last.append(NO_NODE)
+      }
+      id = id + 1
+    }
+    self.firstByBox = move first
+    self.lastByBox = move last
+  }
+
   // Replaces the target's contents with a copy of this arena, reusing its capacity.
   pub effect fn copyInto(self: &Self, target: &mut FragmentArena) ! OutOfMemoryError ? &mut Allocator {
     target.values.clear()

@@ -21,6 +21,8 @@ pub struct Fixtures {
   pub values: List<Fixture>, pub objects: List<NaturalDimensions>,
   pub fonts: List<FontMetrics>,
   pub autoScrollbars: ScrollbarMetrics, pub thinScrollbars: ScrollbarMetrics,
+  // Provider call counts, reported by benchmark mode.
+  pub measureCalls: usize, pub analyzeCalls: usize, pub shapeCalls: usize,
 }
 
 pub effect fn parseFont(value: &Value) -> FontMetrics ! ProtocolError {
@@ -199,6 +201,7 @@ impl Measure for Fixtures {
     return provider.objects.get(key)
   }
   fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    provider.measureCalls = provider.measureCalls + 1
     let fixture = provider.values.asSlice()[key]
     let mut width = fixture.maxWidth
     if request.width.kind == AvailableKind.MinContent { width = fixture.minWidth }
@@ -251,11 +254,13 @@ impl TextMeasure for Fixtures {
 
   effect fn analyze(provider: &mut Self, context: TextContext, output: &mut List<TextBreak>) -> TextAnalysis
     ! OutOfMemoryError | TextError ? &mut Allocator {
+    provider.analyzeCalls = provider.analyzeCalls + 1
     return run TextProfile.analyze(context, provider.fonts.asSlice(), &mut output)
   }
 
   effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>)
     ! OutOfMemoryError | TextError ? &mut Allocator {
+    provider.shapeCalls = provider.shapeCalls + 1
     run TextProfile.shape(request, provider.fonts.asSlice(), &mut output)
   }
 }

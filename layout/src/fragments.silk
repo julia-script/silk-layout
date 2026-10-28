@@ -192,6 +192,18 @@ impl FragmentArena {
     }
   }
 
+  // Replaces the target's contents with a copy of this arena, reusing its capacity.
+  pub effect fn copyInto(self: &Self, target: &mut FragmentArena) ! OutOfMemoryError ? &mut Allocator {
+    target.values.clear()
+    target.texts.clear()
+    target.firstByBox.clear()
+    target.lastByBox.clear()
+    run target.values.appendSlice(self.values.asSlice())
+    run target.texts.appendSlice(self.texts.asSlice())
+    run target.firstByBox.appendSlice(self.firstByBox.asSlice())
+    run target.lastByBox.appendSlice(self.lastByBox.asSlice())
+  }
+  pub fn boxCount(self: &Self) -> usize { return self.firstByBox.length() }
   pub fn first(self: &Self, box: usize) -> usize { return self.firstByBox.get(box) }
   pub fn last(self: &Self, box: usize) -> usize { return self.lastByBox.get(box) }
   pub fn get(self: &Self, id: FragmentId) -> &Fragment { return &self.values.asSlice()[id.index] }

@@ -7,17 +7,15 @@ import silk.usize
 import context { Input, overflowForAxis, scrollbarGutter }
 import geometry { Layout, Point, Rect, OptionalSize, AvailableSpace, AvailableKind, ScrollbarMetrics, ResolvedEdges, max }
 import style { Overflow, ScrollbarWidth }
-import tree { Node, NO_NODE }
+import tree { Node, NO_NODE, LayoutStats }
 import box_tree { BoxTree }
 import fragments { Fragment, FragmentArena, FragmentKind }
 import fragmentation { ResumeStore, ResumeCheckpoint, StaticAnchor, Fragmentainers, Fragmentainer, FragmentAncestor, FragmentationError }
 import breaks { ForcedBreaks, PageSide, BreakKinds }
 import inline_prepared { PreparedInline }
 
-const ABSENT: usize = usize.MAX
-pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
-struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize }
-impl Copy for Entry {}
+pub import layout_cache { CacheKind }
+import layout_cache { LayoutCache, Snapshot, FinalLayout }
 
 struct ScrollbarSelection { horizontal: bool, vertical: bool }
 impl Copy for ScrollbarSelection {}
@@ -50,21 +48,8 @@ pub struct PassCheckpoint {
   scrollbars: usize,
 }
 impl Copy for PassCheckpoint {}
-fn sameOptional(a: &OptionalSize, b: &OptionalSize) -> bool {
-  return a.widthDefinite == b.widthDefinite && a.heightDefinite == b.heightDefinite && (!a.widthDefinite || a.width == b.width) && (!a.heightDefinite || a.height == b.height)
-}
-fn sameAvailable(a: &AvailableSpace, b: &AvailableSpace) -> bool {
-  return a.kind == b.kind && (a.kind != AvailableKind.Definite || a.value == b.value)
-}
-fn sameInput(a: &Input, b: &Input) -> bool {
-  if a.parentMaxSize.width != b.parentMaxSize.width || a.parentMaxSize.height != b.parentMaxSize.height || a.scrollportSize.width != b.scrollportSize.width || a.scrollportSize.height != b.scrollportSize.height { return false }
-  return sameOptional(&a.parent, &b.parent) && sameOptional(&a.initialContainingBlock, &b.initialContainingBlock) && sameOptional(&a.known, &b.known) && sameAvailable(&a.availableWidth, &b.availableWidth) && sameAvailable(&a.availableHeight, &b.availableHeight) && a.blockRoot == b.blockRoot && a.blockify == b.blockify && a.atomicInline == b.atomicInline && a.intrinsicWidth == b.intrinsicWidth && a.intrinsicHeight == b.intrinsicHeight && a.shrinkToFit == b.shrinkToFit && a.indefiniteWidth == b.indefiniteWidth && a.indefiniteHeight == b.indefiniteHeight && a.parentWritingMode == b.parentWritingMode && a.parentTextOrientation == b.parentTextOrientation && a.parentJustifyItems == b.parentJustifyItems && a.parentJustifyItemsSafety == b.parentJustifyItemsSafety
-}
-
-// Results are memoized only for size-only, independent formatting-context
-// entries. Full layout always visits descendants; shared BFC participants
-// never bypass their exclusion/clearance side effects. The cache dies with
-// this compute pass, so replacing a measurement provider needs no invalidation.
+// Size-only results go to `cache`; compute lends it the LayoutTree's cache so
+// clean entries survive between computes (see LayoutCache).
 pub struct LayoutPass<'a, 'source> {
   pub boxes: &'a mut [Layout],
   pub fragments: &'a mut FragmentArena,
@@ -78,38 +63,33 @@ pub struct LayoutPass<'a, 'source> {
   fullIndices: List<usize>,
   pub inlinePrepared: List<List<PreparedInline<'source>>>,
   lineLimits: List<LineLimit>,
-  heads: List<usize>,
-  entries: List<Entry>,
+  pub cache: LayoutCache,
+  // The previous compute's normal-flow result, the one being captured, and
+  // which boxes head subtrees that may be copied (see reuseFinal).
+  pub previous: Snapshot, pub next: Snapshot, pub reusable: List<bool>,
   anchors: List<StaticAnchor>,
   selections: List<ScrollbarSelection>,
   frameSelections: List<List<FrameScrollbarSelection>>,
   scrollbarSnapshots: List<ScrollbarSnapshot>,
   pub hasAutoScrollbars: bool, pub needsRelayout: bool,
+  pub stats: LayoutStats,
 }
 impl<'a, 'source> LayoutPass<'a, 'source> {
   pub effect fn make(boxes: &'a mut [Layout], fragments: &'a mut FragmentArena, sources: &'source [Node]) -> LayoutPass<'a, 'source> ! OutOfMemoryError ? &mut Allocator {
     // The paragraph cache may borrow text from these source nodes.
     drop sources
-    let mut heads = List<usize>.make()
-    run heads.reserveExact(boxes.length)
-    let mut index: usize = 0
-    while index < boxes.length {
-      run heads.append(ABSENT)
-      index = index + 1
-    }
-    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), heads: move heads, entries: List<Entry>.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false }
+    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<bool>.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero() }
   }
   pub effect fn beginFrame(self: &mut Self, frame: usize) ! OutOfMemoryError ? &mut Allocator {
-    if self.frame == NO_NODE {
-      run self.resumes.prepare(self.boxes.length)
-      run self.inlinePrepared.reserveExact(self.boxes.length)
-      let mut index: usize = 0
-      while index < self.boxes.length {
-        run self.inlinePrepared.append(List<PreparedInline<'source>>.make())
-        index = index + 1
-      }
-    }
+    if self.frame == NO_NODE { run self.resumes.prepare(self.boxes.length) }
     self.frame = frame
+  }
+  pub effect fn ensureInlinePrepared(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
+    if self.inlinePrepared.length() == self.boxes.length { return }
+    run self.inlinePrepared.reserveExact(self.boxes.length)
+    while self.inlinePrepared.length() < self.boxes.length {
+      run self.inlinePrepared.append(List<PreparedInline<'source>>.make())
+    }
   }
   pub effect fn ensureFrameRoot(self: &mut Self, index: usize) -> usize ! OutOfMemoryError | FragmentationError ? &mut Allocator {
     while self.frameRoots.length() <= index {
@@ -491,30 +471,93 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.scrollbarSnapshots.clear()
     self.lineLimits.clear()
     self.anchors.clear()
-    self.entries.clear()
+    // Entries computed before scrollbar selection changed are stale.
+    self.cache.clear()
     let mut id: usize = 0
     while id < self.boxes.length {
-      self.heads.set(id, ABSENT)
       self.boxes[id] = Layout.zero()
       id = id + 1
     }
     self.needsRelayout = false
     self.hasAutoScrollbars = false
   }
-  pub fn lookup(self: &Self, id: usize, input: Input, kind: CacheKind) -> Option<Layout> {
-    let entries = self.entries.asSlice()
-    let mut index = self.heads.get(id)
-    while index != ABSENT {
-      let entry = &entries[index]
-      if entry.kind == kind && sameInput(&entry.input, &input) { return Option<Layout>.Some { value: entry.layout } }
-      index = entry.next
+  pub effect fn captureSnapshot(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
+    run self.fragments.copyInto(&mut self.next.fragments)
+    self.next.boxes.clear()
+    run self.next.boxes.reserveExact(self.boxes.length)
+    let mut index: usize = 0
+    while index < self.boxes.length {
+      run self.next.boxes.append(self.boxes[index])
+      index = index + 1
     }
-    return Option<Layout>.None
+  }
+  // Records the full layout of an independent formatting context that just
+  // emitted fragments [start, current end), if its own fragment opens the range.
+  pub effect fn recordFinal(self: &mut Self, id: usize, input: Input, layout: Layout, start: usize) ! OutOfMemoryError ? &mut Allocator {
+    let end = self.fragments.checkpoint()
+    if start >= end || self.fragments.first(id) != start { return }
+    let fragment = self.fragments.values.get(start)
+    if fragment.box != id || fragment.kind != FragmentKind.Box { return }
+    run self.cache.recordFinal(id, FinalLayout { valid: true, input: input, layout: layout, start: start, end: end })
+  }
+  // Restores the box records of a copied subtree's descendants and carries
+  // their final layouts forward, moved to where the copy put their fragments.
+  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalLayout, base: usize) ! OutOfMemoryError ? &mut Allocator {
+    self.boxes[id] = self.previous.boxes.get(id)
+    let mut child = nodes.node(id).firstChild
+    while child != NO_NODE {
+      let mut kept = self.cache.keptFinal(child)
+      if kept.valid && kept.start > from.start && kept.end <= from.end {
+        kept.start = kept.start - from.start + base
+        kept.end = kept.end - from.start + base
+        run self.cache.recordFinal(child, kept)
+      }
+      run self.restoreBoxes(nodes, child, from, base)
+      child = nodes.node(child).nextSibling
+    }
+  }
+  // Blink LayoutNG / Servo style result reuse: a clean independent formatting
+  // context laid out with the same request as in the previous compute gets a
+  // copy of that compute's fragments and box records instead of a layout.
+  // Subtrees with out-of-flow boxes or inline interruptions are excluded:
+  // positioning, not normal-flow layout, finishes those.
+  pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: Input) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
+    if self.frame != NO_NODE || id >= self.reusable.length() || !self.reusable.get(id) { return Option<Layout>.None }
+    let slot = self.cache.keptFinal(id)
+    if !slot.valid || !LayoutCache.sameRequest(&slot.input, &input) { return Option<Layout>.None }
+    if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || self.previous.boxes.length() != self.boxes.length { return Option<Layout>.None }
+    let mut index = slot.start + 1
+    while index < slot.end {
+      let parent = self.previous.fragments.values.get(index).parent
+      if parent < slot.start || parent >= index { return Option<Layout>.None }
+      index = index + 1
+    }
+    let base = self.fragments.checkpoint()
+    index = slot.start
+    while index < slot.end {
+      let mut fragment = self.previous.fragments.values.get(index)
+      if index == slot.start { fragment.parent = self.fragmentParent }
+      else { fragment.parent = base + (fragment.parent - slot.start) }
+      fragment.visualOffset = Point { x: 0.0, y: 0.0 }
+      fragment.worldLocation = Point { x: 0.0, y: 0.0 }
+      if fragment.textData != NO_NODE {
+        let text = self.previous.fragments.texts.get(fragment.textData)
+        drop run self.fragments.appendText(fragment, text)
+      } else {
+        drop run self.fragments.append(fragment)
+      }
+      index = index + 1
+    }
+    run self.restoreBoxes(nodes, id, slot, base)
+    run self.store(id, slot.layout, true)
+    run self.recordFinal(id, input, slot.layout, base)
+    self.stats.reusedLayouts = self.stats.reusedLayouts + 1
+    return Option<Layout>.Some { value: slot.layout }
+  }
+  pub fn lookup(self: &mut Self, id: usize, input: Input, kind: CacheKind) -> Option<Layout> {
+    return self.cache.lookup(id, input, kind)
   }
   pub effect fn remember(self: &mut Self, id: usize, input: Input, kind: CacheKind, layout: Layout) ! OutOfMemoryError ? &mut Allocator {
-    let index = self.entries.length()
-    let previous = self.heads.get(id)
-    run self.entries.append(Entry { input: input, kind: kind, layout: layout, next: previous })
-    self.heads.set(id, index)
+    run self.cache.remember(id, input, kind, layout)
   }
 }

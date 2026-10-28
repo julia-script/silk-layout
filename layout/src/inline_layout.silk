@@ -1647,12 +1647,14 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let axes = Axes.make(style.writingMode)
   let rtl = style.usedDirection() == Direction.Rtl
   let fragmented = input.fragmentation.active && input.performLayout
+  // Normalization, analysis, break opportunities and the bidi plan depend on
+  // the paragraph's content, not on the space offered, so every probe and
+  // fragment of this box in one compute shares a single preparation.
+  run output.ensureInlinePrepared()
   let mut saved = PreparedInline.make<'source>()
-  if fragmented {
-    match move output.inlinePrepared.asMutSlice()[id].pop() {
-      Option<PreparedInline<'source>>.Some { value } => { saved = move value }
-      Option<PreparedInline<'source>>.None => {}
-    }
+  match move output.inlinePrepared.asMutSlice()[id].pop() {
+    Option<PreparedInline<'source>>.Some { value } => { saved = move value }
+    Option<PreparedInline<'source>>.None => {}
   }
   let mut reuse = saved.ready && saved.barriers.length() == raw.length
   let mut barrierIndex: usize = 0
@@ -1665,13 +1667,11 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   if !reuse {
     let rawTokens = run tokensFor(nodes, raw, scopes)
     normalized = run TextFlow.normalize(rawTokens.asSlice(), nodes.sources)
-    if fragmented {
-      barriers.clear()
-      barrierIndex = 0
-      while barrierIndex < raw.length {
-        run barriers.append(shapingBarrier(nodes, &raw[barrierIndex], scopes))
-        barrierIndex = barrierIndex + 1
-      }
+    barriers.clear()
+    barrierIndex = 0
+    while barrierIndex < raw.length {
+      run barriers.append(shapingBarrier(nodes, &raw[barrierIndex], scopes))
+      barrierIndex = barrierIndex + 1
     }
   }
   let mut original = List<Item>.make()
@@ -2181,8 +2181,8 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     state.normalContentComplete = next == points.length()
     state.descendantsComplete = state.normalContentComplete && state.pendingFirst == NO_NODE
     run output.resumes.set(id, state)
-    run output.inlinePrepared.asMutSlice()[id].reserveExact(1)
-    run output.inlinePrepared.asMutSlice()[id].append(PreparedInline { ready: true, normalized: move normalized, analysis: move analysis, offered: move offered, visual: move visualPlan, barriers: move barriers })
   }
+  run output.inlinePrepared.asMutSlice()[id].reserveExact(1)
+  run output.inlinePrepared.asMutSlice()[id].append(PreparedInline { ready: true, normalized: move normalized, analysis: move analysis, offered: move offered, visual: move visualPlan, barriers: move barriers })
   return result
 }

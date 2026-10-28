@@ -10,6 +10,8 @@ import positioned { positionTree, reachableLimits, addOverflow }
 import bfc { BfcState }
 import silk.option { Option }
 import layout_pass { LayoutPass, CacheKind, FullBoxGeometry }
+import layout_cache { LayoutCache, Snapshot }
+import incremental as Incremental
 import replaced { layoutReplaced, preferredRatio, borderRatio }
 import box_tree as Boxes
 import box_tree { BoxTree, BoxKind }
@@ -196,6 +198,7 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
   match output.lookup(id, request, CacheKind.IntrinsicContents) {
     Option<Layout>.Some { value: cached } => {
+      output.stats.cacheHits = output.stats.cacheHits + 1
       if horizontal { return cached.size.width }
       return cached.size.height
     }
@@ -301,17 +304,26 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   if !input.performLayout {
     match output.lookup(id, input.*, CacheKind.IndependentBox) {
       Option<Layout>.Some { value: cached } => {
+        output.stats.cacheHits = output.stats.cacheHits + 1
         run output.store(id, cached, false)
         return cached
       }
       Option<Layout>.None => {}
     }
   }
+  if input.performLayout {
+    match run output.reuseFinal(nodes, id, input.*) {
+      Option<Layout>.Some { value: reused } => { return reused }
+      Option<Layout>.None => {}
+    }
+  }
+  let start = output.fragments.checkpoint()
   let mut bfc = BfcState.make()
   let mut request = input.*
   request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
   if !input.performLayout { run output.remember(id, input.*, CacheKind.IndependentBox, result) }
+  else if output.frame == NO_NODE { run output.recordFinal(id, input.*, result, start) }
   return result
 }
 
@@ -545,6 +557,8 @@ pub effect fn resolveFragmentBox<'pass, 'source, M: Measure + TextMeasure>(nodes
 }
 
 effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if incoming.performLayout { output.stats.fullLayouts = output.stats.fullLayouts + 1 }
+  else { output.stats.sizeProbes = output.stats.sizeProbes + 1 }
   let style = nodes.style(id)
   let node = nodes.node(id)
   let mut input = boxInput(nodes, id, &incoming)
@@ -868,18 +882,45 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
 pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, output: &mut LayoutTree, measurer: &mut M, viewport: OptionalSize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   TextMeasure.beginTextLayout(&mut measurer)
   let nodes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  // Keep size results from the previous compute of this tree when its boxes
+  // are unchanged, minus those that changed sources can affect.
+  let since = output.treeRevision()
+  if output.reusable() && tree.structureRevision() <= since && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice()) {
+    output.cache.rotateFinals()
+    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
+    run output.cache.compact()
+  } else {
+    output.cache.clear()
+  }
+  let cache = Intrinsic.replace(output.cache, LayoutCache.make())
+  let snapshot = Intrinsic.replace(output.snapshot, Snapshot.make())
+  // A compute that fails part way leaves nothing to reuse.
+  output.keep(since, false)
   run output.prepare(nodes.boxes.length())
   output.viewportOverflow = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
   let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
+  boxes.cache = move cache
+  boxes.previous = move snapshot
+  boxes.reusable = run Incremental.reusableSubtrees(&nodes)
   let mut input = Input.make(viewport)
   input.known = viewport
   input.blockRoot = true
   while true {
     let viewportLayout = run layoutNode(&nodes, &mut boxes, &mut measurer, 0, &input)
     drop viewportLayout
+    if !boxes.hasAutoScrollbars { run boxes.captureSnapshot() }
     let overflow = run positionTree(&nodes, &mut boxes, &mut measurer, viewport, tree.viewportScrollOffset)
+    boxes.stats.passes = boxes.stats.passes + 1
     if !boxes.needsRelayout {
+      output.stats = boxes.stats
+      let kept = Intrinsic.replace(boxes.cache, LayoutCache.make())
+      let captured = Intrinsic.replace(boxes.next, Snapshot.make())
+      // Auto scrollbar selection is not part of a cache key.
+      let settled = !boxes.hasAutoScrollbars
       drop boxes
+      output.cache = move kept
+      output.snapshot = move captured
+      output.keep(tree.revision(), settled)
       output.fragments.resolveLocations()
       output.viewportOverflow = overflow
       output.adopt(move nodes)

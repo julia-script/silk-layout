@@ -1054,9 +1054,16 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   output.snapshot.takeOutput(&mut output.fragments, &mut output.boxes, sameBoxes)
   let mut facts = Intrinsic.replace(output.facts, BoxFacts.make())
   let mut writes = Intrinsic.replace(output.writes, BoxWrites.make())
+  // The nodes changed since, when the tree still knows them and so do the
+  // kept facts' style source index.
+  let mut changes = List<usize>.make()
+  let mut logged = false
+  if restoring && facts.styledOffsets.length() == tree.nodes.length() + 1 && facts.styledBoxes.length() == nodes.boxes.length() {
+    logged = run tree.changedNodes(since, &mut changes)
+  }
   if sameBoxes {
     run output.cache.rotateFinals()
-    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
+    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since, logged, changes.asSlice())
     run output.cache.compact()
   } else if kept {
     let matched = run Incremental.matchBoxes(output.boxNodes.asSlice(), output.firstBySource.asSlice(), &nodes)
@@ -1064,7 +1071,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     run output.cache.remap(matched.toOld.asSlice(), matched.toNew.asSlice())
     run output.snapshot.remap(matched.toOld.asSlice(), matched.toNew.asSlice())
     Incremental.invalidateUnmatched(&nodes, &mut output.cache, matched.changed.asSlice())
-    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
+    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since, logged, changes.asSlice())
     run output.cache.compact()
   } else {
     output.cache.clear()
@@ -1083,7 +1090,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   boxes.writes = move writes
   // Style facts of the same boxes need refreshing only where styles changed.
   if sameBoxes && facts.covers(nodes.boxes.length()) {
-    let restyled = run Incremental.remarkSubtrees(tree, &nodes, since, &mut facts)
+    let restyled = run Incremental.remarkSubtrees(tree, &nodes, since, logged, changes.asSlice(), &mut facts)
     let shapes = facts.keyShapes.asMutSlice()
     let mut at: usize = 0
     while at < restyled.length() {
@@ -1092,11 +1099,15 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     }
     // Every style a visit depends on (position, overflow, display) regenerates
     // boxes when it changes; see Tree.setStyle.
-    if !restoring { run positionVisits(&nodes, &mut facts.visits) }
+    if !restoring {
+      run positionVisits(&nodes, &mut facts.visits)
+      run Incremental.indexStyleSources(tree, &nodes, &mut facts.styledOffsets, &mut facts.styledBoxes)
+    }
   } else {
     run Incremental.markSubtrees(&nodes, &mut facts)
     run keyShapes(&nodes, &mut facts.keyShapes)
     run positionVisits(&nodes, &mut facts.visits)
+    run Incremental.indexStyleSources(tree, &nodes, &mut facts.styledOffsets, &mut facts.styledBoxes)
   }
   boxes.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
   boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())

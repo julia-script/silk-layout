@@ -23,10 +23,11 @@ pub const FACT_FREE: u8 = 8
 // Per-box facts drawn from styles, kept across computes of the same boxes
 // and refreshed only where a style changed; see Incremental.markSubtrees.
 // visits: the boxes positioning must visit, in source preorder; see
-// Positioned.positionVisits.
-pub struct BoxFacts { pub own: List<u8>, pub reusable: List<u8>, pub viewportFree: List<bool>, pub keyShapes: List<u8>, pub visits: List<usize> }
+// Positioned.positionVisits. styled: the boxes taking each tree node's
+// style; see Incremental.indexStyleSources.
+pub struct BoxFacts { pub own: List<u8>, pub reusable: List<u8>, pub viewportFree: List<bool>, pub keyShapes: List<u8>, pub visits: List<usize>, pub styledOffsets: List<usize>, pub styledBoxes: List<usize> }
 impl BoxFacts {
-  pub fn make() -> BoxFacts { return BoxFacts { own: List<u8>.make(), reusable: List<u8>.make(), viewportFree: List<bool>.make(), keyShapes: List<u8>.make(), visits: List<usize>.make() } }
+  pub fn make() -> BoxFacts { return BoxFacts { own: List<u8>.make(), reusable: List<u8>.make(), viewportFree: List<bool>.make(), keyShapes: List<u8>.make(), visits: List<usize>.make(), styledOffsets: List<usize>.make(), styledBoxes: List<usize>.make() } }
   pub fn covers(self: &Self, count: usize) -> bool {
     return self.own.length() == count && self.reusable.length() == count && self.viewportFree.length() == count && self.keyShapes.length() == count
   }

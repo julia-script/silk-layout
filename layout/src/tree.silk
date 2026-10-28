@@ -80,7 +80,12 @@ fn whitespace(value: string) -> bool {
 pub struct Tree {
   pub nodes: List<Node>, pub styles: List<Style>, pub viewportScrollOffset: Point,
   current: usize, structure: usize, generated: usize, changed: List<usize>,
+  // The last CHANGE_LOG touches, oldest overwritten first: `logNodes[slot]`
+  // was touched at revision `logRevisions[slot]`. `logLost` is the latest
+  // revision overwritten.
+  logNodes: List<usize>, logRevisions: List<usize>, logged: usize, logLost: usize,
 }
+const CHANGE_LOG: usize = 256
 impl Tree {
   pub effect fn make(style: Style) -> Tree ! OutOfMemoryError ? &mut Allocator {
     let mut nodes = List<Node>.make()
@@ -92,7 +97,11 @@ impl Tree {
     run changed.reserve(1)
     run nodes.append(Node { styleIndex: 0, content: SourceContent.Element, parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE, measureKey: 0, measurement: Measurement.None, scrollOffset: Point { x: 0.0, y: 0.0 } })
     run changed.append(1)
-    return Tree { nodes: move nodes, styles: move styles, viewportScrollOffset: Point { x: 0.0, y: 0.0 }, current: 1, structure: 1, generated: 1, changed: move changed }
+    let mut logNodes = List<usize>.make()
+    let mut logRevisions = List<usize>.make()
+    run logNodes.appendRepeated(NO_NODE, CHANGE_LOG)
+    run logRevisions.appendRepeated(0, CHANGE_LOG)
+    return Tree { nodes: move nodes, styles: move styles, viewportScrollOffset: Point { x: 0.0, y: 0.0 }, current: 1, structure: 1, generated: 1, changed: move changed, logNodes: move logNodes, logRevisions: move logRevisions, logged: 0, logLost: 0 }
   }
   // The current revision; it advances on every change.
   pub fn revision(self: &Self) -> usize { return self.current }
@@ -107,6 +116,29 @@ impl Tree {
   fn touch(self: &mut Self, id: usize) {
     self.current = self.current + 1
     self.changed.set(id, self.current)
+    let slot = self.logged % CHANGE_LOG
+    if self.logged >= CHANGE_LOG { self.logLost = self.logRevisions.get(slot) }
+    self.logNodes.set(slot, id)
+    self.logRevisions.set(slot, self.current)
+    self.logged = self.logged + 1
+  }
+  // Appends each node whose style, text or measurement changed after
+  // revision `since`, once, and returns true; or returns false, appending
+  // nothing, when the tree no longer knows them all without a scan: nodes
+  // were inserted since, or too many changes were made.
+  pub effect fn changedNodes(self: &Self, since: usize, result: &mut List<usize>) -> bool ! OutOfMemoryError ? &mut Allocator {
+    if self.structure > since || self.logLost > since { return false }
+    let mut back: usize = 0
+    while back < self.logged && back < CHANGE_LOG {
+      let slot = (self.logged - 1 - back) % CHANGE_LOG
+      let revision = self.logRevisions.get(slot)
+      if revision <= since { return true }
+      let node = self.logNodes.get(slot)
+      // A node's latest touch stands for all of its touches.
+      if self.changed.get(node) == revision { run result.append(node) }
+      back = back + 1
+    }
+    return true
   }
   // Records a change the tree cannot see: a direct edit of `nodes` or
   // `styles`, or new content behind a node's measurement key. Layout results

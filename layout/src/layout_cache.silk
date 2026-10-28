@@ -17,15 +17,15 @@ pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
 struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }
 impl Copy for Entry {}
 
-// The last full layout of an independent formatting context: its request,
-// its result, and the contiguous fragment range [start, end) it emitted,
-// whose first fragment is the box's own.
-pub struct FinalLayout { pub valid: bool, pub input: Input, pub layout: Layout, pub start: usize, pub end: usize }
-impl Copy for FinalLayout {}
-impl FinalLayout {
-  pub fn none() -> FinalLayout {
-    return FinalLayout { valid: false, input: Input.make(OptionalSize.definite(0.0, 0.0)), layout: Layout.zero(), start: 0, end: 0 }
-  }
+// The last full layout of a reusable box: its request and result, and the
+// contiguous fragment range [start, end) it emitted, whose first fragment is
+// the box's own. Ranges are kept per compute; results are written in place,
+// since carrying a copied subtree forward only moves its ranges.
+pub struct FinalResult { pub input: Input, pub layout: Layout }
+pub struct FinalRange { pub valid: bool, pub start: usize, pub end: usize }
+impl Copy for FinalRange {}
+impl FinalRange {
+  pub fn none() -> FinalRange { return FinalRange { valid: false, start: 0, end: 0 } }
 }
 
 fn sameOptional(a: &OptionalSize, b: &OptionalSize) -> bool {
@@ -52,14 +52,16 @@ pub struct LayoutCache {
   dead: usize,
   // The current compute, and how many entries the previous one used.
   generation: usize, touched: usize, previouslyTouched: usize,
-  // Final layouts recorded by this compute, and those of the previous one,
-  // whose fragments are in the LayoutTree's snapshot.
-  finals: List<FinalLayout>,
-  kept: List<FinalLayout>,
+  // Final layout ranges recorded by this compute, and those of the previous
+  // one, whose fragments are in the LayoutTree's snapshot. A kept range is
+  // dropped once this compute records its box, which replaces the result.
+  results: List<FinalResult>,
+  finals: List<FinalRange>,
+  kept: List<FinalRange>,
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, finals: List<FinalLayout>.make(), kept: List<FinalLayout>.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), finals: List<FinalRange>.make(), kept: List<FinalRange>.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
@@ -67,6 +69,7 @@ impl LayoutCache {
     self.entries.clear()
     self.dead = 0
     self.touched = 0
+    self.results.clear()
     self.finals.clear()
     self.kept.clear()
   }
@@ -75,26 +78,44 @@ impl LayoutCache {
     self.generation = self.generation + 1
     self.previouslyTouched = self.touched
     self.touched = 0
-    let previous = Intrinsic.replace(self.finals, List<FinalLayout>.make())
+    let previous = Intrinsic.replace(self.finals, List<FinalRange>.make())
     let spare = Intrinsic.replace(self.kept, move previous)
     self.finals = move spare
     self.finals.clear()
   }
-  pub fn keptFinal(self: &Self, id: usize) -> FinalLayout {
-    if id >= self.kept.length() { return FinalLayout.none() }
+  // The previous compute's range for a box and the result it holds.
+  pub fn keptRange(self: &Self, id: usize) -> FinalRange {
+    if id >= self.kept.length() { return FinalRange.none() }
     return self.kept.get(id)
   }
-  pub effect fn recordFinal(self: &mut Self, id: usize, value: FinalLayout) ! OutOfMemoryError ? &mut Allocator {
+  pub fn result(self: &Self, id: usize) -> &FinalResult { return &self.results.asSlice()[id] }
+  effect fn setRange(self: &mut Self, id: usize, range: FinalRange) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.finals.length() {
       let missing = id + 1 - self.finals.length()
       run self.finals.reserve(missing)
-      while self.finals.length() <= id { run self.finals.append(FinalLayout.none()) }
+      while self.finals.length() <= id { run self.finals.append(FinalRange.none()) }
     }
-    self.finals.set(id, value)
+    self.finals.set(id, range)
+  }
+  pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator {
+    if id >= self.results.length() {
+      let missing = id + 1 - self.results.length()
+      run self.results.reserve(missing)
+      while self.results.length() <= id { run self.results.append(FinalResult { input: input.*, layout: layout.* }) }
+    }
+    run self.setRange(id, FinalRange { valid: true, start: start, end: end })
+    let results = self.results.asMutSlice()
+    results[id].input = input.*
+    results[id].layout = layout.*
+    if id < self.kept.length() { self.kept.set(id, FinalRange.none()) }
+  }
+  // Moves a kept range, unchanged in content, to where a copy put it.
+  pub effect fn carryFinal(self: &mut Self, id: usize, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator {
+    run self.setRange(id, FinalRange { valid: true, start: start, end: end })
   }
   pub fn clearBox(self: &mut Self, id: usize) {
-    if id < self.kept.length() { self.kept.set(id, FinalLayout.none()) }
-    if id < self.finals.length() { self.finals.set(id, FinalLayout.none()) }
+    if id < self.kept.length() { self.kept.set(id, FinalRange.none()) }
+    if id < self.finals.length() { self.finals.set(id, FinalRange.none()) }
     if id >= self.heads.length() { return }
     let mut index = self.heads.get(id)
     while index != ABSENT {

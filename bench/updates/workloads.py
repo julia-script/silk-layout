@@ -101,6 +101,10 @@ def article():
         "unchanged": toggle([]),
         "leaf-style": toggle([doc.style(target_block, marginBottom=20)], [doc.style(target_block, marginBottom=12)]),
         "text-edit": toggle([{"node": target_text, "text": text + " more"}], [{"node": target_text, "text": text}]),
+        # Inherited by the paragraph's anonymous text style.
+        "font": toggle([doc.style(target_block, fontKey=2, lineHeight=1.3)], [doc.style(target_block, fontKey=1, lineHeight=1.6)]),
+        # Changes which boxes are generated.
+        "hide": toggle([doc.style(target_block, display="none")], [doc.style(target_block)]),
         "resize": resize(680, 4000),
     }
 

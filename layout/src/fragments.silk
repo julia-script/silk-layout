@@ -1,5 +1,6 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
+import silk.slice { Slice }
 import silk.ownership { Copy }
 import geometry { Point, Size, Rect, ResolvedEdges, BaselineSet }
 import tree { NO_NODE }
@@ -189,6 +190,67 @@ impl FragmentArena {
       }
       values[index].worldLocation = Point { x: x, y: y }
       index = index + 1
+    }
+  }
+
+  // Appends a copy of the source's fragments [start, end), whose parents all
+  // lie inside the range except the first's, which becomes `parent`. Links
+  // are rebuilt as append would; visual offsets and world locations reset.
+  pub effect fn appendRange(self: &mut Self, source: &FragmentArena, start: usize, end: usize, parent: usize) ! OutOfMemoryError ? &mut Allocator {
+    let base = self.values.length()
+    let mut texts: usize = 0
+    let sourceValues = source.values.asSlice()
+    let mut index = start
+    while index < end {
+      if sourceValues[index].textData != NO_NODE { texts = texts + 1 }
+      index = index + 1
+    }
+    run self.values.reserve(end - start)
+    run self.texts.reserve(texts)
+    run self.values.appendSlice(Slice.view(sourceValues, start, end - start))
+    let sourceTexts = source.texts.asSlice()
+    let mut at = base
+    let stop = base + (end - start)
+    while at < stop {
+      let values = self.values.asMutSlice()
+      let mut fragmentParent = parent
+      if at != base { fragmentParent = base + (values[at].parent - start) }
+      values[at].parent = fragmentParent
+      values[at].visualOffset = Point { x: 0.0, y: 0.0 }
+      values[at].worldLocation = Point { x: 0.0, y: 0.0 }
+      if values[at].textData != NO_NODE {
+        let text = sourceTexts[values[at].textData]
+        values[at].textData = self.texts.length()
+        run self.texts.append(text)
+      }
+      self.link(at)
+      at = at + 1
+    }
+  }
+  // Links the last-appended fragment to its parent and box, as append does.
+  fn link(self: &mut Self, index: usize) {
+    let values = self.values.asMutSlice()
+    let parent = values[index].parent
+    let box = values[index].box
+    let mut previousSibling = NO_NODE
+    let mut previousForBox = NO_NODE
+    if parent != NO_NODE { previousSibling = values[parent].lastChild }
+    if box != NO_NODE { previousForBox = self.lastByBox.get(box) }
+    values[index].firstChild = NO_NODE
+    values[index].lastChild = NO_NODE
+    values[index].previousSibling = previousSibling
+    values[index].nextSibling = NO_NODE
+    values[index].previousForBox = previousForBox
+    values[index].nextForBox = NO_NODE
+    if parent != NO_NODE {
+      if previousSibling == NO_NODE { values[parent].firstChild = index }
+      else { values[previousSibling].nextSibling = index }
+      values[parent].lastChild = index
+    }
+    if box != NO_NODE {
+      if previousForBox == NO_NODE { self.firstByBox.set(box, index) }
+      else { values[previousForBox].nextForBox = index }
+      self.lastByBox.set(box, index)
     }
   }
 

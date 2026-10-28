@@ -424,6 +424,22 @@ impl FragmentArena {
     if self.inPlace && self.count > self.written { self.written = self.count }
     return index
   }
+  // put of Fragment.make(box, source, kind), written in its slot.
+  effect fn putMade(self: &mut Self, box: usize, source: usize, kind: FragmentKind) -> usize ! OutOfMemoryError ? &mut Allocator {
+    let index = self.count
+    run self.saveFragment(index)
+    if index < self.values.length() {
+      let values = self.values.asMutSlice()
+      values[index] = Fragment.make(box, source, kind)
+      self.textMarks.set(index, self.textCount)
+    } else {
+      run self.values.append(Fragment.make(box, source, kind))
+      run self.textMarks.append(self.textCount)
+    }
+    self.count = index + 1
+    if self.inPlace && self.count > self.written { self.written = self.count }
+    return index
+  }
   effect fn putText(self: &mut Self, value: TextFragment) -> usize ! OutOfMemoryError ? &mut Allocator {
     let index = self.textCount
     run self.saveText(index)
@@ -458,6 +474,31 @@ impl FragmentArena {
     // Link only after allocation succeeds, leaving the arena unchanged on failure.
     run self.adopting(parent, previousForBox)
     let index = run self.put(move value)
+    return self.linkAppended(index, parent, box, previousSibling, previousForBox)
+  }
+  // append for a new box fragment, built in its slot instead of moved there.
+  pub effect fn appendBox(self: &mut Self, box: usize, source: usize, kind: FragmentKind, parent: usize, fragmentainer: usize, first: bool, last: bool) -> FragmentId ! OutOfMemoryError ? &mut Allocator {
+    let next = self.count
+    if box != NO_NODE { run self.claimBox(box, next) }
+    if parent != NO_NODE { run self.edit(parent) }
+    let mut previousSibling = NO_NODE
+    let mut previousForBox = NO_NODE
+    if parent != NO_NODE { previousSibling = self.values.asSlice()[parent].lastChild }
+    if box != NO_NODE { previousForBox = self.lastByBox.get(box) }
+    if previousSibling != NO_NODE { run self.edit(previousSibling) }
+    if previousForBox != NO_NODE { run self.edit(previousForBox) }
+    run self.adopting(parent, previousForBox)
+    let index = run self.putMade(box, source, kind)
+    let value = &mut self.values.asMutSlice()[index]
+    value.fragmentainer = fragmentainer
+    value.parent = parent
+    value.first = first
+    value.last = last
+    value.previousSibling = previousSibling
+    value.previousForBox = previousForBox
+    return self.linkAppended(index, parent, box, previousSibling, previousForBox)
+  }
+  fn linkAppended(self: &mut Self, index: usize, parent: usize, box: usize, previousSibling: usize, previousForBox: usize) -> FragmentId with Intrinsic.inlineAlways() {
     let values = self.values.asMutSlice()
     if parent != NO_NODE {
       if previousSibling == NO_NODE { values[parent].firstChild = index }

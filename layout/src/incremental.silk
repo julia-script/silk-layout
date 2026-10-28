@@ -78,7 +78,7 @@ pub effect fn reusableSubtrees(nodes: &BoxTree) -> List<u8> ! OutOfMemoryError ?
   let count = nodes.boxes.length()
   let mut result = List<u8>.make()
   run result.reserveExact(count)
-  while result.length() < count { run result.append(REUSE_IN_FLOW) }
+  run result.appendRepeated(REUSE_IN_FLOW, count)
   // Generated parents precede their children.
   let mut index = count
   while index > 0 {
@@ -232,7 +232,7 @@ pub effect fn viewportFreeSubtrees(nodes: &BoxTree) -> List<bool> ! OutOfMemoryE
   let count = nodes.boxes.length()
   let mut result = List<bool>.make()
   run result.reserveExact(count)
-  while result.length() < count { run result.append(true) }
+  run result.appendRepeated(true, count)
   let mut index = count
   while index > 0 {
     index = index - 1

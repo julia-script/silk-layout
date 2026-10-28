@@ -90,12 +90,8 @@ impl FragmentArena {
     self.lastByBox.clear()
     run self.firstByBox.reserveExact(boxCount)
     run self.lastByBox.reserveExact(boxCount)
-    let mut box: usize = 0
-    while box < boxCount {
-      run self.firstByBox.append(NO_NODE)
-      run self.lastByBox.append(NO_NODE)
-      box = box + 1
-    }
+    run self.firstByBox.appendRepeated(NO_NODE, boxCount)
+    run self.lastByBox.appendRepeated(NO_NODE, boxCount)
   }
 
   // The parent must already exist; box must be prepared or NO_NODE.

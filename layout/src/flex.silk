@@ -137,7 +137,8 @@ impl Item {
 }
 struct Line { start: usize, end: usize, count: usize, cross: f64, baseline: f64, lastBaseline: f64, baselineCross: f64, lastBaselineCross: f64 }
 impl Copy for Line {}
-effect fn collect(nodes: &BoxTree, id: usize, items: &mut List<Item>) ! OutOfMemoryError ? &mut Allocator {
+// Whether any collected item has a nonzero order, so that sort can move it.
+effect fn collect(nodes: &BoxTree, id: usize, items: &mut List<Item>) -> bool ! OutOfMemoryError ? &mut Allocator {
   // Size the list once instead of regrowing it for every large container.
   let mut count: usize = 0
   let mut child = nodes.node(id).firstChild
@@ -146,11 +147,17 @@ effect fn collect(nodes: &BoxTree, id: usize, items: &mut List<Item>) ! OutOfMem
     child = nodes.node(child).nextSibling
   }
   run items.reserveExact(count)
+  let mut ordered = false
   child = nodes.node(id).firstChild
   while child != NO_NODE {
-    if !outOfFlow(nodes.style(child)) { run items.append(Item.make(child)) }
+    let style = nodes.style(child)
+    if !outOfFlow(style) {
+      run items.append(Item.make(child))
+      ordered = ordered || style.order != 0
+    }
     child = nodes.node(child).nextSibling
   }
+  return ordered
 }
 fn sort(items: &mut [Item], nodes: &BoxTree, count: usize) {
   let mut index: usize = 1
@@ -1125,9 +1132,9 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   let mainGap = max(0.0, resolve(mainGapDimension, main, mainDefinite, mainGapDimension.value))
   let crossGap = max(0.0, resolve(crossGapDimension, cross, crossDefinite && !(resolvedIntrinsicInline && !axis.row), crossGapDimension.value))
   scratch.items.clear()
-  run collect(nodes, id, &mut scratch.items)
+  let ordered = run collect(nodes, id, &mut scratch.items)
   let count = scratch.items.length()
-  sort(scratch.items.asMutSlice(), nodes, count)
+  if ordered { sort(scratch.items.asMutSlice(), nodes, count) }
   // §9.9.2: wrapped columns use the largest item contribution as their
   // intrinsic cross constraint, rather than an unconstrained width per line.
   let columnIntrinsic = !axis.row && style.flexWrap != FlexWrap.NoWrap && !crossKnown && crossConstraint.kind != AvailableKind.Definite

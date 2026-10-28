@@ -258,11 +258,7 @@ impl LayoutTree {
     run self.fragments.prepare(count)
     self.boxes.clear()
     run self.boxes.reserveExact(count)
-    let mut index: usize = 0
-    while index < count {
-      run self.boxes.append(Layout.zero())
-      index = index + 1
-    }
+    run self.boxes.appendRepeated(Layout.zero(), count)
   }
   // Discards every kept result. Call it after replacing the measurement
   // provider, changing what it returns, or computing a different Tree.

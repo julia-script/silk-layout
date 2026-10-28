@@ -2,11 +2,10 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import silk.option { Option }
 import silk.ownership { Copy }
-import silk.pointer { Pointer }
 import silk.usize
 import context { Input }
 import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind, Rect, Point, ResolvedEdges }
-import fragments { FragmentArena, Shift }
+import fragments { FragmentArena, Shift, one }
 import bfc { FloatBox }
 import silk.slice { Slice }
 import inline_prepared { KeptText }
@@ -98,11 +97,6 @@ pub const AGES_OLDER: u8 = 2
 // entry first would copy both through the stack.
 struct Entry { kind: CacheKind, next: usize, generation: usize }
 impl Copy for Entry {}
-
-// `value` as a one-element slice, for appendSlice.
-fn one<T>(value: &T) -> &[T] with Intrinsic.inlineAlways() {
-  unsafe { return Pointer.borrowMany<T, T>(value, Pointer.assumeMany<T>(Pointer.fromRef<T>(value)), 1) }
-}
 
 // The last full layout of a reusable box: its request, and the contiguous
 // fragment range [start, end) it emitted, whose first fragment is the box's

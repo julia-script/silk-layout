@@ -10,7 +10,7 @@ import style { Overflow, ScrollbarWidth }
 import tree { Node, NO_NODE, LayoutStats }
 import bfc { FloatBox }
 import box_tree { BoxTree }
-import fragments { Fragment, FragmentArena, FragmentKind }
+import fragments { Fragment, FragmentArena, FragmentKind, one }
 import fragmentation { ResumeStore, ResumeCheckpoint, StaticAnchor, Fragmentainers, Fragmentainer, FragmentAncestor, FragmentationError }
 import breaks { ForcedBreaks, PageSide, BreakKinds }
 import inline_prepared { PreparedInline, KeptText }
@@ -351,7 +351,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       if self.writes.partial.get(id) == self.writes.generation { run self.savePlaced(id) }
       return
     }
-    run self.writes.saved.append(self.boxes[id])
+    run self.writes.saved.appendSlice(one<Layout>(&self.boxes[id]))
     self.writes.stamps.set(id, self.writes.generation)
     self.writes.slots.set(id, self.writes.saved.length() - 1)
   }
@@ -374,9 +374,9 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // A box saved by placement is about to be written whole: saves its whole
   // previous layout.
   effect fn savePlaced(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
-    let mut previous = self.boxes[id]
-    self.writes.placed.asSlice()[self.writes.slots.get(id)].restore(&mut previous)
-    run self.writes.saved.append(previous)
+    run self.writes.saved.appendSlice(one<Layout>(&self.boxes[id]))
+    let last = self.writes.saved.length() - 1
+    self.writes.placed.asSlice()[self.writes.slots.get(id)].restore(&mut self.writes.saved.asMutSlice()[last])
     self.writes.partial.set(id, 0)
     self.writes.slots.set(id, self.writes.saved.length() - 1)
   }

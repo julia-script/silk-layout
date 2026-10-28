@@ -113,6 +113,14 @@ impl FinalRange {
   pub fn none() -> FinalRange { return FinalRange { valid: false, start: 0, end: 0, floats: 0, floatCount: 0 } }
 }
 
+// A box's range of this compute and, once `stamp` is this compute, the
+// previous compute's range it replaced.
+struct BoxRanges { range: FinalRange, kept: FinalRange, stamp: usize }
+impl Copy for BoxRanges {}
+impl BoxRanges {
+  fn none() -> BoxRanges { return BoxRanges { range: FinalRange.none(), kept: FinalRange.none(), stamp: usize.MAX } }
+}
+
 fn sameOptional(a: &OptionalSize, b: &OptionalSize) -> bool {
   return a.widthDefinite == b.widthDefinite && a.heightDefinite == b.heightDefinite && (!a.widthDefinite || a.width == b.width) && (!a.heightDefinite || a.height == b.height)
 }
@@ -156,12 +164,11 @@ pub struct LayoutCache {
   // as the kept range keptRange reads; it is dropped once this compute
   // records the box, which replaces the result.
   results: List<FinalResult>,
-  ranges: List<FinalRange>,
-  rangeStamps: List<usize>, rangeSlots: List<usize>, keptRanges: List<FinalRange>,
-  // What undoRotate needs: the kept ranges and touched count before the
-  // last rotation, whether it compacted floats, and how many ranges this
-  // compute stamped and has not adopted (see adoptRange).
-  rotatedRanges: List<FinalRange>, rotatedTouched: usize, rotatedFloats: bool, stamped: usize,
+  ranges: List<BoxRanges>,
+  // What undoRotate needs: the touched count before the last rotation,
+  // whether it compacted floats, and how many ranges this compute stamped
+  // and has not adopted (see adoptRange).
+  rotatedTouched: usize, rotatedFloats: bool, stamped: usize,
   // Float lists of ranges, appended to; `floatsCompacted` is the length
   // after the last compaction.
   floats: List<FloatBox>, floatsCompacted: usize,
@@ -172,7 +179,7 @@ pub struct LayoutCache {
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), spare: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<FinalRange>.make(), rangeStamps: List<usize>.make(), rangeSlots: List<usize>.make(), keptRanges: List<FinalRange>.make(), rotatedRanges: List<FinalRange>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), spare: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
@@ -183,10 +190,7 @@ impl LayoutCache {
     self.touched = 0
     self.results.clear()
     self.ranges.clear()
-    self.keptRanges.clear()
-    self.rangeStamps.clear()
     self.rotatedFloats = true
-    self.rangeSlots.clear()
     self.floats.clear()
     self.floatsCompacted = 0
     self.texts.clear()
@@ -198,9 +202,6 @@ impl LayoutCache {
     self.rotatedTouched = self.previouslyTouched
     self.previouslyTouched = self.touched
     self.touched = 0
-    let kept = Intrinsic.replace(self.keptRanges, List<FinalRange>.make())
-    self.keptRanges = Intrinsic.replace(self.rotatedRanges, move kept)
-    self.keptRanges.clear()
     self.stamped = 0
     self.rotatedFloats = self.floats.length() > 1024 && self.floats.length() > 4 * self.floatsCompacted
     if self.rotatedFloats { run self.compactFloats() }
@@ -213,8 +214,6 @@ impl LayoutCache {
     self.generation = self.generation - 1
     self.touched = self.previouslyTouched + self.touched
     self.previouslyTouched = self.rotatedTouched
-    let kept = Intrinsic.replace(self.rotatedRanges, List<FinalRange>.make())
-    self.rotatedRanges = Intrinsic.replace(self.keptRanges, move kept)
     return true
   }
   // Rebuilds the float list with only the lists of valid ranges.
@@ -223,10 +222,10 @@ impl LayoutCache {
     let ranges = self.ranges.asMutSlice()
     let mut id: usize = 0
     while id < ranges.length {
-      if ranges[id].valid && ranges[id].floatCount != 0 {
+      if ranges[id].range.valid && ranges[id].range.floatCount != 0 {
         let first = floats.length()
-        run floats.appendSlice(Slice.view(self.floats.asSlice(), ranges[id].floats, ranges[id].floatCount))
-        ranges[id].floats = first
+        run floats.appendSlice(Slice.view(self.floats.asSlice(), ranges[id].range.floats, ranges[id].range.floatCount))
+        ranges[id].range.floats = first
       }
       id = id + 1
     }
@@ -236,53 +235,51 @@ impl LayoutCache {
   // The previous compute's range for a box and the result it holds.
   pub fn keptRange(self: &Self, id: usize) -> FinalRange {
     if id >= self.ranges.length() { return FinalRange.none() }
-    if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { return self.keptRanges.get(self.rangeSlots.get(id)) }
-    return self.ranges.get(id)
+    let ranges = &self.ranges.asSlice()[id]
+    if ranges.stamp == self.generation { return ranges.kept }
+    return ranges.range
   }
   pub fn result(self: &Self, id: usize) -> &FinalResult { return &self.results.asSlice()[id] }
   // Saves a box's previous range before its first write in this compute.
   effect fn writeRange(self: &mut Self, id: usize, range: FinalRange) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.ranges.length() {
       let missing = id + 1 - self.ranges.length()
-      run self.ranges.appendRepeated(FinalRange.none(), missing)
+      run self.ranges.appendRepeated(BoxRanges.none(), missing)
     }
-    if id >= self.rangeStamps.length() {
-      let missing = id + 1 - self.rangeStamps.length()
-      run self.rangeStamps.appendRepeated(usize.MAX, missing)
-      run self.rangeSlots.appendRepeated(0, missing)
-    }
-    if self.rangeStamps.get(id) != self.generation {
-      run self.keptRanges.append(self.ranges.get(id))
+    let generation = self.generation
+    let ranges = self.ranges.asMutSlice()
+    if ranges[id].stamp != generation {
+      ranges[id].kept = ranges[id].range
+      ranges[id].stamp = generation
       self.stamped = self.stamped + 1
-      self.rangeStamps.set(id, self.generation)
-      self.rangeSlots.set(id, self.keptRanges.length() - 1)
     }
-    self.ranges.set(id, range)
+    ranges[id].range = range
   }
   // A box is being laid out again: it has no range of this compute until it
   // records one.
   pub effect fn beginLayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
-    if id >= self.ranges.length() || (id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation && !self.ranges.get(id).valid) { return }
+    if id >= self.ranges.length() { return }
+    let ranges = &self.ranges.asSlice()[id]
+    if ranges.stamp == self.generation && !ranges.range.valid { return }
     run self.writeRange(id, FinalRange.none())
   }
   // A box of a subtree kept in place has its previous range again.
   pub fn keepRange(self: &mut Self, id: usize) {
-    if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { self.ranges.set(id, self.keptRanges.get(self.rangeSlots.get(id))) }
+    if id >= self.ranges.length() { return }
+    let generation = self.generation
+    let ranges = self.ranges.asMutSlice()
+    if ranges[id].stamp == generation { ranges[id].range = ranges[id].kept }
   }
   // Moves the previous compute's ranges along with its fragments (see
   // FragmentArena.shiftPrevious); a range across the shift's start grows or
   // shrinks with it.
   pub fn shiftRanges(self: &mut Self, shift: Shift) {
+    let generation = self.generation
+    let ranges = self.ranges.asMutSlice()
     let mut id: usize = 0
-    while id < self.ranges.length() {
-      if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation {
-        let slot = self.rangeSlots.get(id)
-        let kept = shiftedRange(self.keptRanges.get(slot), shift)
-        self.keptRanges.set(slot, kept)
-      } else {
-        let range = shiftedRange(self.ranges.get(id), shift)
-        self.ranges.set(id, range)
-      }
+    while id < ranges.length {
+      if ranges[id].stamp == generation { ranges[id].kept = shiftedRange(ranges[id].kept, shift) }
+      else { ranges[id].range = shiftedRange(ranges[id].range, shift) }
       id = id + 1
     }
   }
@@ -295,7 +292,8 @@ impl LayoutCache {
     let first = self.floats.length()
     run self.floats.appendSlice(floats)
     run self.writeRange(id, FinalRange { valid: true, start: start, end: end, floats: first, floatCount: floats.length })
-    self.keptRanges.set(self.rangeSlots.get(id), FinalRange.none())
+    let ranges = self.ranges.asMutSlice()
+    ranges[id].kept = FinalRange.none()
     let results = self.results.asMutSlice()
     results[id].input = input.*
     results[id].location = layout.location
@@ -326,8 +324,11 @@ impl LayoutCache {
   pub fn clearBox(self: &mut Self, id: usize) {
     self.flexMemos.dropBox(id)
     if id < self.texts.length() { self.texts.asMutSlice()[id].clear() }
-    if id < self.ranges.length() { self.ranges.set(id, FinalRange.none()) }
-    if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { self.keptRanges.set(self.rangeSlots.get(id), FinalRange.none()) }
+    if id < self.ranges.length() {
+      let ranges = self.ranges.asMutSlice()
+      ranges[id].range = FinalRange.none()
+      ranges[id].kept = FinalRange.none()
+    }
     if id >= self.heads.length() { return }
     let mut index = self.heads.get(id)
     while index != ABSENT {
@@ -370,20 +371,19 @@ impl LayoutCache {
   }
   // The range a box recorded in this compute, if any.
   pub fn recordedRange(self: &Self, id: usize) -> FinalRange {
-    if id >= self.rangeStamps.length() || self.rangeStamps.get(id) != self.generation { return FinalRange.none() }
-    return self.ranges.get(id)
+    if id >= self.ranges.length() || self.ranges.asSlice()[id].stamp != self.generation { return FinalRange.none() }
+    return self.ranges.asSlice()[id].range
   }
   // Makes the range a box recorded in this compute, at fragments `shift`
   // earlier than where they now lie, its range of the previous compute.
   pub fn adoptRange(self: &mut Self, id: usize, shift: usize) {
-    if id >= self.rangeStamps.length() || self.rangeStamps.get(id) != self.generation { return }
-    let mut range = self.ranges.get(id)
-    if range.valid {
-      range.start = range.start + shift
-      range.end = range.end + shift
+    if id >= self.ranges.length() || self.ranges.asSlice()[id].stamp != self.generation { return }
+    let ranges = self.ranges.asMutSlice()
+    if ranges[id].range.valid {
+      ranges[id].range.start = ranges[id].range.start + shift
+      ranges[id].range.end = ranges[id].range.end + shift
     }
-    self.ranges.set(id, range)
-    self.rangeStamps.set(id, usize.MAX)
+    ranges[id].stamp = usize.MAX
     self.stamped = self.stamped - 1
   }
   pub fn lookup(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Layout> {
@@ -441,7 +441,7 @@ impl LayoutCache {
       old = old + 1
     }
     let mut heads = List<usize>.make()
-    let mut kept = List<FinalRange>.make()
+    let mut kept = List<BoxRanges>.make()
     let mut results = List<FinalResult>.make()
     run heads.reserveExact(toOld.length)
     run kept.reserveExact(toOld.length)
@@ -454,17 +454,14 @@ impl LayoutCache {
       if from != ABSENT && from < self.heads.length() { head = self.heads.get(from) }
       if from != ABSENT && from < self.ranges.length() { range = self.keptRange(from) }
       run heads.append(head)
-      run kept.append(range)
+      run kept.append(BoxRanges { range: range, kept: FinalRange.none(), stamp: usize.MAX })
       if from != ABSENT && from < self.results.length() { run results.append(self.results.asSlice()[from]) }
       else { run results.append(FinalResult.none()) }
       id = id + 1
     }
     self.heads = move heads
     self.ranges = move kept
-    self.keptRanges.clear()
-    self.rangeStamps.clear()
     self.rotatedFloats = true
-    self.rangeSlots.clear()
     self.results = move results
     let mut texts = List<List<KeptText>>.make()
     run texts.reserveExact(toOld.length)

@@ -1645,6 +1645,11 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   output.viewportOverflow = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
   let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
   boxes.cache = move cache
+  // A viewport resize amid computes that reuse nothing records no ranges
+  // for the next one, unless that one is the eighth that tries reuse
+  // again (see `tracking` below). An edit after the resizes then lays out
+  // in full once, recording them again.
+  boxes.cache.skipFinals(sameBoxes && output.reuseIdle % 8 != 0 && output.reuseIdle % 8 != 7 && !sameViewport(&output.keptViewport, &viewport))
   run boxes.cache.reserveBoxes(nodes.boxes.length())
   boxes.previous = move snapshot
   boxes.flexScratch = move flexScratch

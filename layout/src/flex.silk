@@ -8,7 +8,7 @@ import geometry { Measure, Layout, BaselineSet, FontRequest, Size, OptionalSize,
 import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, BoxSizing, Visibility, MarginBreak, BoxDecorationBreak }
 import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
-import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, scrollable, overflowForAxis, UNBOUNDED }
+import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, isFlex, scrollable, overflowForAxis, UNBOUNDED }
 import engine { layoutNode, probeNode, probeSize }
 import layout_pass { LayoutPass }
 import text { TextMeasure, TextError }
@@ -175,6 +175,17 @@ fn contribution(value: f64, preferred: f64, item: &Item) -> f64 {
   if item.shrink == 0.0 { result = max(result, item.base) }
   return clamp(result, item.minimum, item.maximum) + item.marginStart + item.marginEnd
 }
+// Sizing §5.1: a box's min-content block size equals its max-content block
+// size, except for a multi-line flex container whose main axis is the block
+// axis (§9.9.1). Probing both under one constraint lets the second reuse the
+// first's cached result.
+fn blockAxisConstraint(style: &Style, horizontal: bool, constraint: AvailableSpace) -> AvailableSpace {
+  if constraint.kind != AvailableKind.MinContent { return constraint }
+  let inlineHorizontal = style.writingMode == WritingMode.HorizontalTb
+  if horizontal == inlineHorizontal { return constraint }
+  if isFlex(style) && style.flexWrap != FlexWrap.NoWrap && axes(style).horizontal != inlineHorizontal { return constraint }
+  return AvailableSpace.maxContent()
+}
 effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f64) -> Probe ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut input = childInput.*
   input.performLayout = false
@@ -260,7 +271,7 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let base = resolve(basis, parentMain, parentDefinite, 0.0) + add
   let deferMinimum = autoMinimum && !intrinsic && preferredDefinite && basisDefinite && basis.kind == DimensionKind.Length && base >= max(item.inset, preferredSize) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
   if (autoMinimum && !deferMinimum) || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
-    let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, AvailableSpace.minContent(), crossDefinite, crossSize)
+    let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, blockAxisConstraint(style, axis.horizontal, AvailableSpace.minContent()), crossDefinite, crossSize)
     minContent = axisSize(measured.size, axis.horizontal)
     minimumCross = axisSize(measured.size, !axis.horizontal)
     ratio = measured.preferredRatio

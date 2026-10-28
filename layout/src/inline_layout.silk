@@ -1665,6 +1665,8 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   }
   let mut barriers = move saved.barriers
   let mut normalized = move saved.normalized
+  let mut memo = move saved.memo
+  if !reuse { memo.prefix.clear() }
   if !reuse {
     let rawTokens = run tokensFor(nodes, raw, scopes)
     normalized = run TextFlow.normalize(rawTokens.asSlice(), nodes.sources)
@@ -1697,6 +1699,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       floatMinimum = max(floatMinimum, item.advance) }
     index = index + 1
   }
+  run memo.prepare(original.asSlice(), scopes)
   let context = TextContext { tokens: normalized.tokens.asSlice(), writingMode: style.writingMode, textOrientation: style.textOrientation, direction: style.usedDirection(), unicodeBidi: unicodeBidi, textJustify: style.textJustify }
   let mut offered = move saved.offered
   if !reuse { offered.clear() }
@@ -1779,11 +1782,17 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   else if available.kind == AvailableKind.Definite { width = max(0.0, available.value - box.inset.horizontal()) }
   else {
     let mut minimum = available.kind == AvailableKind.MinContent
+    let remembered = !fragmented && !visualPlan.active && ((minimum && memo.hasMin) || (!minimum && memo.hasMax))
+    let wanted = minimum
     // CSS Sizing §5.1 defines intrinsic widths through shrink-to-fit. An
     // indent can make the all-breaks width exceed the no-soft-breaks width.
     let capMinimum = minimum && resolve(style.textIndent.value, 0.0, true, 0.0) != 0.0
     let mut minimumWidth = 0.0
-    while true {
+    if remembered {
+      width = memo.maxContent
+      if minimum { width = memo.minContent }
+    }
+    while !remembered {
       width = 0.0
       let mut start = TextCursor { unit: 0, offset: 0 }
       let mut firstIntrinsic = true
@@ -1812,6 +1821,12 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         continue
       }
       if capMinimum { width = min(width, minimumWidth) }
+      if !fragmented && !visualPlan.active {
+        if wanted { memo.minContent = width
+          memo.hasMin = true }
+        else { memo.maxContent = width
+          memo.hasMax = true }
+      }
       break
     }
   }
@@ -1875,12 +1890,18 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     fastFit = points.get(index).kind != TextBreakKind.Hyphenated
     index = index + 1
   }
-  let mut fastPrefix = List<f64>.make()
-  if fastFit {
+  // Every line of a width fitted before in this pass ends where it did then.
+  let fitsMemo = fastFit && bfc.clearBelow(input.bfcContentOrigin.y)
+  let mut memoFirst = NO_NODE
+  if fitsMemo { memoFirst = memo.linesFor(width) }
+  let mut memoLine: usize = 0
+  let mut lineEnds = List<usize>.make()
+  if fastFit && memoFirst == NO_NODE && memo.prefix.length() != context.tokens.length + 1 {
+    memo.prefix.clear()
     run shapeCandidate(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut fonts, &mut shaped, &mut candidate, TextCursor { unit: 0, offset: 0 }, terminal, false, 0.0, 0.0, &[])
-    run fastPrefix.reserveExact(context.tokens.length + 1)
-    while fastPrefix.length() <= context.tokens.length { run fastPrefix.append(0.0) }
-    let prefix = fastPrefix.asMutSlice()
+    run memo.prefix.reserveExact(context.tokens.length + 1)
+    while memo.prefix.length() <= context.tokens.length { run memo.prefix.append(0.0) }
+    let prefix = memo.prefix.asMutSlice()
     index = 0
     while index < candidate.items.length() {
       let item = candidate.items.get(index)
@@ -1941,7 +1962,24 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     let mut total = 0.0
     let mut lineClosed = false
     let mut band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, 0.0), indent, indentRtl)
-    if fastFit && next + 1 < points.length() && bfc.clearBelow(input.bfcContentOrigin.y + cursor) {
+    if memoFirst != NO_NODE {
+      let point = points.get(memo.ends.get(memoFirst + memoLine))
+      let room = band.right - band.left
+      let mut inlineOrigin = band.left
+      if rtl { inlineOrigin = width - band.right }
+      run shapeCandidate(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut fonts, &mut shaped, &mut candidate, start, point.at, false, 0.0, inlineOrigin, &[])
+      let natural = leading + candidate.advance + textEdge(nodes, original.asSlice(), scopes, point.at, false, rtl, visualPlan.active)
+      let old = move accepted
+      accepted = move candidate
+      candidate = move old
+      total = natural - accepted.hanging
+      if point.kind == TextBreakKind.Forced || point.at.equal(terminal) {
+        total = natural - min(accepted.hanging, max(0.0, natural - room))
+      }
+      end = point.at
+      next = memo.ends.get(memoFirst + memoLine) + 1
+      lineClosed = true
+    } else if fastFit && next + 1 < points.length() && bfc.clearBelow(input.bfcContentOrigin.y + cursor) {
       // Skip the candidates that clearly fit: guess the last point whose
       // estimated line fits, step back until one exactly fits, and let the
       // loop below extend from there. Line advances grow with content, so
@@ -1958,7 +1996,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         let mut endUnit = point.at.unit
         while endUnit > startUnit && context.tokens[endUnit - 1].kind == TextTokenKind.Space { endUnit = endUnit - 1 }
         let mut estimate = 0.0
-        if endUnit > startUnit { estimate = fastPrefix.get(endUnit) - fastPrefix.get(startUnit) }
+        if endUnit > startUnit { estimate = memo.prefix.get(endUnit) - memo.prefix.get(startUnit) }
         if probe > next && leading + estimate > room { break }
         guess = probe
         if point.kind == TextBreakKind.Forced { break }
@@ -2033,6 +2071,10 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       sourceEnding = atSource
       if point.at.equal(offeredPoint.at) { next = next + 1 }
       if atSource || point.kind == TextBreakKind.Forced { break }
+    }
+    if fitsMemo {
+      if memoFirst == NO_NODE { run lineEnds.append(next - 1) }
+      memoLine = memoLine + 1
     }
     let mut metrics = lineExtents(accepted.items.asSlice(), scopes, extents.asMutSlice(), 0, accepted.items.length(), accepted.real)
     let mut boundaryOnly = false
@@ -2264,7 +2306,8 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     state.descendantsComplete = state.normalContentComplete && state.pendingFirst == NO_NODE
     run output.resumes.set(id, state)
   }
+  if fitsMemo && memoFirst == NO_NODE && !blocked && next == points.length() { run memo.record(width, lineEnds.asSlice()) }
   run output.inlinePrepared.asMutSlice()[id].reserveExact(1)
-  run output.inlinePrepared.asMutSlice()[id].append(PreparedInline { ready: true, normalized: move normalized, analysis: move analysis, offered: move offered, visual: move visualPlan, barriers: move barriers })
+  run output.inlinePrepared.asMutSlice()[id].append(PreparedInline { ready: true, normalized: move normalized, analysis: move analysis, offered: move offered, visual: move visualPlan, barriers: move barriers, memo: move memo })
   return result
 }

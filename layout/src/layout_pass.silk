@@ -318,7 +318,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // Intrinsic probes update scalar sizing state only. Fragment geometry belongs
   // to accepted full-layout passes, not to cached or speculative measurements.
   // Marks a box's ancestors as having a descendant written or laid out again.
-  fn markAncestors(self: &mut Self, id: usize) {
+  fn markAncestors(self: &mut Self, id: usize) with Intrinsic.inlineAlways() {
     if id >= self.parents.length() || id >= self.writes.below.length() { return }
     let mut box = self.parents.get(id)
     while box != NO_NODE && self.writes.below.get(box) != self.writes.generation {

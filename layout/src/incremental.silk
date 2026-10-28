@@ -45,31 +45,46 @@ fn clearSubtree(nodes: &BoxTree, cache: &mut LayoutCache, root: usize) {
 // ancestor (its size may depend on any descendant). A text source shares its
 // parent's style and has no descendants. When `logged`, `sources` lists the
 // changed sources.
-pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, since: usize, logged: bool, sources: &[usize]) {
+// The boxes in `alone` are laid out again by themselves first (see the
+// early cutoff in compute), which clears their ancestors only if needed.
+pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, since: usize, logged: bool, sources: &[usize], alone: &[usize]) {
   if logged {
     let mut at: usize = 0
     while at < sources.length {
-      invalidateSource(nodes, &mut cache, sources[at])
+      invalidateSource(nodes, &mut cache, sources[at], alone)
       at = at + 1
     }
     return
   }
   let mut source: usize = 0
   while source < tree.nodes.length() {
-    if tree.changedAt(source) > since { invalidateSource(nodes, &mut cache, source) }
+    if tree.changedAt(source) > since { invalidateSource(nodes, &mut cache, source, alone) }
     source = source + 1
   }
 }
-fn invalidateSource(nodes: &BoxTree, cache: &mut LayoutCache, source: usize) {
+fn invalidateSource(nodes: &BoxTree, cache: &mut LayoutCache, source: usize, alone: &[usize]) {
   let mut box = nodes.firstBySource.get(source)
   while box != NO_NODE {
-    clearSubtree(nodes, &mut cache, box)
-    let mut ancestor = nodes.node(box).parent
-    while ancestor != NO_NODE {
-      cache.clearBox(ancestor)
-      ancestor = nodes.node(ancestor).parent
-    }
+    invalidateBox(nodes, &mut cache, box, !contains(alone, box))
     box = nodes.node(box).nextContinuation
+  }
+}
+fn contains(values: &[usize], value: usize) -> bool {
+  let mut at: usize = 0
+  while at < values.length {
+    if values[at] == value { return true }
+    at = at + 1
+  }
+  return false
+}
+// Clears a box's subtree and, with `ancestors`, every ancestor.
+pub fn invalidateBox(nodes: &BoxTree, cache: &mut LayoutCache, box: usize, ancestors: bool) {
+  clearSubtree(nodes, &mut cache, box)
+  if !ancestors { return }
+  let mut ancestor = nodes.node(box).parent
+  while ancestor != NO_NODE {
+    cache.clearBox(ancestor)
+    ancestor = nodes.node(ancestor).parent
   }
 }
 

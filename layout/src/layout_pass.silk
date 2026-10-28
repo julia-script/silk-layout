@@ -553,8 +553,8 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     if start >= end || self.fragments.first(id) != start { return }
     let fragment = &self.fragments.values.asSlice()[start]
     if fragment.box != id || fragment.kind != FragmentKind.Box { return }
-    if beside { run self.cache.recordFinal(id, input, layout, start, end, self.floatContext.asSlice()) }
-    else { run self.cache.recordFinal(id, input, layout, start, end, &[]) }
+    if beside { run self.cache.recordFinal(id, input, layout, start, end, self.floatContext.asSlice(), true) }
+    else { run self.cache.recordFinal(id, input, layout, start, end, &[], false) }
   }
   // Restores the box records of a copied subtree's descendants and carries
   // their kept ranges forward, moved to where the copy put their fragments.

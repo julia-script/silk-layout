@@ -642,9 +642,14 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       // Positioning appends after normal flow; no copied link may reach it.
       if !run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent) { return Option<Layout>.None }
     }
+    // A box kept in place and not written yet this compute still holds its
+    // previous final layout, which differs from the recorded one only in what
+    // its parent's placement wrote.
+    let untouched = kept && self.inPlace && self.writes.stamps.get(id) != self.writes.generation
     run self.restoreBoxes(nodes, id, slot, base, kept, true)
     let layout = self.cache.result(id).layout
-    run self.store(id, &layout, true)
+    if untouched { run self.place(id, layout.location, layout.usedMargin, layout.hasClearance, true) }
+    else { run self.store(id, &layout, true) }
     run self.cache.carryFinal(id, slot, base, self.fragments.checkpoint())
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
     return Option<Layout>.Some { value: layout }
@@ -712,6 +717,19 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.boxes[id] = self.cache.layoutAt(index).*
     self.stats.cacheHits = self.stats.cacheHits + 1
     return true
+  }
+  // The cache entry answering a size probe of the box, or usize.MAX. A hit is
+  // read in place with `probed`, leaving boxes[id] as it was.
+  pub fn findProbe(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> usize {
+    let index = self.cache.find(id, input, kind)
+    if index != usize.MAX { self.stats.cacheHits = self.stats.cacheHits + 1 }
+    return index
+  }
+  // A probe's result: the cache entry `index` from findProbe, else the layout
+  // a fresh probe stored.
+  pub fn probed(self: &Self, id: usize, index: usize) -> &Layout {
+    if index == usize.MAX { return &self.boxes[id] }
+    return self.cache.layoutAt(index)
   }
   // Caches the layout last stored for the box.
   pub effect fn rememberStored(self: &mut Self, id: usize, input: &Input, kind: CacheKind) ! OutOfMemoryError ? &mut Allocator {

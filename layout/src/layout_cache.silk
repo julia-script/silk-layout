@@ -19,6 +19,19 @@ pub const REUSE_LEVEL: u8 = 3
 // Set beside the level when no box in the subtree is relatively or sticky
 // positioned: its fragments' final overflow from the previous compute holds.
 pub const REUSE_STATIC: u8 = 4
+// A box's own share of the facts above, from its style and its parent's
+// writing mode, plus whether it reads no viewport limits.
+pub const FACT_FREE: u8 = 8
+
+// Per-box facts drawn from styles, kept across computes of the same boxes
+// and refreshed only where a style changed; see Incremental.markSubtrees.
+pub struct BoxFacts { pub own: List<u8>, pub reusable: List<u8>, pub viewportFree: List<bool>, pub keyShapes: List<u8> }
+impl BoxFacts {
+  pub fn make() -> BoxFacts { return BoxFacts { own: List<u8>.make(), reusable: List<u8>.make(), viewportFree: List<bool>.make(), keyShapes: List<u8>.make() } }
+  pub fn covers(self: &Self, count: usize) -> bool {
+    return self.own.length() == count && self.reusable.length() == count && self.viewportFree.length() == count && self.keyShapes.length() == count
+  }
+}
 pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
 // `generation` is the last compute that created or hit the entry.
 struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }

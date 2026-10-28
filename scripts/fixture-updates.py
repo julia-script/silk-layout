@@ -2,7 +2,7 @@
 """Check kept layout results against fresh layouts on every fixture.
 
 For each unfragmented fixture, the native adapter lays out the input, applies
-a cycle of updates (viewport resizes, restyling an element with its own style,
+a cycle of updates (viewport resizes, restyling an element with its own style or with changed style facts,
 hiding and showing it, editing a text node, scrolling a scroll container), and
 the final geometry must equal a fresh layout of the final document. Fixtures
 only check single computes; this covers what the LayoutTree keeps between them.
@@ -34,6 +34,15 @@ def scenarios(document):
         yield "restyle", [{"set": [{"node": node, "style": style}]}]
         hidden = dict(style, display="none")
         yield "hide", [{"set": [{"node": node, "style": hidden}]}, {"set": [{"node": node, "style": style}]}]
+        # Style facts kept across computes: relative positioning, a negative
+        # margin, a length width, each on a box and then on its parent.
+        for name, target in (("restyle-facts", node), ("restyle-facts-parent", document["nodes"][node]["parent"])):
+            original = document["nodes"][target].get("style")
+            if original is None:
+                continue
+            moved = dict(original, position="relative", insetTop=3, marginLeft=-4, width=57)
+            yield name, [{"set": [{"node": target, "style": moved}]}]
+            yield name + "-back", [{"set": [{"node": target, "style": moved}]}, {"set": [{"node": target, "style": original}]}]
     scrollers = [index for index, node in enumerate(document["nodes"])
                  if "style" in node and ({node["style"].get("overflowX"), node["style"].get("overflowY"), node["style"].get("overflow")} & {"scroll", "auto", "hidden"})]
     if scrollers:

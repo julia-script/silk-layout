@@ -60,6 +60,10 @@ fn edges<T: Copy>(s: &serde_json::Map<String, Value>, name: &str, parse: fn(Opti
     Rect { left: side("Left"), right: side("Right"), top: side("Top"), bottom: side("Bottom") }
 }
 
+fn inset(value: Option<&Value>) -> LengthPercentageAuto {
+    value.map_or(LengthPercentageAuto::auto(), |v| length_percentage_auto(Some(v)))
+}
+
 fn align(value: Option<&Value>) -> AlignItems {
     value.map_or(AlignItems::NORMAL, |v| match v.as_str().unwrap() {
         "normal" => AlignItems::NORMAL,
@@ -222,6 +226,11 @@ fn style(value: &Value) -> Style {
         max_size: Size { width: min_max(s.get("maxWidth")), height: min_max(s.get("maxHeight")) },
         padding: edges(s, "padding", length_percentage),
         margin: edges(s, "margin", length_percentage_auto),
+        position: match s.get("position").and_then(Value::as_str) {
+            Some("absolute") => Position::Absolute,
+            _ => Position::Relative,
+        },
+        inset: edges(s, "inset", inset),
         border,
         gap: Size { width: length_percentage(s.get("columnGap")), height: length_percentage(s.get("rowGap")) },
         align_items: align(s.get("alignItems")),

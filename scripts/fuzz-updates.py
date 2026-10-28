@@ -90,7 +90,10 @@ def style_edit(r, mode, nodes, node):
 
 def case(seed, mode):
     r = random.Random(seed)
-    nodes = [{"parent": None, "style": {"display": "block", "boxSizing": "border-box", "width": 800, "padding": 4}}]
+    root = {"display": r.choice(["block", "flex"]), "boxSizing": "border-box", "padding": 4}
+    # A fixed root width hides viewport resizes from everything below it.
+    if r.random() < .5: root["width"] = 800
+    nodes = [{"parent": None, "style": root}]
     depth = [0]
     for _ in range(1, r.randint(20, 150)):
         parent = r.choice([index for index in range(len(nodes)) if depth[index] < 7 and "text" not in nodes[index]])

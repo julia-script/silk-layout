@@ -384,10 +384,16 @@ fn cacheKey(shape: u8, input: &Input, viewportFree: bool) -> Input {
     if key.intrinsicWidth || shape & KEY_WIDTH_LENGTH != 0 { key.availableWidth = AvailableSpace.maxContent() }
     if key.intrinsicHeight || shape & KEY_HEIGHT_LENGTH != 0 { key.availableHeight = AvailableSpace.maxContent() }
   }
+  let parentHorizontal = input.parentWritingMode == WritingMode.HorizontalTb
+  // A length size in the parent's writing mode leaves available space
+  // nothing to size on that axis.
+  if shape & KEY_PERCENT == 0 && (shape & KEY_HORIZONTAL != 0) == parentHorizontal {
+    if shape & KEY_WIDTH_LENGTH != 0 && !key.intrinsicWidth { key.availableWidth = AvailableSpace.maxContent() }
+    if shape & KEY_HEIGHT_LENGTH != 0 && !key.intrinsicHeight { key.availableHeight = AvailableSpace.maxContent() }
+  }
   // A horizontal block container never reads its available block size: its
   // children get max-content block space and it has no stretch or
   // fit-content block sizing in a horizontal parent.
-  let parentHorizontal = input.parentWritingMode == WritingMode.HorizontalTb
   if shape & KEY_BLOCK != 0 && parentHorizontal { key.availableHeight = AvailableSpace.maxContent() }
   // Orthogonal flows and percentage-sized boxes read the parent size.
   if (shape & KEY_HORIZONTAL != 0) != parentHorizontal || shape & KEY_PERCENT != 0 { return key }

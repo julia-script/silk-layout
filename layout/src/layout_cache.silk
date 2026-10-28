@@ -16,9 +16,6 @@ pub const REUSE_NONE: u8 = 0
 pub const REUSE_INDEPENDENT: u8 = 1
 pub const REUSE_IN_FLOW: u8 = 2
 pub const REUSE_LEVEL: u8 = 3
-// Set beside the level when no box in the subtree is relatively or sticky
-// positioned: its fragments' final overflow from the previous compute holds.
-pub const REUSE_STATIC: u8 = 4
 // A box's own share of the facts above, from its style and its parent's
 // writing mode, plus whether it reads no viewport limits.
 pub const FACT_FREE: u8 = 8
@@ -311,15 +308,16 @@ impl LayoutCache {
   }
 }
 
-// The previous compute's output, which reused subtrees are copied from, and
-// the scrollable overflow each fragment and box had after the final pass's
-// normal-flow layout, before positioning extended it. Positioning's other
-// edits (visual offsets, world locations, out-of-flow fragments appended
-// after the normal-flow ones) are reset or excluded when copying. Between
-// computes `fragments` and `boxes` are spare storage for the next output.
-pub struct Snapshot { pub fragments: FragmentArena, pub boxes: List<Layout>, pub fragmentOverflow: List<Rect>, pub boxOverflow: List<Rect> }
+// The previous compute's output, which reused subtrees are copied from.
+// Copies keep each fragment's and box's final scrollable overflow: inside a
+// reused subtree positioning places everything as before, so propagating
+// overflow again would only reach the same union. Positioning's other edits
+// (visual offsets, world locations, out-of-flow fragments appended after the
+// normal-flow ones) are reset or excluded when copying. Between computes
+// `fragments` and `boxes` are spare storage for the next output.
+pub struct Snapshot { pub fragments: FragmentArena, pub boxes: List<Layout> }
 impl Snapshot {
-  pub fn make() -> Snapshot { return Snapshot { fragments: FragmentArena.make(), boxes: List<Layout>.make(), fragmentOverflow: List<Rect>.make(), boxOverflow: List<Rect>.make() } }
+  pub fn make() -> Snapshot { return Snapshot { fragments: FragmentArena.make(), boxes: List<Layout>.make() } }
   // Takes a finished compute's output, leaving the spare storage in its place.
   pub fn takeOutput(self: &mut Self, fragments: &mut FragmentArena, boxes: &mut List<Layout>) {
     let spareFragments = Intrinsic.replace(self.fragments, FragmentArena.make())
@@ -339,18 +337,6 @@ impl Snapshot {
       id = id + 1
     }
     self.boxes = move boxes
-    let mut overflow = List<Rect>.make()
-    if self.boxOverflow.length() == toNew.length {
-      run overflow.reserveExact(toOld.length)
-      id = 0
-      while id < toOld.length {
-        let from = toOld[id]
-        if from != ABSENT { run overflow.append(self.boxOverflow.get(from)) }
-        else { run overflow.append(Rect.zero()) }
-        id = id + 1
-      }
-    }
-    self.boxOverflow = move overflow
     run self.fragments.remapBoxes(toOld, toNew)
   }
 }

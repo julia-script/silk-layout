@@ -16,7 +16,7 @@ import breaks { ForcedBreaks, PageSide, BreakKinds }
 import inline_prepared { PreparedInline, KeptText }
 
 pub import layout_cache { REUSE_INDEPENDENT, REUSE_IN_FLOW, CacheKind }
-import layout_cache { LayoutCache, Snapshot, FinalRange, REUSE_LEVEL, REUSE_STATIC }
+import layout_cache { LayoutCache, Snapshot, FinalRange, REUSE_LEVEL }
 
 struct ScrollbarSelection { horizontal: bool, vertical: bool }
 impl Copy for ScrollbarSelection {}
@@ -501,24 +501,6 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.needsRelayout = false
     self.hasAutoScrollbars = false
   }
-  // Records the normal-flow overflow positioning is about to extend.
-  pub effect fn captureSnapshot(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
-    let values = self.fragments.values.asSlice()
-    self.next.fragmentOverflow.clear()
-    run self.next.fragmentOverflow.reserveExact(values.length)
-    let mut index: usize = 0
-    while index < values.length {
-      run self.next.fragmentOverflow.append(values[index].scrollableOverflow)
-      index = index + 1
-    }
-    self.next.boxOverflow.clear()
-    run self.next.boxOverflow.reserveExact(self.boxes.length)
-    index = 0
-    while index < self.boxes.length {
-      run self.next.boxOverflow.append(self.boxes[index].scrollableOverflow)
-      index = index + 1
-    }
-  }
   // Records the full layout of a reusable box that just emitted fragments
   // [start, current end), if its own fragment opens the range.
   // `beside` says the box was laid out beside the floats in floatContext.
@@ -532,17 +514,15 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   }
   // Restores the box records of a copied subtree's descendants and carries
   // their kept ranges forward, moved to where the copy put their fragments.
-  // A settled subtree keeps their final overflow.
-  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize, settled: bool) ! OutOfMemoryError ? &mut Allocator {
+  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize) ! OutOfMemoryError ? &mut Allocator {
     self.boxes[id] = self.previous.boxes.asSlice()[id]
-    if !settled { self.boxes[id].scrollableOverflow = self.previous.boxOverflow.get(id) }
     let mut child = nodes.node(id).firstChild
     while child != NO_NODE {
       let kept = self.cache.keptRange(child)
       if kept.valid && kept.start > from.start && kept.end <= from.end {
         run self.cache.carryFinal(child, kept, kept.start - from.start + base, kept.end - from.start + base)
       }
-      run self.restoreBoxes(nodes, child, from, base, settled)
+      run self.restoreBoxes(nodes, child, from, base)
       child = nodes.node(child).nextSibling
     }
   }
@@ -552,13 +532,11 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // of subtree the caller can take (see Incremental.markSubtrees).
   pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
     if self.frame != NO_NODE || id >= self.reusable.length() || (self.reusable.get(id) & REUSE_LEVEL) < level { return Option<Layout>.None }
-    let settled = (self.reusable.get(id) & REUSE_STATIC) != 0
     let slot = self.cache.keptRange(id)
     if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return Option<Layout>.None }
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }
     if !beside && slot.floatCount != 0 { return Option<Layout>.None }
     if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || self.previous.boxes.length() != self.boxes.length { return Option<Layout>.None }
-    if slot.end > self.previous.fragmentOverflow.length() || self.previous.boxOverflow.length() != self.boxes.length { return Option<Layout>.None }
     let previous = self.previous.fragments.values.asSlice()
     let mut index = slot.start
     while index < slot.end {
@@ -569,8 +547,8 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       index = index + 1
     }
     let base = self.fragments.checkpoint()
-    run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent, self.previous.fragmentOverflow.asSlice(), settled)
-    run self.restoreBoxes(nodes, id, slot, base, settled)
+    run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent)
+    run self.restoreBoxes(nodes, id, slot, base)
     let layout = self.cache.result(id).layout
     run self.store(id, &layout, true)
     run self.cache.carryFinal(id, slot, base, self.fragments.checkpoint())

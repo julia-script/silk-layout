@@ -2,6 +2,7 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import silk.slice { Slice }
 import silk.ownership { Copy }
+import silk.pointer { Pointer }
 import geometry { Point, Size, Rect, ResolvedEdges, BaselineSet, sameSize, sameRect, sameEdges, sameBaselines, sameOverflow }
 import tree { NO_NODE }
 
@@ -16,6 +17,13 @@ pub struct TextFragment {
   pub kind: TextFragmentKind,
 }
 impl Copy for TextFragment {}
+
+// `value` as a one-element slice, for List.appendSlice: it copies straight
+// from `value`, where List.append of a large value built in place copies it
+// through the stack first.
+pub fn one<T>(value: &T) -> &[T] with Intrinsic.inlineAlways() {
+  unsafe { return Pointer.borrowMany<T, T>(value, Pointer.assumeMany<T>(Pointer.fromRef<T>(value)), 1) }
+}
 
 pub struct Fragment {
   // What resolveLocations reads and writes for every fragment comes first,
@@ -343,16 +351,18 @@ impl FragmentArena {
   }
 
   // Saves what a write over fragment `index` would lose of the previous output.
+  // appendSlice copies the fragment straight across; append would stage it
+  // through the stack first.
   effect fn saveFragment(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
     if !self.inPlace || index >= self.previousCount || self.fragmentStamps.get(index) == self.generation { return }
-    run self.savedFragments.append(self.values.get(index))
+    run self.savedFragments.appendSlice(one<Fragment>(&self.values.asSlice()[index]))
     run self.noteEdit(index)
     self.fragmentStamps.set(index, self.generation)
     self.fragmentSlots.set(index, self.savedFragments.length() - 1)
   }
   effect fn saveText(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
     if !self.inPlace || index >= self.previousTexts || self.textStamps.get(index) == self.generation { return }
-    run self.savedTexts.append(self.texts.get(index))
+    run self.savedTexts.appendSlice(one<TextFragment>(&self.texts.asSlice()[index]))
     self.textStamps.set(index, self.generation)
     self.textSlots.set(index, self.savedTexts.length() - 1)
   }

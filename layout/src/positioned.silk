@@ -1648,8 +1648,18 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
   // Physical parents precede children, including CB-owned absolute subtrees.
   // Line/inline fragments pass overflow through; only actual box fragments clip.
   let mut index = output.fragments.values.length()
+  // Settled ranges already hold their final overflow: skip to their first fragment.
+  let mut settled = output.fragments.settled.length()
+  if output.frame != NO_NODE { settled = 0 }
   while index > 0 {
     index = index - 1
+    if settled > 0 && index + 1 == output.fragments.settled.get(settled - 1).end {
+      let range = output.fragments.settled.get(settled - 1)
+      settled = settled - 1
+      index = range.start
+      let values = output.fragments.values.asMutSlice()
+      values[index].scrollableOverflow = range.overflow
+    }
     let fragment = &output.fragments.values.asSlice()[index]
     // Nonpainting scopes contribute no own rectangle, but CB-owned absolute
     // descendants still propagate their overflow through that physical scope.

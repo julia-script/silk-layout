@@ -1,0 +1,212 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.i32
+import silk.usize
+import geometry { max }
+import grid_style { GridBreadth, GridBreadthKind, GridTrack, GridTrackKind }
+
+pub struct TrackState {
+  pub base: f64,
+  pub position: f64,
+  pub isFlexible: bool,
+  pub factor: f64,
+  pub autoMinimum: bool,
+  pub autoMaximum: bool,
+  frozen: bool,
+}
+
+impl Copy for TrackState {}
+
+impl TrackState {
+  pub fn fixed(size: f64) -> TrackState {
+    return TrackState {
+      base: max(0.0, size),
+      position: 0.0,
+      isFlexible: false,
+      factor: 0.0,
+      autoMinimum: false,
+      autoMaximum: false,
+      frozen: false,
+    }
+  }
+
+  pub fn flexible(minimum: f64, factor: f64) -> TrackState {
+    let mut result = TrackState.fixed(minimum)
+    result.isFlexible = true
+    result.factor = max(0.0, factor)
+    return result
+  }
+}
+
+fn automatic(value: GridBreadth, definite: bool) -> bool {
+  return value.kind == GridBreadthKind.Auto
+    || (!definite && (value.kind == GridBreadthKind.Percent || value.kind == GridBreadthKind.Calc))
+}
+
+fn initialize(track: &GridTrack, basis: f64, definite: bool) -> TrackState {
+  let mut minimum = 0.0
+  if track.min.kind == GridBreadthKind.Length {
+    minimum = track.min.length
+  } else if definite
+    && (track.min.kind == GridBreadthKind.Percent || track.min.kind == GridBreadthKind.Calc) {
+    minimum = track.min.length + track.min.percent * basis
+  }
+  let mut result = TrackState.fixed(minimum)
+  result.autoMinimum = automatic(track.min, definite)
+  result.autoMaximum = track.kind != GridTrackKind.FitContent && automatic(track.max, definite)
+  if track.max.kind == GridBreadthKind.Flex {
+    result.isFlexible = true
+    result.factor = track.max.length
+
+    // A bare flex breadth means minmax(auto, <flex>), not a flexible minimum.
+    if track.kind == GridTrackKind.Breadth {
+      result.autoMinimum = true
+    }
+  }
+
+  // Intrinsic minima start at zero. Their contribution and growth-limit
+  // algorithms, including fit-content, are not implemented by this initializer.
+  return result
+}
+
+pub effect fn initializeTracks(
+  explicit: &[GridTrack],
+  origin: i32,
+  count: usize,
+  basis: f64,
+  definite: bool,
+  result: &mut List<TrackState>,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  result.clear()
+  let mut leading: usize = 0
+  let mut explicitStart: usize = 0
+  if origin < 0 {
+    // Avoid negating the minimum signed value before converting to usize.
+    leading = i32.toUsize(-(origin + 1)) + 1
+  } else {
+    explicitStart = i32.toUsize(origin)
+  }
+  let mut index: usize = 0
+  while index < count {
+    let mut state = TrackState.fixed(0.0)
+    state.autoMinimum = true
+    state.autoMaximum = true
+    if index >= leading {
+      let source = index - leading + explicitStart
+      if source < explicit.length {
+        state = initialize(&explicit[source], basis, definite)
+      }
+    }
+    run result.append(state)
+    index = index + 1
+  }
+}
+
+fn gutters(count: usize, gap: f64) -> f64 {
+  if count == 0 {
+    return 0.0
+  }
+  return usize.toF64(count - 1) * gap
+}
+
+// CSS Grid 2 §12.7.1, with gutters treated as fixed tracks. Invoke after
+// collecting contribution bases, before expanding or stretching those bases.
+pub fn resolveFlexible(tracks: &mut [TrackState], available: f64, gap: f64) {
+  let space = available - gutters(tracks.length, gap)
+  let mut index: usize = 0
+  while index < tracks.length {
+    let track = &mut tracks[index]
+    track.frozen = !track.isFlexible || track.factor == 0.0
+    index = index + 1
+  }
+  while true {
+    let mut remaining = space
+    let mut factors = 0.0
+    index = 0
+    while index < tracks.length {
+      let track = &tracks[index]
+      if track.frozen {
+        remaining = remaining - track.base
+      } else {
+        factors = factors + track.factor
+      }
+      index = index + 1
+    }
+
+    // Overflow never shrinks an established base; zero-fr tracks keep theirs.
+    if remaining <= 0.0 || factors == 0.0 {
+      return
+    }
+    let fraction = remaining / max(1.0, factors)
+    let mut restart = false
+    index = 0
+    while index < tracks.length {
+      let track = &mut tracks[index]
+      if !track.frozen && fraction * track.factor < track.base {
+        track.frozen = true
+        restart = true
+      }
+      index = index + 1
+    }
+    if !restart {
+      index = 0
+      while index < tracks.length {
+        let track = &mut tracks[index]
+        if !track.frozen {
+          track.base = fraction * track.factor
+        }
+        index = index + 1
+      }
+      return
+    }
+  }
+}
+
+// CSS Grid 2 §12.8. The caller decides whether content alignment permits stretch.
+pub fn stretchAuto(tracks: &mut [TrackState], available: f64, gap: f64) {
+  let mut remaining = available - gutters(tracks.length, gap)
+  let mut count: usize = 0
+  let mut index: usize = 0
+  while index < tracks.length {
+    remaining = remaining - tracks[index].base
+    if tracks[index].autoMaximum {
+      count = count + 1
+    }
+    index = index + 1
+  }
+  if remaining <= 0.0 || count == 0 {
+    return
+  }
+  let share = remaining / usize.toF64(count)
+  index = 0
+  while index < tracks.length {
+    let track = &mut tracks[index]
+    if track.autoMaximum {
+      track.base = track.base + share
+    }
+    index = index + 1
+  }
+}
+
+pub fn positionTracks(tracks: &mut [TrackState], gap: f64) -> f64 {
+  let mut extent = 0.0
+  let mut index: usize = 0
+  while index < tracks.length {
+    if index > 0 {
+      extent = extent + gap
+    }
+    tracks[index].position = extent
+    extent = extent + tracks[index].base
+    index = index + 1
+  }
+  return extent
+}
+
+// Positions must be current; the caller supplies a nonempty, in-range span.
+pub fn spanSize(tracks: &[TrackState], start: usize, end: usize) -> f64 {
+  let last = &tracks[end - 1]
+  return last.position - tracks[start].position + last.base
+}

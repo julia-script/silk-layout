@@ -1,0 +1,258 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.i32
+import silk.usize
+import box_tree { BoxTree }
+import context { outOfFlow }
+import grid_style { GridLine, GridLineKind, MAX_GRID_TRACKS }
+import tree { NO_NODE }
+
+pub struct GridSpan {
+  pub start: i32,
+  pub end: i32,
+  pub definite: bool,
+}
+
+impl Copy for GridSpan {}
+
+pub struct GridItem {
+  pub id: usize,
+  pub row: GridSpan,
+  pub column: GridSpan,
+}
+
+impl Copy for GridItem {}
+
+impl GridItem {
+  pub fn make(id: usize) -> GridItem {
+    return GridItem {
+      id: id,
+      row: GridSpan { start: 0, end: 1, definite: false },
+      column: GridSpan { start: 0, end: 1, definite: false },
+    }
+  }
+}
+
+pub struct GridBounds {
+  pub rowOrigin: i32,
+  pub columnOrigin: i32,
+  pub rows: usize,
+  pub columns: usize,
+}
+
+impl Copy for GridBounds {}
+
+impl GridBounds {
+  pub fn empty() -> GridBounds {
+    return GridBounds { rowOrigin: 0, columnOrigin: 0, rows: 0, columns: 0 }
+  }
+}
+
+fn boundedTracks(count: usize) -> i32 {
+  if count > MAX_GRID_TRACKS {
+    return usize.toI32(MAX_GRID_TRACKS)
+  }
+  return usize.toI32(count)
+}
+
+fn boundedNumber(number: i32) -> i32 {
+  let limit = usize.toI32(MAX_GRID_TRACKS)
+  if number < -limit {
+    return -limit
+  }
+  if number > limit {
+    return limit
+  }
+  return number
+}
+
+fn isNumericLine(line: &GridLine) -> bool {
+  return line.kind == GridLineKind.Line && line.name == 0 && line.number != 0
+}
+
+fn linePosition(line: &GridLine, explicitEnd: i32) -> i32 {
+  let number = boundedNumber(line.number)
+  if number > 0 {
+    return number - 1
+  }
+  return explicitEnd + number + 1
+}
+
+fn spanLength(line: &GridLine) -> i32 {
+  if line.kind == GridLineKind.Span && line.name == 0 && line.number > 0 {
+    return boundedNumber(line.number)
+  }
+  return 1
+}
+
+// Grid §8.3 / §8.3.1. Signed coordinates are relative to explicit line 1;
+// negative line numbers resolve against the explicit end, never implicit tracks.
+// Named sides remain unresolved in this numeric phase, not numeric line matches.
+pub fn numericSpan(start: &GridLine, end: &GridLine, explicitTracks: usize) -> GridSpan {
+  let explicitEnd = boundedTracks(explicitTracks)
+  let hasStart = isNumericLine(start)
+  let hasEnd = isNumericLine(end)
+  if hasStart && hasEnd {
+    let first = linePosition(start, explicitEnd)
+    let last = linePosition(end, explicitEnd)
+    if first > last {
+      return GridSpan { start: last, end: first, definite: true }
+    }
+    if first == last {
+      return GridSpan { start: first, end: first + 1, definite: true }
+    }
+    return GridSpan { start: first, end: last, definite: true }
+  }
+  if hasStart {
+    let first = linePosition(start, explicitEnd)
+    return GridSpan { start: first, end: first + spanLength(end), definite: true }
+  }
+  if hasEnd {
+    let last = linePosition(end, explicitEnd)
+    return GridSpan { start: last - spanLength(start), end: last, definite: true }
+  }
+
+  // Two spans discard the end span, including when the start span is named.
+  // A lone named span contributes the default length of one (§8.3.1).
+  let mut length = spanLength(end)
+  if start.kind == GridLineKind.Span {
+    length = spanLength(start)
+  }
+  return GridSpan { start: 0, end: length, definite: false }
+}
+
+// Preserve the explicit grid when the combined implicit extent exceeds the
+// allocation limit. Excess tracks on either side are clipped during normalization.
+fn limitedOrigin(first: i32, explicitEnd: i32) -> i32 {
+  let earliest = explicitEnd - usize.toI32(MAX_GRID_TRACKS)
+  if first < earliest {
+    return earliest
+  }
+  return first
+}
+
+fn limitedEnd(last: i32, origin: i32) -> i32 {
+  let latest = origin + usize.toI32(MAX_GRID_TRACKS)
+  if last > latest {
+    return latest
+  }
+  return last
+}
+
+fn normalize(span: GridSpan, origin: i32, end: i32) -> GridSpan {
+  let mut first = span.start
+  let mut last = span.end
+
+  // Grid §5.4: wholly excluded areas occupy the nearest boundary track;
+  // partially excluded areas retain the intersection with the limited grid.
+  if first < origin {
+    first = origin
+  }
+  if first >= end {
+    first = end - 1
+  }
+  if last > end {
+    last = end
+  }
+  if last <= first {
+    last = first + 1
+  }
+  return GridSpan { start: first - origin, end: last - origin, definite: span.definite }
+}
+
+pub effect fn collectItems<'source>(
+  nodes: &BoxTree<'source>,
+  id: usize,
+  items: &mut List<GridItem>,
+) -> GridBounds
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  items.clear()
+  let template = &nodes.grids[nodes.style(id).grid]
+  let explicitRows = template.rows.tracks.length()
+  let explicitColumns = template.columns.tracks.length()
+  let mut rowStart: i32 = 0
+  let mut columnStart: i32 = 0
+  let mut rowEnd = boundedTracks(explicitRows)
+  let mut columnEnd = boundedTracks(explicitColumns)
+
+  // Reserve once, reusing capacity; no occupancy matrix or per-item allocation.
+  let mut count: usize = 0
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    if !outOfFlow(nodes.style(child)) {
+      count = count + 1
+    }
+    child = nodes.node(child).nextSibling
+  }
+  run items.reserveExact(count)
+
+  let mut nextRow: i32 = 0
+  let limit = usize.toI32(MAX_GRID_TRACKS)
+  child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    let style = nodes.style(child)
+    if !outOfFlow(style) {
+      let placement = &nodes.grids[style.grid].placement
+      let mut item = GridItem.make(child)
+      item.row = numericSpan(&placement.rowStart, &placement.rowEnd, explicitRows)
+      item.column = numericSpan(&placement.columnStart, &placement.columnEnd, explicitColumns)
+
+      // Source-order, single-column fallback only, not Grid §8.5 auto-placement.
+      // The cursor follows preceding row ends and respects automatic span length.
+      if !item.row.definite {
+        let length = item.row.end - item.row.start
+        item.row.start = nextRow
+        item.row.end = nextRow + length
+      }
+      if !item.column.definite {
+        item.column.end = item.column.end - item.column.start
+        item.column.start = 0
+      }
+      if item.row.end > nextRow {
+        nextRow = item.row.end
+      }
+
+      // Once beyond the allocation limit all later fallback rows will be clipped.
+      // Bounding the cursor also prevents arithmetic growth with the item count.
+      if nextRow > limit {
+        nextRow = limit
+      }
+      if item.row.start < rowStart {
+        rowStart = item.row.start
+      }
+      if item.row.end > rowEnd {
+        rowEnd = item.row.end
+      }
+      if item.column.start < columnStart {
+        columnStart = item.column.start
+      }
+      if item.column.end > columnEnd {
+        columnEnd = item.column.end
+      }
+      run items.append(item)
+    }
+    child = nodes.node(child).nextSibling
+  }
+
+  rowStart = limitedOrigin(rowStart, boundedTracks(explicitRows))
+  columnStart = limitedOrigin(columnStart, boundedTracks(explicitColumns))
+  rowEnd = limitedEnd(rowEnd, rowStart)
+  columnEnd = limitedEnd(columnEnd, columnStart)
+  let values = items.asMutSlice()
+  let mut index: usize = 0
+  while index < values.length {
+    values[index].row = normalize(values[index].row, rowStart, rowEnd)
+    values[index].column = normalize(values[index].column, columnStart, columnEnd)
+    index = index + 1
+  }
+
+  // Empty containers retain explicit tracks without inventing an implicit cell.
+  return GridBounds {
+    rowOrigin: rowStart,
+    columnOrigin: columnStart,
+    rows: i32.toUsize(rowEnd - rowStart),
+    columns: i32.toUsize(columnEnd - columnStart),
+  }
+}

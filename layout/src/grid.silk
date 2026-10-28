@@ -1,57 +1,97 @@
 import silk.allocator { Allocator, OutOfMemoryError }
-import silk.usize
+import silk.i32
 import geometry { Layout, Size, Point, OptionalSize, AvailableSpace, Measure, max, clamp }
 import style { Style, DimensionKind, Direction, Align }
-import context { Input, ResolvedBox, childrenInput, resolveBox, outOfFlow }
+import context { Input, ResolvedBox, childrenInput, resolveBox, resolve }
 import box_tree { BoxTree }
-import tree { NO_NODE }
 import layout_pass { LayoutPass }
 import engine { layoutNode, probeNode }
 import text { TextMeasure, TextError }
 import fragmentation { FragmentationError }
 import axes { Axes }
+import grid_placement { collectItems }
+import grid_tracks { initializeTracks, resolveFlexible, stretchAuto, positionTracks, spanSize }
 
-// Grid plumbing: one implicit column and source-order auto rows. Explicit
-// placement and track sizing are separate follow-on algorithms (Grid §§8, 12).
-// Grid §6.1 items never float or collapse margins with their grid container.
-fn itemInput(base: &Input, style: &Style, axis: &Axes, inlineSize: f64, definite: bool) -> Input {
+fn selfAlignment(style: &Style, parent: &Style, inline: bool) -> Align {
+  let mut value = style.alignSelf
+  if inline {
+    value = style.justifySelf
+    if value == Align.Auto {
+      value = parent.justifyItems
+    }
+  } else if value == Align.Auto {
+    value = parent.alignItems
+  }
+  if value == Align.Normal {
+    if !style.replaced && style.aspectRatio == 0.0 {
+      return Align.Stretch
+    }
+    return Align.Start
+  }
+  return value
+}
+
+fn stretchContent(value: Align) -> bool {
+  return value == Align.Normal || value == Align.Stretch
+}
+
+fn alignmentOffset(value: Align, free: f64) -> f64 {
+  if value == Align.End || value == Align.FlexEnd {
+    return free
+  }
+  if value == Align.Center {
+    return free / 2.0
+  }
+  return 0.0
+}
+
+// Grid §6.2: the area supplies both available space and the percentage basis.
+// Only stretch fixes an auto preferred size; other values use fit-content.
+fn itemInput(
+  base: &Input,
+  style: &Style,
+  parent: &Style,
+  axis: &Axes,
+  area: OptionalSize,
+) -> Input {
   let mut request = base.*
   request.blockify = true
   request.blockRoot = true
+  request.shrinkToFit = true
   request.known = OptionalSize.none()
-  request.parent = axis.optional(
-    OptionalSize { width: inlineSize, height: 0.0, widthDefinite: definite, heightDefinite: false },
-  )
-  if axis.vertical {
-    request.availableHeight = AvailableSpace.maxContent()
-    if definite {
-      request.availableHeight = AvailableSpace.definite(inlineSize)
-    }
-    request.availableWidth = AvailableSpace.maxContent()
-  } else {
-    request.availableWidth = AvailableSpace.maxContent()
-    if definite {
-      request.availableWidth = AvailableSpace.definite(inlineSize)
-    }
-    request.availableHeight = AvailableSpace.maxContent()
+  request.parent = axis.optional(area)
+  request.availableWidth = AvailableSpace.maxContent()
+  request.availableHeight = AvailableSpace.maxContent()
+  if request.parent.widthDefinite {
+    request.availableWidth = AvailableSpace.definite(request.parent.width)
   }
-
-  // Normal stretches non-replaced, ratio-less items; the area is their basis.
-  let mut align = style.justifySelf
-  if align == Align.Auto {
-    align = base.parentJustifyItems
+  if request.parent.heightDefinite {
+    request.availableHeight = AvailableSpace.definite(request.parent.height)
   }
-  let stretch = align == Align.Stretch
-    || align == Align.Normal && !style.replaced && style.aspectRatio == 0.0
-  if definite && stretch && axis.autoInline(style) && !axis.lowAuto(style)
+  let resolved = resolveBox(style, &request)
+  let margin = axis.edges(resolved.margin)
+  let mut known = OptionalSize.none()
+  if area.widthDefinite && selfAlignment(style, parent, true) == Align.Stretch
+    && axis.autoInline(style)
+    && !axis.lowAuto(style)
     && !axis.highAuto(style) {
-    let resolved = resolveBox(style, &request)
-    let margin = axis.edges(resolved.margin)
-    let size = max(0.0, inlineSize - margin.horizontal())
-    request.known = axis.optional(
-      OptionalSize { width: size, height: 0.0, widthDefinite: true, heightDefinite: false },
-    )
+    known.width = max(0.0, area.width - margin.horizontal())
+    known.widthDefinite = true
   }
+  let mut autoBlock = style.height.kind == DimensionKind.Auto
+  let mut autoBlockMargin = style.margin.top.kind == DimensionKind.Auto
+    || style.margin.bottom.kind == DimensionKind.Auto
+  if axis.vertical {
+    autoBlock = style.width.kind == DimensionKind.Auto
+    autoBlockMargin = style.margin.left.kind == DimensionKind.Auto
+      || style.margin.right.kind == DimensionKind.Auto
+  }
+  if area.heightDefinite && selfAlignment(style, parent, false) == Align.Stretch && autoBlock
+    && !autoBlockMargin {
+    known.height = max(0.0, area.height - margin.vertical())
+    known.heightDefinite = true
+  }
+  request.known = axis.optional(known)
   return request
 }
 
@@ -66,70 +106,131 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
   let style = nodes.style(id)
+  let template = &nodes.grids[style.grid]
   let axis = Axes.make(style.writingMode)
   let logical = axis.box(box.*)
   let mut inlineSize = max(0.0, logical.size.width - logical.inset.horizontal())
+  let mut blockSize = max(0.0, logical.size.height - logical.inset.vertical())
+  let columnGap = max(
+    0.0,
+    resolve(style.columnGap, inlineSize, logical.size.widthDefinite, style.columnGap.value),
+  )
+  let rowGap = max(
+    0.0,
+    resolve(style.rowGap, blockSize, logical.size.heightDefinite, style.rowGap.value),
+  )
   let mut base = childrenInput(input, style, box, OptionalSize.none())
   base.performLayout = false
   base.baselines = false
   let mut lease = run output.gridScratch.take(id, nodes.boxes.length())
   if lease.fresh {
-    let mut child = nodes.node(id).firstChild
-    while child != NO_NODE {
-      if !outOfFlow(nodes.style(child)) {
-        run lease.value.items.append(child)
-      }
-      child = nodes.node(child).nextSibling
-    }
+    lease.value.bounds = run collectItems(nodes, id, &mut lease.value.items)
   }
+  let bounds = lease.value.bounds
+  run initializeTracks(
+    template.columns.tracks.asSlice(),
+    bounds.columnOrigin,
+    bounds.columns,
+    inlineSize,
+    logical.size.widthDefinite,
+    &mut lease.value.columns,
+  )
+  run initializeTracks(
+    template.rows.tracks.asSlice(),
+    bounds.rowOrigin,
+    bounds.rows,
+    blockSize,
+    logical.size.heightDefinite,
+    &mut lease.value.rows,
+  )
   let items = lease.value.items.asSlice()
-  if !logical.size.widthDefinite {
-    inlineSize = 0.0
+  let columns = lease.value.columns.asMutSlice()
+  let rows = lease.value.rows.asMutSlice()
+
+  // Preserve single-span intrinsic sizing for the initial auto column.
+  // Full intrinsic functions and spanning contributions are handled separately.
+  if !logical.size.widthDefinite || !stretchContent(style.justifyContent) {
     let mut index: usize = 0
     while index < items.length {
-      let child = items[index]
-      let itemStyle = nodes.style(child)
-      let mut request = itemInput(&base, itemStyle, &axis, 0.0, false)
-      request.intrinsicWidth = input.intrinsicWidth
-      request.intrinsicHeight = input.intrinsicHeight
-      if axis.vertical {
-        request.availableHeight = input.availableHeight
-      } else {
-        request.availableWidth = input.availableWidth
+      let item = &items[index]
+      let column = i32.toUsize(item.column.start)
+      if item.column.end - item.column.start == 1
+        && (columns[column].autoMinimum || columns[column].autoMaximum) {
+        let mut request = itemInput(&base, nodes.style(item.id), style, &axis, OptionalSize.none())
+        request.intrinsicWidth = input.intrinsicWidth
+        request.intrinsicHeight = input.intrinsicHeight
+        if !logical.size.widthDefinite {
+          if axis.vertical {
+            request.availableHeight = input.availableHeight
+          } else {
+            request.availableWidth = input.availableWidth
+          }
+        }
+        run probeNode(nodes, &mut output, &mut measurer, item.id, &request)
+        let size = axis.size(output.boxes[item.id].size)
+        let margin = axis.edges(output.boxes[item.id].usedMargin)
+        columns[column].base = max(columns[column].base, size.width + margin.horizontal())
       }
-      run probeNode(nodes, &mut output, &mut measurer, child, &request)
-      let size = axis.size(output.boxes[child].size)
-      let margin = axis.edges(output.boxes[child].usedMargin)
-      inlineSize = max(inlineSize, size.width + margin.horizontal())
       index = index + 1
     }
+  }
+  if logical.size.widthDefinite {
+    resolveFlexible(&mut columns, inlineSize, columnGap)
+  } else {
+    let naturalInline = positionTracks(&mut columns, columnGap)
     inlineSize = max(
       0.0,
-      clamp(inlineSize + logical.inset.horizontal(), logical.min.width, logical.max.width)
+      clamp(naturalInline + logical.inset.horizontal(), logical.min.width, logical.max.width)
         - logical.inset.horizontal(),
     )
   }
-  let mut naturalBlock = 0.0
-  let count = items.length
+  if stretchContent(style.justifyContent) {
+    stretchAuto(&mut columns, inlineSize, columnGap)
+  }
+  drop positionTracks(&mut columns, columnGap)
+
+  // Grid §12.1 sizes rows using the already-sized column areas. Fixed rows
+  // need no contribution probes; auto rows take the largest single-span item.
   let mut index: usize = 0
-  while index < count {
-    let child = items[index]
-    let itemStyle = nodes.style(child)
-    let request = itemInput(&base, itemStyle, &axis, inlineSize, true)
-    run probeNode(nodes, &mut output, &mut measurer, child, &request)
-    let size = axis.size(output.boxes[child].size)
-    let margin = axis.edges(output.boxes[child].usedMargin)
-    naturalBlock = naturalBlock + max(0.0, size.height + margin.vertical())
+  while index < items.length {
+    let item = &items[index]
+    let row = i32.toUsize(item.row.start)
+    if item.row.end - item.row.start == 1 && !rows[row].isFlexible
+      && (rows[row].autoMinimum || rows[row].autoMaximum) {
+      let areaWidth = spanSize(
+        &columns,
+        i32.toUsize(item.column.start),
+        i32.toUsize(item.column.end),
+      )
+      let area = OptionalSize {
+        width: areaWidth,
+        height: 0.0,
+        widthDefinite: true,
+        heightDefinite: false,
+      }
+      let request = itemInput(&base, nodes.style(item.id), style, &axis, area)
+      run probeNode(nodes, &mut output, &mut measurer, item.id, &request)
+      let size = axis.size(output.boxes[item.id].size)
+      let margin = axis.edges(output.boxes[item.id].usedMargin)
+      rows[row].base = max(rows[row].base, size.height + margin.vertical())
+    }
     index = index + 1
   }
-  let mut blockSize = max(
-    0.0,
-    clamp(naturalBlock + logical.inset.vertical(), logical.min.height, logical.max.height)
-      - logical.inset.vertical(),
-  )
   if logical.size.heightDefinite {
-    blockSize = max(0.0, logical.size.height - logical.inset.vertical())
+    resolveFlexible(&mut rows, blockSize, rowGap)
+  } else {
+    let naturalBlock = positionTracks(&mut rows, rowGap)
+    blockSize = max(
+      0.0,
+      clamp(naturalBlock + logical.inset.vertical(), logical.min.height, logical.max.height)
+        - logical.inset.vertical(),
+    )
   }
+  if stretchContent(style.alignContent) {
+    stretchAuto(&mut rows, blockSize, rowGap)
+  }
+  drop positionTracks(&mut rows, rowGap)
+
   let mut result = Layout.zero()
   result.size = axis.size(
     Size {
@@ -147,47 +248,55 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     output.gridScratch.put(move lease)
     return result
   }
-  let mut extra = 0.0
-  if count > 0 && (style.alignContent == Align.Normal || style.alignContent == Align.Stretch) {
-    extra = max(0.0, blockSize - naturalBlock) / usize.toF64(count)
-  }
-  let mut cursor = logical.inset.top
+  let rtl = style.usedDirection() == Direction.Rtl
   index = 0
-  while index < count {
-    let child = items[index]
-    let itemStyle = nodes.style(child)
-    let mut request = itemInput(&base, itemStyle, &axis, inlineSize, true)
-    run probeNode(nodes, &mut output, &mut measurer, child, &request)
-    let rowSize = axis.size(output.boxes[child].size).height
-      + axis.edges(output.boxes[child].usedMargin).vertical()
-      + extra
-    request.parent = axis.optional(OptionalSize.definite(inlineSize, rowSize))
-    if axis.vertical {
-      request.availableWidth = AvailableSpace.definite(rowSize)
-    } else {
-      request.availableHeight = AvailableSpace.definite(rowSize)
-    }
+  while index < items.length {
+    let item = &items[index]
+    let column = i32.toUsize(item.column.start)
+    let row = i32.toUsize(item.row.start)
+    let areaWidth = spanSize(&columns, column, i32.toUsize(item.column.end))
+    let areaHeight = spanSize(&rows, row, i32.toUsize(item.row.end))
+    let itemStyle = nodes.style(item.id)
+    let mut request = itemInput(
+      &base,
+      itemStyle,
+      style,
+      &axis,
+      OptionalSize.definite(areaWidth, areaHeight),
+    )
     request.performLayout = input.performLayout
     request.baselines = input.baselines
     if input.performLayout {
-      drop run layoutNode(nodes, &mut output, &mut measurer, child, &request)
+      drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
     } else {
-      run probeNode(nodes, &mut output, &mut measurer, child, &request)
+      run probeNode(nodes, &mut output, &mut measurer, item.id, &request)
     }
-    let size = axis.size(output.boxes[child].size)
-    let usedMargin = output.boxes[child].usedMargin
+    let size = axis.size(output.boxes[item.id].size)
+    let usedMargin = output.boxes[item.id].usedMargin
     let margin = axis.edges(usedMargin)
-    let mut inlineOffset = logical.inset.left + margin.left
-    if style.usedDirection() == Direction.Rtl {
-      inlineOffset = logical.inset.left + inlineSize - margin.right - size.width
+    let inlineShift = alignmentOffset(
+      selfAlignment(itemStyle, style, true),
+      areaWidth - size.width - margin.horizontal(),
+    )
+    let blockShift = alignmentOffset(
+      selfAlignment(itemStyle, style, false),
+      areaHeight - size.height - margin.vertical(),
+    )
+    let mut inlineOffset = logical.inset.left + columns[column].position + margin.left + inlineShift
+    if rtl {
+      inlineOffset = logical.inset.left + inlineSize - columns[column].position - margin.right
+        - size.width
+        - inlineShift
     }
     let location = axis.physicalPoint(
-      Point { x: inlineOffset, y: cursor + margin.top },
-      output.boxes[child].size,
+      Point {
+        x: inlineOffset,
+        y: logical.inset.top + rows[row].position + margin.top + blockShift,
+      },
+      output.boxes[item.id].size,
       result.size,
     )
-    run output.place(child, location, usedMargin, false, input.performLayout)
-    cursor = cursor + max(0.0, rowSize)
+    run output.place(item.id, location, usedMargin, false, input.performLayout)
     index = index + 1
   }
   output.gridScratch.put(move lease)

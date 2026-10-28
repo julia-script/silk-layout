@@ -1,16 +1,26 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import silk.usize
+import grid_placement { GridItem, GridBounds }
+import grid_tracks { TrackState }
 
-// Generated, in-flow child box ids in source order, shared by this compute's
-// probes and final layout. Geometry-dependent placement is not retained here.
+// Placement is shared by this compute's probes and final layout. Track sizes
+// are request-dependent and are initialized again before each sizing pass.
 pub struct GridScratch {
-  pub items: List<usize>
+  pub items: List<GridItem>,
+  pub bounds: GridBounds,
+  pub columns: List<TrackState>,
+  pub rows: List<TrackState>,
 }
 
 impl GridScratch {
   pub fn make() -> GridScratch {
-    return GridScratch { items: List<usize>.make() }
+    return GridScratch {
+      items: List<GridItem>.make(),
+      bounds: GridBounds.empty(),
+      columns: List<TrackState>.make(),
+      rows: List<TrackState>.make(),
+    }
   }
 }
 
@@ -61,6 +71,9 @@ impl GridScratchPool {
     let mut value = Intrinsic.replace(slots[slot], GridScratch.make())
     if fresh {
       value.items.clear()
+      value.bounds = GridBounds.empty()
+      value.columns.clear()
+      value.rows.clear()
     }
     return GridLease { fresh: fresh, value: move value, slot: slot }
   }

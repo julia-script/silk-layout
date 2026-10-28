@@ -889,7 +889,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   // fragment is CB-owned, so publish its final placement in that coordinate space.
   let generatedOrigin = normalPosition(nodes, &output, nodes.node(id).parent)
   result.location = Point { x: x - generatedOrigin.x, y: y - generatedOrigin.y }
-  run output.store(id, result, true)
+  run output.store(id, &result, true)
   let physicalOrigin = fragmentPosition(&output, physicalParent, false)
   let fragment = output.publication(id)
   let fragments = output.fragments.values.asMutSlice()
@@ -937,7 +937,7 @@ effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &
   input.indefiniteHeight = !metadata.content.heightDefinite
   input.performLayout = false
   input.fragmentation = FragmentInput.continuous()
-  match output.lookup(id, input, CacheKind.FlexAllocation) {
+  match output.lookup(id, &input, CacheKind.FlexAllocation) {
     Option<Layout>.Some { value } => { return value }
     Option<Layout>.None => {}
   }
@@ -950,7 +950,7 @@ effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &
       let mut allocation = output.boxes[child]
       allocation.location.x = allocation.location.x - box.inset.left
       allocation.location.y = allocation.location.y - box.inset.top
-      run output.remember(child, input, CacheKind.FlexAllocation, allocation)
+      run output.remember(child, &input, CacheKind.FlexAllocation, &allocation)
     }
     child = nodes.node(child).nextSibling
   }
@@ -1518,7 +1518,7 @@ effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
       }
       let parentOrigin = fragmentPosition(&output, parent, false)
       result.location = Point { x: point.x - parentOrigin.x, y: point.y - parentOrigin.y }
-      run output.store(id, result, true)
+      run output.store(id, &result, true)
     }
     if unfragmented || state.contentComplete { break }
     first = false

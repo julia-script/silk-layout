@@ -297,7 +297,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   }
   // Intrinsic probes update scalar sizing state only. Fragment geometry belongs
   // to accepted full-layout passes, not to cached or speculative measurements.
-  pub effect fn store(self: &mut Self, id: usize, value: Layout, publish: bool) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn store(self: &mut Self, id: usize, value: &Layout, publish: bool) ! OutOfMemoryError ? &mut Allocator {
     run self.preserveLayout(id)
     if publish {
       let first = self.publication(id)
@@ -334,7 +334,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
         }
       }
     }
-    self.boxes[id] = move value
+    self.boxes[id] = value.*
   }
   pub fn staticAnchor(self: &Self, id: usize) -> StaticAnchor {
     if self.frame != NO_NODE { return self.resumes.anchor(id) }
@@ -544,16 +544,16 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent)
     run self.restoreBoxes(nodes, id, slot, base)
     let layout = self.cache.result(id).layout
-    run self.store(id, layout, true)
+    run self.store(id, &layout, true)
     run self.cache.carryFinal(id, slot, base, self.fragments.checkpoint())
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
     return Option<Layout>.Some { value: layout }
   }
   pub fn viewportFree(self: &Self, id: usize) -> bool { return id < self.viewportFrees.length() && self.viewportFrees.get(id) }
-  pub fn lookup(self: &mut Self, id: usize, input: Input, kind: CacheKind) -> Option<Layout> {
+  pub fn lookup(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Layout> {
     return self.cache.lookup(id, input, kind)
   }
-  pub effect fn remember(self: &mut Self, id: usize, input: Input, kind: CacheKind, layout: Layout) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn remember(self: &mut Self, id: usize, input: &Input, kind: CacheKind, layout: &Layout) ! OutOfMemoryError ? &mut Allocator {
     run self.cache.remember(id, input, kind, layout)
   }
 }

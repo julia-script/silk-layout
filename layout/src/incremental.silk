@@ -233,6 +233,13 @@ pub effect fn markSubtrees(nodes: &BoxTree, facts: &mut BoxFacts) ! OutOfMemoryE
   }
   run facts.reusable.appendRepeated(REUSE_IN_FLOW, count)
   run facts.viewportFree.appendRepeated(true, count)
+  facts.parents.clear()
+  run facts.parents.reserveExact(count)
+  index = 0
+  while index < count {
+    run facts.parents.append(nodes.node(index).parent)
+    index = index + 1
+  }
   let own = facts.own.asSlice()
   let levels = facts.reusable.asMutSlice()
   let frees = facts.viewportFree.asMutSlice()

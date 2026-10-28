@@ -717,7 +717,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   let previousParent = output.fragmentParent
   if input.performLayout {
     run output.preserveLayout(id)
-    run output.touch(id)
+    run output.relayout(id)
     output.boxes[id].location = Point { x: 0.0, y: 0.0 }
     if fragmented && id == 0 {
       let frame = output.frame
@@ -1127,6 +1127,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
   boxes.keyShapes = Intrinsic.replace(facts.keyShapes, List<u8>.make())
   boxes.visits = Intrinsic.replace(facts.visits, List<usize>.make())
+  boxes.parents = Intrinsic.replace(facts.parents, List<usize>.make())
   let mut input = Input.make(viewport)
   input.known = viewport
   input.blockRoot = true
@@ -1149,6 +1150,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       facts.viewportFree = Intrinsic.replace(boxes.viewportFrees, List<bool>.make())
       facts.keyShapes = Intrinsic.replace(boxes.keyShapes, List<u8>.make())
       facts.visits = Intrinsic.replace(boxes.visits, List<usize>.make())
+      facts.parents = Intrinsic.replace(boxes.parents, List<usize>.make())
       let usedWrites = Intrinsic.replace(boxes.writes, BoxWrites.make())
       drop boxes
       output.cache = move kept

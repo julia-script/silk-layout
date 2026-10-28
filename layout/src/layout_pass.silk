@@ -618,6 +618,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     let mut slot = self.cache.keptRange(id)
     if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return Option<Layout>.None }
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }
+    if !self.inPlace && id >= self.previous.boxes.length() { return Option<Layout>.None }
     if !beside && slot.floatCount != 0 { return Option<Layout>.None }
     let base = self.fragments.checkpoint()
     let mut kept = false
@@ -647,12 +648,31 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     // its parent's placement wrote.
     let untouched = kept && self.inPlace && self.writes.stamps.get(id) != self.writes.generation
     run self.restoreBoxes(nodes, id, slot, base, kept, true)
-    let layout = self.cache.result(id).layout
-    if untouched { run self.place(id, layout.location, layout.usedMargin, layout.hasClearance, true) }
-    else { run self.store(id, &layout, true) }
+    if untouched {
+      let record = self.cache.result(id)
+      let location = record.location
+      let usedMargin = record.usedMargin
+      let hasClearance = record.hasClearance
+      let overflow = record.scrollableOverflow
+      let horizontal = record.horizontalScrollbar
+      let vertical = record.verticalScrollbar
+      run self.place(id, location, usedMargin, hasClearance, true)
+      self.boxes[id].scrollableOverflow = overflow
+      self.boxes[id].horizontalScrollbar = horizontal
+      self.boxes[id].verticalScrollbar = vertical
+    } else {
+      let layout = self.cache.result(id).layout(self.keptLayout(id))
+      run self.store(id, &layout, true)
+    }
     run self.cache.carryFinal(id, slot, base, self.fragments.checkpoint())
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
-    return Option<Layout>.Some { value: layout }
+    return Option<Layout>.Some { value: self.boxes[id] }
+  }
+  // The box's layout at the end of the previous compute.
+  fn keptLayout(self: &Self, id: usize) -> &Layout {
+    if !self.inPlace { return &self.previous.boxes.asSlice()[id] }
+    if self.writes.stamps.get(id) == self.writes.generation { return &self.writes.saved.asSlice()[self.writes.slots.get(id)] }
+    return &self.boxes[id]
   }
   // `store` for a box whose layout from this compute is already stored, after
   // its parent placed it: only its location, used margins and clearance change,

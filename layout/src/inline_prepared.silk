@@ -3,7 +3,7 @@ import silk.ownership { Copy }
 import silk.list { List }
 import inline_text { NormalizedText }
 import inline_visual { Plan }
-import text { TextToken, TextAnalysis, TextBreak }
+import text { TextToken, TextAnalysis, TextBreak, TextCursor }
 import inline_items { Item, Scope, FontBox }
 import inline_visual { Line }
 import fragments { TextFragmentKind }
@@ -89,9 +89,9 @@ pub struct TextMemo {
   // For each width fitted without floats: the index of the break point
   // ending each line, `counts[i]` of them for `widths[i]`, in order.
   pub widths: List<f64>, pub counts: List<usize>, pub ends: List<usize>,
-  // Fonts that candidates' text leaves index, and the whole paragraph
-  // shaped as one candidate without a visual plan.
-  pub fonts: List<TextFont>, pub whole: TextCandidate, pub hasWhole: bool,
+  // Fonts that candidates' text leaves index, and ranges shaped without a
+  // visual plan, chained by the unit they start in.
+  pub fonts: List<TextFont>, pub segments: List<Segment>, pub heads: List<usize>,
   valid: bool,
 }
 impl TextMemo {
@@ -100,7 +100,7 @@ impl TextMemo {
       items: List<Item>.make(), scopes: List<Scope>.make(), prefix: List<f64>.make(),
       minContent: 0.0, maxContent: 0.0, hasMin: false, hasMax: false,
       widths: List<f64>.make(), counts: List<usize>.make(), ends: List<usize>.make(),
-      fonts: List<TextFont>.make(), whole: TextCandidate.make(), hasWhole: false, valid: false,
+      fonts: List<TextFont>.make(), segments: List<Segment>.make(), heads: List<usize>.make(), valid: false,
     }
   }
   // Keeps the results when they were computed from the same items and
@@ -119,7 +119,8 @@ impl TextMemo {
     }
     if same { return }
     self.valid = true
-    self.hasWhole = false
+    self.segments.clear()
+    self.heads.clear()
     self.fonts.clear()
     self.hasMin = false
     self.hasMax = false
@@ -141,6 +142,30 @@ impl TextMemo {
   pub fn forget(self: &mut Self) {
     self.valid = false
     self.prefix.clear()
+  }
+  // The shaped range [start, end), or NO_NODE.
+  pub fn segment(self: &Self, start: TextCursor, end: TextCursor) -> usize {
+    if start.unit >= self.heads.length() { return NO_NODE }
+    let mut index = self.heads.get(start.unit)
+    while index != NO_NODE {
+      let entry = &self.segments.asSlice()[index]
+      if entry.start.equal(start) && entry.end.equal(end) { return index }
+      index = entry.next
+    }
+    return NO_NODE
+  }
+  // Remembers a shaped range, starting over once a paragraph has collected
+  // `limit` of them (a drag-resize fits new lines each compute).
+  pub effect fn addSegment(self: &mut Self, start: TextCursor, end: TextCursor, candidate: &TextCandidate, limit: usize) ! OutOfMemoryError ? &mut Allocator {
+    if self.segments.length() >= limit {
+      self.segments.clear()
+      self.heads.clear()
+    }
+    while self.heads.length() <= start.unit { run self.heads.append(NO_NODE) }
+    let mut entry = Segment { start: start, end: end, next: self.heads.get(start.unit), candidate: TextCandidate.make() }
+    run entry.candidate.copyPlain(candidate)
+    self.heads.set(start.unit, self.segments.length())
+    run self.segments.append(move entry)
   }
   // The first line end recorded for `width`, or NO_NODE.
   pub fn linesFor(self: &Self, width: f64) -> usize {
@@ -167,6 +192,8 @@ impl TextMemo {
       index = index + 1 }
   }
 }
+
+pub struct Segment { pub start: TextCursor, pub end: TextCursor, pub next: usize, pub candidate: TextCandidate }
 
 fn sameEdges(a: &ResolvedEdges, b: &ResolvedEdges) -> bool {
   return a.top == b.top && a.right == b.right && a.bottom == b.bottom && a.left == b.left

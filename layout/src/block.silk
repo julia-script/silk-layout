@@ -217,7 +217,10 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   if parallel { childId = run output.popPending(id) }
   let childBase = childrenInput(&input, style, &physicalBox, parent)
   let lazy = fragmented && box.size.widthDefinite
-  while childId != NO_NODE && !lazy {
+  // Outside fragmentation a definite inline size needs no look-ahead over the children, so
+  // each child is prepared as it is placed and the children are never collected in a list.
+  let streaming = !fragmented && box.size.widthDefinite
+  while childId != NO_NODE && !lazy && !streaming {
     let mut child = prepareChild(nodes, childId, &childBase, axes, &box, availableInline, parallel)
     // A definite inline size needs no whole-subtree measurement pass. Only
     // intrinsic sizing probes children before their source-order placement.
@@ -278,20 +281,26 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   let mut normalAfter = BreakBoundary.none()
   let mut leadingBoundary = BreakBoundary.none()
   let mut candidate = Option<Candidate>.None
-  while index < children.length() || (lazy && childId != NO_NODE) {
-    if index == children.length() {
-      if stopped && !parallel { break }
-      // Only visited children need preparation or final-axis conversion.
-      // The old pending tail prevents consuming continuations queued here.
-      run children.append(prepareChild(nodes, childId, &childBase, axes, &box, availableInline, parallel))
-      if parallel {
-        if childId == pendingTail { parallel = false
-          childId = nextChild }
-        else { childId = run output.popPending(id) }
-      } else { childId = boxChild(nodes, nodes.node(childId).nextSibling) }
+  let mut current = Child { id: NO_NODE, margin: ResolvedEdges.zero(), inset: ResolvedEdges.zero(), input: childBase, width: 0.0, parallel: false }
+  while index < children.length() || ((lazy || streaming) && childId != NO_NODE) {
+    if streaming {
+      current = prepareChild(nodes, childId, &childBase, axes, &box, availableInline, false)
+      childId = boxChild(nodes, nodes.node(childId).nextSibling)
+    } else {
+      if index == children.length() {
+        if stopped && !parallel { break }
+        // Only visited children need preparation or final-axis conversion.
+        // The old pending tail prevents consuming continuations queued here.
+        run children.append(prepareChild(nodes, childId, &childBase, axes, &box, availableInline, parallel))
+        if parallel {
+          if childId == pendingTail { parallel = false
+            childId = nextChild }
+          else { childId = run output.popPending(id) }
+        } else { childId = boxChild(nodes, nodes.node(childId).nextSibling) }
+      }
+      current = children.get(index)
     }
-    let slots = children.asMutSlice()
-    let item = &mut slots[index]
+    let item = &mut current
     if fragmented && stopped && !item.parallel { index = index + 1
       continue }
     if fragmented && !item.parallel && item.id == endBefore {
@@ -852,7 +861,16 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   result.size = axes.size(Size { width: width, height: height })
   if result.hasFirstBaseline { result.firstBaselines = result.firstBaselines.translated(alignmentOffset) }
   if result.hasLastBaseline { result.lastBaselines = result.lastBaselines.translated(alignmentOffset) }
-  if axes.vertical || alignmentOffset != 0.0 {
+  if (axes.vertical || alignmentOffset != 0.0) && streaming {
+    let mut childIndex = boxChild(nodes, nodes.node(id).firstChild)
+    while childIndex != NO_NODE {
+      let mut child = output.boxes[childIndex]
+      let point = Point { x: child.location.x, y: child.location.y + alignmentOffset }
+      child.location = axes.physicalPoint(point, child.size, result.size)
+      run output.store(childIndex, &child, input.performLayout)
+      childIndex = boxChild(nodes, nodes.node(childIndex).nextSibling)
+    }
+  } else if axes.vertical || alignmentOffset != 0.0 {
     index = 0
     while index < children.length() {
       let childIndex = children.get(index).id

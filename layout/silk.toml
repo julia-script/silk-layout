@@ -3,6 +3,6 @@ name = "silk_layout"
 version = "0.1.0"
 kind = "library"
 exports = ["lib"]
-silk-version = "0.1.0-dev.24+912a664401ae"
+silk-version = "0.1.0-dev.25+584955edf9ef"
 license = "MIT"
 description = "CSS block and flex layout with replaceable intrinsic measurement"

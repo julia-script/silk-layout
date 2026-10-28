@@ -2,6 +2,7 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import silk.option { Option }
 import silk.ownership { Copy }
+import silk.pointer { Pointer }
 import silk.usize
 import context { Input }
 import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind, Rect, Point, ResolvedEdges }
@@ -91,9 +92,17 @@ impl Copy for CachedProbe {}
 pub const AGES_NONE: u8 = 0
 pub const AGES_RECENT: u8 = 1
 pub const AGES_OLDER: u8 = 2
-// `generation` is the last compute that created or hit the entry.
-struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }
+// `generation` is the last compute that created or hit the entry. Its
+// request and layout are at the same index of `inputs` and `layouts`, which
+// appendSlice fills straight from the caller's values: building one large
+// entry first would copy both through the stack.
+struct Entry { kind: CacheKind, next: usize, generation: usize }
 impl Copy for Entry {}
+
+// `value` as a one-element slice, for appendSlice.
+fn one<T>(value: &T) -> &[T] with Intrinsic.inlineAlways() {
+  unsafe { return Pointer.borrowMany<T, T>(value, Pointer.assumeMany<T>(Pointer.fromRef<T>(value)), 1) }
+}
 
 // The last full layout of a reusable box: its request, and the contiguous
 // fragment range [start, end) it emitted, whose first fragment is the box's
@@ -170,10 +179,10 @@ fn shiftedRange(range: FinalRange, shift: Shift) -> FinalRange {
 
 pub struct LayoutCache {
   heads: List<usize>,
-  entries: List<Entry>,
+  entries: List<Entry>, inputs: List<Input>, layouts: List<Layout>,
   // The storage compact last moved entries out of, kept so that neither list
   // grows again in a steady state.
-  spare: List<Entry>,
+  spare: List<Entry>, spareInputs: List<Input>, spareLayouts: List<Layout>,
   // Entries no longer reachable from a head; compacted when they dominate.
   dead: usize,
   // The current compute, and how many entries the previous one used.
@@ -201,13 +210,15 @@ pub struct LayoutCache {
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), spare: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
     self.flexMemos.clear()
     self.heads.clear()
     self.entries.clear()
+    self.inputs.clear()
+    self.layouts.clear()
     self.dead = 0
     self.touched = 0
     self.results.clear()
@@ -419,7 +430,7 @@ impl LayoutCache {
     while index != ABSENT {
       let entry = self.entries.get(index)
       if entry.kind == CacheKind.FlexAllocation { return false }
-      if entry.kind == CacheKind.IndependentBox && entry.generation >= generation { run result.append(CachedProbe { input: entry.input, layout: entry.layout }) }
+      if entry.kind == CacheKind.IndependentBox && entry.generation >= generation { run result.append(CachedProbe { input: self.inputs.asSlice()[index], layout: self.layouts.asSlice()[index] }) }
       index = entry.next
     }
     return true
@@ -444,7 +455,7 @@ impl LayoutCache {
   pub fn lookup(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Layout> {
     let index = self.find(id, input, kind)
     if index == ABSENT { return Option<Layout>.None }
-    return Option<Layout>.Some { value: self.entries.asSlice()[index].layout }
+    return Option<Layout>.Some { value: self.layouts.asSlice()[index] }
   }
   // The entry index of a cached result, or usize.MAX; read it with layoutAt.
   pub fn find(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> usize {
@@ -453,7 +464,7 @@ impl LayoutCache {
     while index != ABSENT {
       let entries = self.entries.asSlice()
       let entry = &entries[index]
-      if entry.kind == kind && sameInput(&entry.input, input) {
+      if entry.kind == kind && sameInput(&self.inputs.asSlice()[index], input) {
         if entry.generation != self.generation {
           let mutable = self.entries.asMutSlice()
           mutable[index].generation = self.generation
@@ -465,17 +476,18 @@ impl LayoutCache {
     }
     return ABSENT
   }
-  pub fn layoutAt(self: &Self, index: usize) -> &Layout with Intrinsic.inlineAlways() { return &self.entries.asSlice()[index].layout }
+  pub fn layoutAt(self: &Self, index: usize) -> &Layout with Intrinsic.inlineAlways() { return &self.layouts.asSlice()[index] }
   pub effect fn remember(self: &mut Self, id: usize, input: &Input, kind: CacheKind, layout: &Layout) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.heads.length() {
       let missing = id + 1 - self.heads.length()
       run self.heads.reserve(missing)
       while self.heads.length() <= id { run self.heads.append(ABSENT) }
     }
-    run self.entries.reserve(1)
     let index = self.entries.length()
     let previous = self.heads.get(id)
-    run self.entries.append(Entry { input: input.*, kind: kind, layout: layout.*, next: previous, generation: self.generation })
+    run self.inputs.appendSlice(one<Input>(input))
+    run self.layouts.appendSlice(one<Layout>(layout))
+    run self.entries.append(Entry { kind: kind, next: previous, generation: self.generation })
     self.touched = self.touched + 1
     self.heads.set(id, index)
   }
@@ -549,8 +561,14 @@ impl LayoutCache {
     let mut oldest: usize = 0
     if stale && self.generation > 0 { oldest = self.generation - 1 }
     let mut kept = Intrinsic.replace(self.spare, List<Entry>.make())
+    let mut keptInputs = Intrinsic.replace(self.spareInputs, List<Input>.make())
+    let mut keptLayouts = Intrinsic.replace(self.spareLayouts, List<Layout>.make())
     kept.clear()
+    keptInputs.clear()
+    keptLayouts.clear()
     run kept.reserve(self.entries.length() - self.dead)
+    run keptInputs.reserve(self.entries.length() - self.dead)
+    run keptLayouts.reserve(self.entries.length() - self.dead)
     let mut chain = List<usize>.make()
     let mut id: usize = 0
     while id < self.heads.length() {
@@ -564,16 +582,23 @@ impl LayoutCache {
       let mut at = chain.length()
       while at > 0 {
         at = at - 1
-        let mut entry = self.entries.get(chain.get(at))
+        let from = chain.get(at)
+        let mut entry = self.entries.get(from)
         entry.next = next
         next = kept.length()
         run kept.append(entry)
+        run keptInputs.appendSlice(one<Input>(&self.inputs.asSlice()[from]))
+        run keptLayouts.appendSlice(one<Layout>(&self.layouts.asSlice()[from]))
       }
       self.heads.set(id, next)
       id = id + 1
     }
     self.spare = Intrinsic.replace(self.entries, move kept)
+    self.spareInputs = Intrinsic.replace(self.inputs, move keptInputs)
+    self.spareLayouts = Intrinsic.replace(self.layouts, move keptLayouts)
     self.spare.clear()
+    self.spareInputs.clear()
+    self.spareLayouts.clear()
     self.dead = 0
   }
 }

@@ -701,7 +701,7 @@ effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     return
   }
   layout.location = axes.physicalPoint(point, layout.size, container)
-  run output.store(item.id, layout, true)
+  run output.store(item.id, &layout, true)
   if !state.contentComplete { run output.enqueuePending(owner, item.id) }
   output.fragmentParent = previousParent
   output.closeCheckpoint(checkpoint)
@@ -1193,7 +1193,7 @@ effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       scalar.usedMargin = value.usedMargin
       scalar.setOverflowGeometry(value.contentRect, value.paddingRect, value.layoutBounds)
       scalar.scrollableOverflow = value.scrollableOverflow
-      run output.store(scope.id, scalar, false)
+      run output.store(scope.id, &scalar, false)
     }
     index = span.next
   }
@@ -1250,7 +1250,7 @@ effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       if item.kind == ItemKind.Atomic { layout.usedMargin = axes.physicalEdges(margin) }
       let physical = axes.physicalPoint(point, layout.size, physicalSize)
       layout.location = Point { x: physical.x - parent.origin.x, y: physical.y - parent.origin.y }
-      run output.store(item.id, layout, true)
+      run output.store(item.id, &layout, true)
     } else if item.kind == ItemKind.Text {
       let text = texts[item.leaf]
       let font = &fonts[text.font].font
@@ -1280,7 +1280,7 @@ effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       scalar.contentSize = size
       scalar.setOverflowGeometry(value.contentRect, value.paddingRect, value.layoutBounds)
       scalar.scrollableOverflow = value.scrollableOverflow
-      run output.store(item.id, scalar, false)
+      run output.store(item.id, &scalar, false)
     } else if item.kind == ItemKind.Anchor {
       let inlineLevel = nodes.style(item.id).display.outsideIs(DisplayOutside.Inline)
       let mut point = Point { x: offset + x, y: 0.0 }

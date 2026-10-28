@@ -740,7 +740,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     childLayout.usedMargin = axes.physicalEdges(usedMargin)
     childLayout.location = Point { x: box.inset.left + x, y: box.inset.top + y }
     childLayout.size = axes.size(childLayout.size)
-    run output.store(item.id, childLayout, input.performLayout)
+    run output.store(item.id, &childLayout, input.performLayout)
     if fragmented {
       progressed = true
       let state = output.resumes.get(item.id)
@@ -830,7 +830,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       let mut child = output.boxes[childIndex]
       let point = Point { x: child.location.x, y: child.location.y + alignmentOffset }
       child.location = axes.physicalPoint(point, child.size, result.size)
-      run output.store(childIndex, child, input.performLayout)
+      run output.store(childIndex, &child, input.performLayout)
       index = index + 1
     }
   }

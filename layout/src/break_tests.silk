@@ -265,7 +265,7 @@ test effect fn fragmentPublicationAndRejectedLookaheadPreserveEarlierGeometry() 
   let mut box = Layout.zero()
   box.location = Point { x: 1.0, y: 2.0 }
   box.size = Size { width: 10.0, height: 20.0 }
-  run pass.store(0, box, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.store(0, &box, true) |> Effect.provideMut<Allocator>(&mut allocator)
   let firstLineStart = pass.fragments.checkpoint()
   run pass.beginPublication(1, NO_NODE, firstLineStart) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut line = pass.fragment(1, NO_NODE, FragmentKind.Line)
@@ -275,7 +275,7 @@ test effect fn fragmentPublicationAndRejectedLookaheadPreserveEarlierGeometry() 
   run pass.firstLine(1, firstLine.index) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut lineLayout = Layout.zero()
   lineLayout.location.y = 10.0
-  run pass.store(1, lineLayout, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.store(1, &lineLayout, true) |> Effect.provideMut<Allocator>(&mut allocator)
   run pass.setStaticAnchor(2, firstLine.index, Rect { x: 3.0, y: 4.0, width: 0.0, height: 10.0 }, true) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut text = pass.fragment(3, 3, FragmentKind.Text)
   text.parent = firstLine.index
@@ -288,17 +288,18 @@ test effect fn fragmentPublicationAndRejectedLookaheadPreserveEarlierGeometry() 
   run pass.beginPublication(0, secondBox.index, secondBox.index) |> Effect.provideMut<Allocator>(&mut allocator)
   box.location = Point { x: 3.0, y: 4.0 }
   box.size = Size { width: 30.0, height: 40.0 }
-  run pass.store(0, box, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.store(0, &box, true) |> Effect.provideMut<Allocator>(&mut allocator)
   let secondLineStart = pass.fragments.checkpoint()
   run pass.beginPublication(1, NO_NODE, secondLineStart) |> Effect.provideMut<Allocator>(&mut allocator)
-  run pass.store(1, Layout.zero(), false) |> Effect.provideMut<Allocator>(&mut allocator)
+  let empty = Layout.zero()
+  run pass.store(1, &empty, false) |> Effect.provideMut<Allocator>(&mut allocator)
   line = pass.fragment(1, NO_NODE, FragmentKind.Line)
   line.parent = secondBox.index
   line.location.y = 7.0
   let secondLine = run pass.fragments.append(line) |> Effect.provideMut<Allocator>(&mut allocator)
   run pass.firstLine(1, secondLine.index) |> Effect.provideMut<Allocator>(&mut allocator)
   lineLayout.location.y = 20.0
-  run pass.store(1, lineLayout, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.store(1, &lineLayout, true) |> Effect.provideMut<Allocator>(&mut allocator)
   run pass.setStaticAnchor(2, secondLine.index, Rect.zero(), false) |> Effect.provideMut<Allocator>(&mut allocator)
   text = pass.fragment(3, 3, FragmentKind.Text)
   text.parent = secondLine.index

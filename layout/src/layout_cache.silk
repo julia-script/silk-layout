@@ -155,13 +155,13 @@ impl LayoutCache {
     self.heads.set(id, ABSENT)
   }
   pub fn sameRequest(a: &Input, b: &Input) -> bool { return sameInput(a, b) }
-  pub fn lookup(self: &mut Self, id: usize, input: Input, kind: CacheKind) -> Option<Layout> {
+  pub fn lookup(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Layout> {
     if id >= self.heads.length() { return Option<Layout>.None }
     let mut index = self.heads.get(id)
     while index != ABSENT {
       let entries = self.entries.asSlice()
       let entry = &entries[index]
-      if entry.kind == kind && sameInput(&entry.input, &input) {
+      if entry.kind == kind && sameInput(&entry.input, input) {
         let layout = entry.layout
         if entry.generation != self.generation {
           let mutable = self.entries.asMutSlice()
@@ -174,7 +174,7 @@ impl LayoutCache {
     }
     return Option<Layout>.None
   }
-  pub effect fn remember(self: &mut Self, id: usize, input: Input, kind: CacheKind, layout: Layout) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn remember(self: &mut Self, id: usize, input: &Input, kind: CacheKind, layout: &Layout) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.heads.length() {
       let missing = id + 1 - self.heads.length()
       run self.heads.reserve(missing)
@@ -183,7 +183,7 @@ impl LayoutCache {
     run self.entries.reserve(1)
     let index = self.entries.length()
     let previous = self.heads.get(id)
-    run self.entries.append(Entry { input: input, kind: kind, layout: layout, next: previous, generation: self.generation })
+    run self.entries.append(Entry { input: input.*, kind: kind, layout: layout.*, next: previous, generation: self.generation })
     self.touched = self.touched + 1
     self.heads.set(id, index)
   }

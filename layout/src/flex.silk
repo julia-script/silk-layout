@@ -216,11 +216,12 @@ fn probeInput(childInput: &Input, horizontal: bool, constraint: AvailableSpace, 
   return input
 }
 // prepareFresh, or what it made of the item before under the same arguments.
-effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+// `request` is FlexMemos.request for the container pass.
+effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool, request: usize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let id = item.id
-  let memoable = output.cache.flexMemos.enabled && !output.cache.flexMemos.fresh && !childInput.fragmentation.active && output.frame == NO_NODE
+  let memoable = request != 0
   if memoable {
-    let found = output.cache.flexMemos.find(id, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite)
+    let found = output.cache.flexMemos.find(id, request)
     if found != NO_NODE {
       item.* = output.cache.flexMemos.entries.asSlice()[found].item
       return
@@ -229,7 +230,7 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   // Specialized per main axis so the axis selects fold away.
   if axis.horizontal { run prepareFresh(nodes, &mut output, &mut measurer, &mut item, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite, true) }
   else { run prepareFresh(nodes, &mut output, &mut measurer, &mut item, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite, false) }
-  if memoable { run output.cache.flexMemos.remember(id, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite, &item) }
+  if memoable { run output.cache.flexMemos.remember(id, request, &item) }
 }
 effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool, static horizontal: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let id = item.id
@@ -915,20 +916,28 @@ pub struct FlexScratch { items: List<Item>, lines: List<Line> }
 pub struct FlexMemos {
   heads: List<usize>, entries: List<FlexMemo>,
   free: usize, enabled: bool, fresh: bool, lookups: usize, hits: usize, skipped: usize,
+  // Each container's last REQUESTS_PER_BOX item requests, from
+  // `requests[requestHeads[container]]` on; see request.
+  requestHeads: List<usize>, requests: List<FlexRequest>, nextRequest: usize,
 }
-struct FlexMemo {
-  input: Input, main: AvailableSpace, axis: Axes,
+// What a container pass gives every item's prepare besides the item. `id`
+// numbers distinct requests, never reused; an item memo names the request
+// it was made under.
+struct FlexRequest {
+  id: usize, input: Input, main: AvailableSpace, axis: Axes,
   align: Align, wrap: FlexWrap, intrinsic: bool, mainDefinite: bool,
-  next: usize, item: Item,
 }
+impl Copy for FlexRequest {}
+struct FlexMemo { request: usize, next: usize, item: Item }
 impl Copy for FlexMemo {}
 // Results kept per item box, and in all; past the latter they start over.
 // Entries of dropped boxes are reused first, so only new boxes grow the list.
 const MEMOS_PER_BOX: usize = 4
 const MEMOS: usize = 16384
 const SAMPLE: usize = 8
+const REQUESTS_PER_BOX: usize = 4
 impl FlexMemos {
-  pub fn make() -> FlexMemos { return FlexMemos { heads: List<usize>.make(), entries: List<FlexMemo>.make(), free: NO_NODE, enabled: true, fresh: false, lookups: 0, hits: 0, skipped: 0 } }
+  pub fn make() -> FlexMemos { return FlexMemos { heads: List<usize>.make(), entries: List<FlexMemo>.make(), free: NO_NODE, enabled: true, fresh: false, lookups: 0, hits: 0, skipped: 0, requestHeads: List<usize>.make(), requests: List<FlexRequest>.make(), nextRequest: 1 } }
   // Starts a compute that keeps the previous one's cache.
   pub fn rotate(self: &mut Self) {
     self.fresh = false
@@ -948,6 +957,40 @@ impl FlexMemos {
     self.heads.clear()
     self.entries.clear()
     self.free = NO_NODE
+    self.requestHeads.clear()
+    self.requests.clear()
+  }
+  // The id of a container pass's item request, the same as an earlier pass's
+  // when nothing in it changed; 0 when the memo is off for the pass.
+  effect fn request(self: &mut Self, container: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool) -> usize ! OutOfMemoryError ? &mut Allocator {
+    if !self.enabled || self.fresh || input.fragmentation.active { return 0 }
+    if container >= self.requestHeads.length() {
+      let missing = container + 1 - self.requestHeads.length()
+      run self.requestHeads.appendRepeated(NO_NODE, missing)
+    }
+    let mut first = self.requestHeads.get(container)
+    if first == NO_NODE {
+      first = self.requests.length()
+      let none = FlexRequest { id: 0, input: input.*, main: main, axis: axis.*, align: parentStyle.alignItems, wrap: parentStyle.flexWrap, intrinsic: intrinsic, mainDefinite: mainDefinite }
+      run self.requests.appendRepeated(none, REQUESTS_PER_BOX)
+      self.requestHeads.set(container, first)
+    }
+    let requests = self.requests.asMutSlice()
+    let mut oldest = first
+    let mut slot = first
+    while slot < first + REQUESTS_PER_BOX {
+      let known = &requests[slot]
+      if known.id != 0 && known.main.kind == main.kind && known.main.value == main.value && known.intrinsic == intrinsic && known.mainDefinite == mainDefinite
+        && known.align == parentStyle.alignItems && known.wrap == parentStyle.flexWrap && sameAxes(&known.axis, axis)
+        && LayoutCache.sameRequest(&known.input, input) { return known.id }
+      if known.id < requests[oldest].id { oldest = slot }
+      slot = slot + 1
+    }
+    // A new request displaces the oldest.
+    let id = self.nextRequest
+    self.nextRequest = id + 1
+    requests[oldest] = FlexRequest { id: id, input: input.*, main: main, axis: axis.*, align: parentStyle.alignItems, wrap: parentStyle.flexWrap, intrinsic: intrinsic, mainDefinite: mainDefinite }
+    return id
   }
   // Starts a compute with nothing kept, which skips the memo.
   pub fn startFresh(self: &mut Self) { self.fresh = true }
@@ -963,7 +1006,7 @@ impl FlexMemos {
     entries[last].next = self.free
     self.free = head
   }
-  fn find(self: &mut Self, id: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool) -> usize {
+  fn find(self: &mut Self, id: usize, request: usize) -> usize {
     if id >= self.heads.length() { return NO_NODE }
     let entries = self.entries.asSlice()
     let mut index = self.heads.get(id)
@@ -972,9 +1015,7 @@ impl FlexMemos {
     if index != NO_NODE { self.lookups = self.lookups + 1 }
     while index != NO_NODE {
       let entry = &entries[index]
-      if entry.main.kind == main.kind && entry.main.value == main.value && entry.intrinsic == intrinsic && entry.mainDefinite == mainDefinite
-        && entry.align == parentStyle.alignItems && entry.wrap == parentStyle.flexWrap && sameAxes(&entry.axis, axis)
-        && LayoutCache.sameRequest(&entry.input, input) {
+      if entry.request == request {
         self.hits = self.hits + 1
         return index
       }
@@ -982,7 +1023,7 @@ impl FlexMemos {
     }
     return NO_NODE
   }
-  effect fn remember(self: &mut Self, id: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool, item: &Item) ! OutOfMemoryError ? &mut Allocator {
+  effect fn remember(self: &mut Self, id: usize, request: usize, item: &Item) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.heads.length() {
       let missing = id + 1 - self.heads.length()
       run self.heads.appendRepeated(NO_NODE, missing)
@@ -1014,19 +1055,13 @@ impl FlexMemos {
         run self.heads.appendRepeated(NO_NODE, id + 1)
       }
       let next = self.heads.get(id)
-      run self.entries.append(FlexMemo { input: input.*, main: main, axis: axis.*, align: parentStyle.alignItems, wrap: parentStyle.flexWrap, intrinsic: intrinsic, mainDefinite: mainDefinite, next: next, item: item.* })
+      run self.entries.append(FlexMemo { request: request, next: next, item: item.* })
       self.heads.set(id, self.entries.length() - 1)
       return
     }
     // Field by field, so the large ones are copied once.
     let entries = self.entries.asMutSlice()
-    entries[slot].input = input.*
-    entries[slot].main = main
-    entries[slot].axis = axis.*
-    entries[slot].align = parentStyle.alignItems
-    entries[slot].wrap = parentStyle.flexWrap
-    entries[slot].intrinsic = intrinsic
-    entries[slot].mainDefinite = mainDefinite
+    entries[slot].request = request
     entries[slot].next = head
     entries[slot].item = item.*
     self.heads.set(id, slot)
@@ -1103,8 +1138,10 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   }
   let mut index: usize = 0
   let mut hasCollapsed = false
+  let mut request: usize = 0
+  if output.frame == NO_NODE { request = run output.cache.flexMemos.request(id, &childInput, &axis, style, mainConstraint, !mainKnown, mainDefinite) }
   while index < count {
-    run prepare(nodes, &mut output, &mut measurer, &mut scratch.items.asMutSlice()[index], &childInput, &axis, style, mainConstraint, !mainKnown, mainDefinite)
+    run prepare(nodes, &mut output, &mut measurer, &mut scratch.items.asMutSlice()[index], &childInput, &axis, style, mainConstraint, !mainKnown, mainDefinite, request)
     hasCollapsed = hasCollapsed || scratch.items.asSlice()[index].collapsed
     index = index + 1
   }

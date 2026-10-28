@@ -1,22 +1,22 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
-import style { Style, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
+import style { Style, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
 import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
 import block { layoutBlock }
 import flex { layoutFlex }
-import positioned { positionTree, positionVisits, reachableLimits, addOverflow }
+import positioned { positionTree, positionVisits, reachableLimits, addOverflow, subtreeOverflow }
 import bfc { BfcState }
 import silk.option { Option }
 import layout_pass { LayoutPass, CacheKind, FullBoxGeometry, REUSE_INDEPENDENT, REUSE_IN_FLOW }
-import layout_cache { LayoutCache, Snapshot, BoxFacts, BoxWrites }
+import layout_cache { LayoutCache, Snapshot, BoxFacts, BoxWrites, CachedProbe, FinalRange, AGES_NONE, AGES_OLDER }
 import incremental as Incremental
 import replaced { layoutReplaced, preferredRatio, borderRatio }
 import box_tree as Boxes
 import box_tree { BoxTree, BoxKind, BoxNode }
 import silk.list { List }
-import fragments { FragmentKind, FragmentArena }
+import fragments { FragmentKind, FragmentArena, Fragment }
 import inline_layout { layoutInline }
 import text { TextMeasure, TextError }
 import fragment_box as FragmentBox
@@ -1044,6 +1044,182 @@ effect fn boxesFor<'source>(tree: &'source Tree, output: &mut LayoutTree, since:
   return move nodes
 }
 
+// Early cutoff, after the relayout boundaries of browser engines but decided
+// by result: a changed box with a small static subtree is laid out again
+// alone, before the compute. When it reproduces its previous result, size
+// probes and fragment count, its new fragments replace the old ones in the
+// previous output and its ancestors keep their results, so the compute
+// reuses them whole; otherwise its ancestors are cleared as usual.
+const CUTOFF_BOXES: usize = 64
+
+// Whether the subtree has at most CUTOFF_BOXES boxes, all static, unscrolled,
+// unfloated and in one piece, adding their count to `seen`.
+fn staticSubtree(nodes: &BoxTree, id: usize, seen: &mut usize) -> bool {
+  seen.* = seen.* + 1
+  if seen.* > CUTOFF_BOXES { return false }
+  let node = nodes.node(id)
+  let style = nodes.style(id)
+  if style.position != Position.Static || style.float != Float.None || style.overflowX != Overflow.Visible || style.overflowY != Overflow.Visible { return false }
+  if node.nextContinuation != NO_NODE || node.previousContinuation != NO_NODE || node.interruptionFirst != NO_NODE { return false }
+  let mut child = node.firstChild
+  while child != NO_NODE {
+    if !staticSubtree(nodes, child, &mut seen) { return false }
+    child = nodes.node(child).nextSibling
+  }
+  return true
+}
+
+// Whether a block container lays out the box in flow, horizontally.
+fn blockPlaced(nodes: &BoxTree, id: usize) -> bool {
+  let style = nodes.style(id)
+  let parent = nodes.style(nodes.node(id).parent)
+  return style.display.outsideIs(DisplayOutside.Block) && !style.replaced && style.writingMode == WritingMode.HorizontalTb && parent.writingMode == WritingMode.HorizontalTb
+    && (parent.display.insideIs(DisplayInside.Flow) || parent.display.insideIs(DisplayInside.FlowRoot))
+}
+
+// The changed boxes to lay out alone, and the size probes of each of them
+// (`probes[ends[i - 1]..ends[i]]`) that the previous compute used.
+effect fn cutoffCandidates(tree: &Tree, since: usize, nodes: &BoxTree, output: &LayoutTree, changes: &[usize], boxes: &mut List<usize>, ranges: &mut List<FinalRange>, probes: &mut List<CachedProbe>, ends: &mut List<usize>) ! OutOfMemoryError ? &mut Allocator {
+  if !output.fragments.settledOutput() { return }
+  if output.boxes.length() != nodes.boxes.length() { return }
+  let previous = output.cache.previousGeneration()
+  let mut at: usize = 0
+  while at < changes.length {
+    let id = nodes.firstBySource.get(changes[at])
+    at = at + 1
+    if id == NO_NODE || id == 0 { continue }
+    // Its parent reads its outer style: a change there needs the parent.
+    if tree.outerChangedAt(changes[at - 1]) > since { continue }
+    // A block parent places the box by its padding and border, which come out
+    // the same when its size does; its float origin matters to no float.
+    let insets = tree.insetsChangedAt(changes[at - 1]) > since
+    if insets && !blockPlaced(nodes, id) { continue }
+    let range = output.cache.keptRange(id)
+    if !range.valid || range.floatCount != 0 || range.end > output.fragments.values.length() || output.fragments.values.get(range.start).box != id { continue }
+    let mut seen: usize = 0
+    if !staticSubtree(nodes, id, &mut seen) { continue }
+    // Ancestors that probed may have probed this box: it must be reached only
+    // through cached probes (an independent box), all of them reproduced.
+    let mut eligible = true
+    let mut probed = false
+    let mut ancestor = nodes.node(id).parent
+    while ancestor != NO_NODE && eligible {
+      let source = nodes.node(ancestor).source
+      let mut other: usize = 0
+      while other < changes.length {
+        if changes[other] == source { eligible = false }
+        other = other + 1
+      }
+      let ages = output.cache.entryAges(ancestor, previous)
+      if ages == AGES_OLDER { eligible = false }
+      if ages != AGES_NONE { probed = true }
+      ancestor = nodes.node(ancestor).parent
+    }
+    if !eligible { continue }
+    if probed && (insets || output.cache.result(id).beside) { continue }
+    let mark = probes.length()
+    if !run output.cache.probesOf(id, previous, &mut probes) {
+      probes.truncate(mark)
+      continue
+    }
+    run boxes.append(id)
+    run ranges.append(range)
+    run ends.append(probes.length())
+  }
+}
+
+// Whether a box's baselines can reach its ancestors: unless its parent is a
+// block or flex container that aligns nothing by baseline and the box sits
+// between in-flow siblings that have baselines of their own, which the
+// parent's first and last baselines would come from instead.
+fn baselinesMatter(nodes: &BoxTree, fragments: &FragmentArena, id: usize, fragment: usize) -> bool {
+  let parent = nodes.node(id).parent
+  if parent == NO_NODE { return true }
+  let kind = nodes.node(parent).kind
+  if kind != BoxKind.Block && kind != BoxKind.Flex { return true }
+  let parentStyle = nodes.style(parent)
+  let style = nodes.style(id)
+  if isFlex(parentStyle) && (parentStyle.alignItems == Align.Baseline || parentStyle.alignItems == Align.LastBaseline || style.alignSelf == Align.Baseline || style.alignSelf == Align.LastBaseline || style.order != 0) { return true }
+  let values = fragments.values.asSlice()
+  let previous = values[fragment].previousSibling
+  let next = values[fragment].nextSibling
+  if previous == NO_NODE || next == NO_NODE { return true }
+  if values[previous].kind != FragmentKind.Box || values[next].kind != FragmentKind.Box || values[previous].box == NO_NODE || values[next].box == NO_NODE { return true }
+  if !values[previous].hasFirstBaseline || !values[previous].hasLastBaseline || !values[next].hasFirstBaseline || !values[next].hasLastBaseline { return true }
+  let before = nodes.style(values[previous].box)
+  let after = nodes.style(values[next].box)
+  return outOfFlow(before) || outOfFlow(after) || before.float != Float.None || after.float != Float.None || before.order != 0 || after.order != 0
+}
+
+// Gives each box of the subtree its layout from `scratch` and makes its
+// recorded range, `shift` fragments on, its range of the previous compute.
+fn adoptSubtree(nodes: &BoxTree, output: &mut LayoutTree, scratch: &[Layout], id: usize, root: usize, shift: usize) {
+  let boxes = output.boxes.asMutSlice()
+  if id == root {
+    let location = boxes[id].location
+    boxes[id] = scratch[id]
+    boxes[id].location = location
+  } else { boxes[id] = scratch[id] }
+  output.cache.adoptRange(id, shift)
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    adoptSubtree(nodes, &mut output, scratch, child, root, shift)
+    child = nodes.node(child).nextSibling
+  }
+}
+
+// Lays out a candidate alone and, when its parent would see no change,
+// splices it into the previous output; see cutoffCandidates.
+effect fn cutoffBox<'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutTree, facts: &mut BoxFacts, measurer: &mut M, id: usize, range: FinalRange, probes: &[CachedProbe], first: usize, end: usize) -> bool ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let final = output.cache.result(id).*
+  let count = nodes.boxes.length()
+  let mut scratchBoxes = Intrinsic.replace(output.scratchBoxes, List<Layout>.make())
+  let have = scratchBoxes.length()
+  if have < count { run scratchBoxes.appendRepeated(Layout.zero(), count - have) }
+  let mut scratchFragments = Intrinsic.replace(output.scratchFragments, FragmentArena.make())
+  run scratchFragments.prepare(count)
+  let mut same = true
+  let mut pass = run LayoutPass.make(scratchBoxes.asMutSlice(), &mut scratchFragments, nodes.sources)
+  pass.cache = Intrinsic.replace(output.cache, LayoutCache.make())
+  pass.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
+  pass.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
+  pass.keyShapes = Intrinsic.replace(facts.keyShapes, List<u8>.make())
+  let baselines = baselinesMatter(nodes, &output.fragments, id, range.start)
+  let mut at = first
+  while at < end && same {
+    run probeNode(nodes, &mut pass, &mut measurer, id, &probes[at].input)
+    same = Layout.sameOutside(&pass.boxes[id], &probes[at].layout, baselines)
+    at = at + 1
+  }
+  if same {
+    if final.beside {
+      let mut bfc = BfcState.make()
+      drop run layoutInFlow(nodes, &mut pass, &mut measurer, id, &final.input, &mut bfc)
+    } else { drop run layoutNode(nodes, &mut pass, &mut measurer, id, &final.input) }
+    subtreeOverflow(nodes, &mut pass)
+    let recorded = pass.cache.recordedRange(id)
+    let length = range.end - range.start
+    same = !pass.needsRelayout && !pass.hasAutoScrollbars
+      && recorded.valid && recorded.start == 0 && recorded.end == length && recorded.floatCount == 0
+      && pass.fragments.values.length() == length
+      && pass.fragments.texts.length() == output.fragments.textsBefore(range.end) - output.fragments.textsBefore(range.start)
+      && Layout.sameOutside(&pass.boxes[id], &output.boxes.asSlice()[id], baselines)
+      && Fragment.sameOutside(&pass.fragments.values.asSlice()[0], &output.fragments.values.asSlice()[range.start], baselines)
+  }
+  output.cache = Intrinsic.replace(pass.cache, LayoutCache.make())
+  facts.reusable = Intrinsic.replace(pass.reusable, List<u8>.make())
+  facts.viewportFree = Intrinsic.replace(pass.viewportFrees, List<bool>.make())
+  facts.keyShapes = Intrinsic.replace(pass.keyShapes, List<u8>.make())
+  drop pass
+  if same {
+    output.fragments.spliceFrom(range.start, range.end, &scratchFragments)
+    adoptSubtree(nodes, &mut output, scratchBoxes.asSlice(), id, id, range.start)
+  }
+  output.scratchBoxes = move scratchBoxes
+  output.scratchFragments = move scratchFragments
+  return same
+}
+
 pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, output: &mut LayoutTree, measurer: &mut M, viewport: OptionalSize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   TextMeasure.beginTextLayout(&mut measurer)
   // Nothing changed since the last compute: its output stands.
@@ -1072,9 +1248,14 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   if restoring && facts.styledOffsets.length() == tree.nodes.length() + 1 && facts.styledBoxes.length() == nodes.boxes.length() {
     logged = run tree.changedNodes(since, &mut changes)
   }
+  let mut alone = List<usize>.make()
+  let mut aloneRanges = List<FinalRange>.make()
+  let mut aloneProbes = List<CachedProbe>.make()
+  let mut aloneEnds = List<usize>.make()
   if sameBoxes {
     run output.cache.rotateFinals()
-    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since, logged, changes.asSlice())
+    if logged { run cutoffCandidates(tree, since, &nodes, &output, changes.asSlice(), &mut alone, &mut aloneRanges, &mut aloneProbes, &mut aloneEnds) }
+    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since, logged, changes.asSlice(), alone.asSlice())
     run output.cache.compact()
   } else if kept {
     let matched = run Incremental.matchBoxes(output.boxNodes.asSlice(), output.firstBySource.asSlice(), &nodes)
@@ -1082,23 +1263,11 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     run output.cache.remap(matched.toOld.asSlice(), matched.toNew.asSlice())
     run output.snapshot.remap(matched.toOld.asSlice(), matched.toNew.asSlice())
     Incremental.invalidateUnmatched(&nodes, &mut output.cache, matched.changed.asSlice())
-    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since, logged, changes.asSlice())
+    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since, logged, changes.asSlice(), &[])
     run output.cache.compact()
   } else {
     output.cache.clear()
   }
-  let cache = Intrinsic.replace(output.cache, LayoutCache.make())
-  let snapshot = Intrinsic.replace(output.snapshot, Snapshot.make())
-  // A compute that fails part way leaves nothing to reuse.
-  output.keep(since, false)
-  run output.prepareBoxes(nodes.boxes.length(), sameBoxes)
-  run writes.begin(nodes.boxes.length())
-  output.viewportOverflow = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
-  let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
-  boxes.cache = move cache
-  boxes.previous = move snapshot
-  boxes.inPlace = sameBoxes
-  boxes.writes = move writes
   // Style facts of the same boxes need refreshing only where styles changed.
   if sameBoxes && facts.covers(nodes.boxes.length()) {
     let restyled = run Incremental.remarkSubtrees(tree, &nodes, since, logged, changes.asSlice(), &mut facts)
@@ -1120,6 +1289,29 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     run positionVisits(&nodes, &mut facts.visits)
     run Incremental.indexStyleSources(tree, &nodes, &mut facts.styledOffsets, &mut facts.styledBoxes)
   }
+  // Changed boxes laid out alone first; see cutoffCandidates.
+  if alone.length() != 0 { output.suspendReuse() }
+  let mut candidate: usize = 0
+  while candidate < alone.length() {
+    let mut first: usize = 0
+    if candidate > 0 { first = aloneEnds.get(candidate - 1) }
+    if !run cutoffBox(&nodes, &mut output, &mut facts, &mut measurer, alone.get(candidate), aloneRanges.get(candidate), aloneProbes.asSlice(), first, aloneEnds.get(candidate)) {
+      Incremental.invalidateBox(&nodes, &mut output.cache, alone.get(candidate), true)
+    }
+    candidate = candidate + 1
+  }
+  let cache = Intrinsic.replace(output.cache, LayoutCache.make())
+  let snapshot = Intrinsic.replace(output.snapshot, Snapshot.make())
+  // A compute that fails part way leaves nothing to reuse.
+  output.keep(since, false)
+  run output.prepareBoxes(nodes.boxes.length(), sameBoxes)
+  run writes.begin(nodes.boxes.length())
+  output.viewportOverflow = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
+  let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
+  boxes.cache = move cache
+  boxes.previous = move snapshot
+  boxes.inPlace = sameBoxes
+  boxes.writes = move writes
   boxes.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
   boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
   boxes.keyShapes = Intrinsic.replace(facts.keyShapes, List<u8>.make())

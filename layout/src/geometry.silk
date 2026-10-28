@@ -254,6 +254,27 @@ impl Layout {
     self.flowOverflow = flow
     self.generated = true
   }
+  // Whether two results of a box are the same in every field its parent and
+  // other ancestors read: all but its location and its content and padding
+  // geometry, which only its own descendants read (see the early cutoff in
+  // compute).
+  // Overflow inside the border box adds nothing to an ancestor's, and
+  // baselines matter only where `baselines` says so.
+  pub fn sameOutside(a: &Layout, b: &Layout, baselines: bool) -> bool {
+    return sameSize(a.size, b.size) && sameEdges(a.scrollbarGutter, b.scrollbarGutter)
+      && a.horizontalScrollbar == b.horizontalScrollbar && a.verticalScrollbar == b.verticalScrollbar
+      && a.scrollbarMetrics.horizontal == b.scrollbarMetrics.horizontal && a.scrollbarMetrics.vertical == b.scrollbarMetrics.vertical
+      && a.scrollbarMetrics.overlay == b.scrollbarMetrics.overlay && a.scrollbarMetrics.horizontalOnTop == b.scrollbarMetrics.horizontalOnTop && a.scrollbarMetrics.verticalOnLeft == b.scrollbarMetrics.verticalOnLeft
+      && a.scrollbarsApplicable == b.scrollbarsApplicable && a.widthDefinite == b.widthDefinite && a.heightDefinite == b.heightDefinite
+      && (!baselines || (sameBaselines(a.firstBaselines, b.firstBaselines) && sameBaselines(a.lastBaselines, b.lastBaselines)
+        && a.hasFirstBaseline == b.hasFirstBaseline && a.hasLastBaseline == b.hasLastBaseline))
+      && a.measurementOffset.x == b.measurementOffset.x && a.measurementOffset.y == b.measurementOffset.y
+      && sameOverflow(a.scrollableOverflow, b.scrollableOverflow, a.size) && a.generated == b.generated
+      && a.preferredRatio == b.preferredRatio && a.ratioBorderBox == b.ratioBorderBox && sameEdges(a.usedMargin, b.usedMargin)
+      && a.marginTopPositive == b.marginTopPositive && a.marginTopNegative == b.marginTopNegative
+      && a.marginBottomPositive == b.marginBottomPositive && a.marginBottomNegative == b.marginBottomNegative
+      && a.collapsesThrough == b.collapsesThrough && a.hasClearance == b.hasClearance
+  }
   pub fn normalFlowOverflow(self: &Self) -> Rect { return self.flowOverflow }
   pub fn paddingRect(self: &Self) -> Rect { return self.paddingBox }
   pub fn contentRect(self: &Self) -> Rect { return self.contentBox }
@@ -277,4 +298,18 @@ pub fn clamp(value: f64, minimum: f64, maximum: f64) -> f64 { return max(minimum
 pub fn abs(value: f64) -> f64 {
   if value < 0.0 { return -value }
   return value
+}
+
+pub fn sameSize(a: Size, b: Size) -> bool { return a.width == b.width && a.height == b.height }
+pub fn sameRect(a: Rect, b: Rect) -> bool { return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height }
+// Equal, or both within a border box of `size`.
+pub fn sameOverflow(a: Rect, b: Rect, size: Size) -> bool {
+  if sameRect(a, b) { return true }
+  return a.x >= 0.0 && a.y >= 0.0 && a.x + a.width <= size.width && a.y + a.height <= size.height
+    && b.x >= 0.0 && b.y >= 0.0 && b.x + b.width <= size.width && b.y + b.height <= size.height
+}
+pub fn sameEdges(a: ResolvedEdges, b: ResolvedEdges) -> bool { return a.top == b.top && a.right == b.right && a.bottom == b.bottom && a.left == b.left }
+pub fn sameBaselines(a: BaselineSet, b: BaselineSet) -> bool {
+  return a.alphabetic == b.alphabetic && a.ideographic == b.ideographic && a.central == b.central && a.mathematical == b.mathematical
+    && a.xMiddle == b.xMiddle && a.textOver == b.textOver && a.textUnder == b.textUnder
 }

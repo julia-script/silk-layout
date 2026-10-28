@@ -2,7 +2,7 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import silk.slice { Slice }
 import silk.ownership { Copy }
-import geometry { Point, Size, Rect, ResolvedEdges, BaselineSet }
+import geometry { Point, Size, Rect, ResolvedEdges, BaselineSet, sameSize, sameRect, sameEdges, sameBaselines, sameOverflow }
 import tree { NO_NODE }
 
 pub enum FragmentKind { Box, Inline, Text, Line }
@@ -47,6 +47,17 @@ pub struct Fragment {
 }
 impl Copy for Fragment {}
 impl Fragment {
+  // Whether two fragments are the same in what their ancestors read: all
+  // but their links, location, world location and content and padding rects.
+  pub fn sameOutside(a: &Fragment, b: &Fragment, baselines: bool) -> bool {
+    return a.box == b.box && a.source == b.source && a.kind == b.kind && a.fragmentainer == b.fragmentainer
+      && sameSize(a.size, b.size) && sameRect(a.layoutBounds, b.layoutBounds) && sameOverflow(a.scrollableOverflow, b.scrollableOverflow, a.size)
+      && a.visualOffset.x == b.visualOffset.x && a.visualOffset.y == b.visualOffset.y
+      && (!baselines || (sameBaselines(a.firstBaselines, b.firstBaselines) && sameBaselines(a.lastBaselines, b.lastBaselines)
+        && a.hasFirstBaseline == b.hasFirstBaseline && a.hasLastBaseline == b.hasLastBaseline)) && sameEdges(a.usedMargin, b.usedMargin)
+      && a.decorationEdges == b.decorationEdges && a.phantom == b.phantom && a.repeated == b.repeated && a.overflowOnly == b.overflowOnly
+      && a.nonpainting == b.nonpainting && a.positioningShell == b.positioningShell && (a.textData == NO_NODE) == (b.textData == NO_NODE)
+  }
   pub fn make(box: usize, source: usize, kind: FragmentKind) -> Fragment {
     return Fragment {
       box: box, source: source, kind: kind, fragmentainer: 0,
@@ -779,6 +790,81 @@ impl FragmentArena {
   }
 
   pub fn boxCount(self: &Self) -> usize { return self.firstByBox.length() }
+  // Whether a whole output stands, with no visual offsets: between computes.
+  pub fn settledOutput(self: &Self) -> bool {
+    return !self.inPlace && !self.offsets && self.count == self.values.length() && self.textCount == self.texts.length()
+  }
+  // How many texts the fragments before `index` hold.
+  pub fn textsBefore(self: &Self, index: usize) -> usize {
+    if index < self.textMarks.length() { return self.textMarks.get(index) }
+    return self.texts.length()
+  }
+  // Replaces the output's fragments [start, end) with all of `source`'s, a
+  // layout of the same subtree alone that emitted as many fragments and
+  // texts. The first keeps its place among its siblings and its location;
+  // world locations follow from it. Between computes only (settledOutput).
+  pub fn spliceFrom(self: &mut Self, start: usize, end: usize, source: &FragmentArena) {
+    let firstText = self.textsBefore(start)
+    let values = self.values.asMutSlice()
+    let from = source.values.asSlice()
+    // The boxes of the old fragments lose their chains; the new ones set them.
+    let mut index = start
+    while index < end {
+      let box = values[index].box
+      if box != NO_NODE {
+        self.firstByBox.set(box, NO_NODE)
+        self.lastByBox.set(box, NO_NODE)
+      }
+      index = index + 1
+    }
+    let root = values[start]
+    index = start
+    while index < end {
+      let mut value = from[index - start]
+      if index == start {
+        value.parent = root.parent
+        value.previousSibling = root.previousSibling
+        value.nextSibling = root.nextSibling
+        value.location = root.location
+      } else {
+        value.parent = value.parent + start
+        if value.previousSibling != NO_NODE { value.previousSibling = value.previousSibling + start }
+        if value.nextSibling != NO_NODE { value.nextSibling = value.nextSibling + start }
+      }
+      if value.firstChild != NO_NODE {
+        value.firstChild = value.firstChild + start
+        value.lastChild = value.lastChild + start
+      }
+      if value.previousForBox != NO_NODE { value.previousForBox = value.previousForBox + start }
+      if value.nextForBox != NO_NODE { value.nextForBox = value.nextForBox + start }
+      if value.textData != NO_NODE { value.textData = value.textData + firstText }
+      if value.kind == FragmentKind.Text && value.box != NO_NODE {
+        value.first = value.previousForBox == NO_NODE
+        value.last = value.nextForBox == NO_NODE
+      }
+      let mut x = value.location.x + value.visualOffset.x
+      let mut y = value.location.y + value.visualOffset.y
+      if value.parent != NO_NODE {
+        x = x + values[value.parent].worldLocation.x
+        y = y + values[value.parent].worldLocation.y
+      }
+      value.worldLocation = Point { x: x, y: y }
+      if value.box != NO_NODE {
+        if value.previousForBox == NO_NODE { self.firstByBox.set(value.box, index) }
+        if value.nextForBox == NO_NODE { self.lastByBox.set(value.box, index) }
+      }
+      values[index] = value
+      self.textMarks.set(index, firstText + source.textMarks.get(index - start))
+      index = index + 1
+    }
+    let texts = self.texts.asMutSlice()
+    let fromTexts = source.texts.asSlice()
+    let mut text: usize = 0
+    while text < fromTexts.length {
+      texts[firstText + text] = fromTexts[text]
+      text = text + 1
+    }
+  }
   // A box's first and last fragments of this compute so far, or NO_NODE.
   // The chains of a box this compute has not reached still name previous
   // fragments, which are not the box's unless kept.

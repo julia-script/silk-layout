@@ -341,9 +341,9 @@ fn cacheKey(nodes: &BoxTree, id: usize, input: &Input, viewportFree: bool) -> In
 // CSS Sizing: known dimensions are border-box constraints, not a rewritten style.
 // Intrinsic probes preserve the original percentage containing block.
 pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  let mut key = input.*
+  // Final layouts are kept under the same normalized request as probes.
+  let key = cacheKey(nodes, id, &input, output.viewportFree(id))
   if !input.performLayout {
-    key = cacheKey(nodes, id, &input, output.viewportFree(id))
     match output.lookup(id, key, CacheKind.IndependentBox) {
       Option<Layout>.Some { value: cached } => {
         output.stats.cacheHits = output.stats.cacheHits + 1
@@ -354,7 +354,7 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     }
   }
   if input.performLayout {
-    match run output.reuseFinal(nodes, id, input, REUSE_INDEPENDENT) {
+    match run output.reuseFinal(nodes, id, &key, REUSE_INDEPENDENT) {
       Option<Layout>.Some { value: reused } => { return reused }
       Option<Layout>.None => {}
     }
@@ -365,7 +365,7 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
   if !input.performLayout { run output.remember(id, key, CacheKind.IndependentBox, result) }
-  else if output.frame == NO_NODE { run output.recordFinal(id, input, &result, start) }
+  else if output.frame == NO_NODE { run output.recordFinal(id, &key, &result, start) }
   return result
 }
 
@@ -375,15 +375,16 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
 // clean child is copied like an independent formatting context.
 pub effect fn layoutInFlow<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let reusable = input.performLayout && !input.fragmentation.active && output.frame == NO_NODE && bfc.clearBelow(input.bfcContentOrigin.y)
+  let key = cacheKey(nodes, id, &input, output.viewportFree(id))
   if reusable {
-    match run output.reuseFinal(nodes, id, input, REUSE_IN_FLOW) {
+    match run output.reuseFinal(nodes, id, &key, REUSE_IN_FLOW) {
       Option<Layout>.Some { value: reused } => { return reused }
       Option<Layout>.None => {}
     }
   }
   let start = output.fragments.checkpoint()
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
-  if reusable && bfc.clearBelow(input.bfcContentOrigin.y) { run output.recordFinal(id, input, &result, start) }
+  if reusable && bfc.clearBelow(input.bfcContentOrigin.y) { run output.recordFinal(id, &key, &result, start) }
   return result
 }
 

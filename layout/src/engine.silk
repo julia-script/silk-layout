@@ -328,9 +328,22 @@ fn cacheKey(nodes: &BoxTree, id: usize, input: &Input, viewportFree: bool) -> In
   }
   if key.known.widthDefinite { key.availableWidth = AvailableSpace.maxContent() }
   if key.known.heightDefinite { key.availableHeight = AvailableSpace.maxContent() }
-  if nodes.node(id).kind == BoxKind.InlineFormatting { return key }
+  let node = nodes.node(id)
+  if node.kind == BoxKind.InlineFormatting { return key }
   let style = nodes.style(id)
   if style.replaced { return key }
+  // An empty box has the same min- and max-content contribution, and a
+  // fixed length leaves it nothing to do with available space on that axis.
+  if node.firstChild == NO_NODE && node.measurement == Measurement.None && node.kind != BoxKind.Text {
+    if key.intrinsicWidth || style.width.kind == DimensionKind.Length { key.availableWidth = AvailableSpace.maxContent() }
+    if key.intrinsicHeight || style.height.kind == DimensionKind.Length { key.availableHeight = AvailableSpace.maxContent() }
+  }
+  // A horizontal block container never reads its available block size: its
+  // children get max-content block space and it has no stretch or
+  // fit-content block sizing in a horizontal parent.
+  if node.kind == BoxKind.Block && node.measurement == Measurement.None && !isFlex(style) && style.writingMode == WritingMode.HorizontalTb && input.parentWritingMode == WritingMode.HorizontalTb && style.height.kind != DimensionKind.MinContent && style.height.kind != DimensionKind.MaxContent && style.height.kind != DimensionKind.FitContent {
+    key.availableHeight = AvailableSpace.maxContent()
+  }
   if (style.writingMode == WritingMode.HorizontalTb) != (input.parentWritingMode == WritingMode.HorizontalTb) { return key }
   if percentLike(style.width) || percentLike(style.height) || percentLike(style.minWidth) || percentLike(style.minHeight) || percentLike(style.maxWidth) || percentLike(style.maxHeight) { return key }
   if percentEdges(&style.padding) || percentEdges(&style.margin) || percentEdges(&style.inset) { return key }

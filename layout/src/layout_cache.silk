@@ -24,20 +24,23 @@ pub const FACT_FREE: u8 = 8
 // and refreshed only where a style changed; see Incremental.markSubtrees.
 // visits: the boxes positioning must visit, in source preorder; see
 // Positioned.positionVisits. styled: the boxes taking each tree node's
-// style; see Incremental.indexStyleSources.
-pub struct BoxFacts { pub own: List<u8>, pub reusable: List<u8>, pub viewportFree: List<bool>, pub keyShapes: List<u8>, pub visits: List<usize>, pub styledOffsets: List<usize>, pub styledBoxes: List<usize> }
+// style; see Incremental.indexStyleSources. parents: each box's parent.
+pub struct BoxFacts { pub own: List<u8>, pub reusable: List<u8>, pub viewportFree: List<bool>, pub keyShapes: List<u8>, pub visits: List<usize>, pub styledOffsets: List<usize>, pub styledBoxes: List<usize>, pub parents: List<usize> }
 impl BoxFacts {
-  pub fn make() -> BoxFacts { return BoxFacts { own: List<u8>.make(), reusable: List<u8>.make(), viewportFree: List<bool>.make(), keyShapes: List<u8>.make(), visits: List<usize>.make(), styledOffsets: List<usize>.make(), styledBoxes: List<usize>.make() } }
+  pub fn make() -> BoxFacts { return BoxFacts { own: List<u8>.make(), reusable: List<u8>.make(), viewportFree: List<bool>.make(), keyShapes: List<u8>.make(), visits: List<usize>.make(), styledOffsets: List<usize>.make(), styledBoxes: List<usize>.make(), parents: List<usize>.make() } }
   pub fn covers(self: &Self, count: usize) -> bool {
-    return self.own.length() == count && self.reusable.length() == count && self.viewportFree.length() == count && self.keyShapes.length() == count
+    return self.own.length() == count && self.reusable.length() == count && self.viewportFree.length() == count && self.keyShapes.length() == count && self.parents.length() == count
   }
 }
 // Box layouts rewritten during a compute that keeps the previous compute's
 // box layouts in place: `stamps[id] == generation` marks a box rewritten in
-// this compute, whose previous layout is `saved[slots[id]]`.
-pub struct BoxWrites { pub generation: usize, pub stamps: List<usize>, pub slots: List<usize>, pub saved: List<Layout> }
+// this compute, whose previous layout is `saved[slots[id]]`. In any compute,
+// a box whose `written` entry is `generation` had its layout written, one
+// whose `relaid` entry is had its subtree laid out again, and one whose
+// `below` entry is has a descendant with either.
+pub struct BoxWrites { pub generation: usize, pub stamps: List<usize>, pub slots: List<usize>, pub saved: List<Layout>, pub written: List<usize>, pub relaid: List<usize>, pub below: List<usize> }
 impl BoxWrites {
-  pub fn make() -> BoxWrites { return BoxWrites { generation: 0, stamps: List<usize>.make(), slots: List<usize>.make(), saved: List<Layout>.make() } }
+  pub fn make() -> BoxWrites { return BoxWrites { generation: 0, stamps: List<usize>.make(), slots: List<usize>.make(), saved: List<Layout>.make(), written: List<usize>.make(), relaid: List<usize>.make(), below: List<usize>.make() } }
   // Starts a compute over `count` boxes.
   pub effect fn begin(self: &mut Self, count: usize) ! OutOfMemoryError ? &mut Allocator {
     self.generation = self.generation + 1
@@ -45,8 +48,14 @@ impl BoxWrites {
     if self.stamps.length() != count {
       self.stamps.clear()
       self.slots.clear()
+      self.written.clear()
+      self.relaid.clear()
+      self.below.clear()
       run self.stamps.appendRepeated(0, count)
       run self.slots.appendRepeated(0, count)
+      run self.written.appendRepeated(0, count)
+      run self.relaid.appendRepeated(0, count)
+      run self.below.appendRepeated(0, count)
     }
   }
 }
@@ -63,7 +72,7 @@ impl Copy for Entry {}
 pub struct FinalResult { pub input: Input, pub layout: Layout }
 impl Copy for FinalResult {}
 // `floats` and `floatCount` locate the float exclusions the box was laid out
-// beside, relative to its content origin, in the same compute's float list.
+// beside, relative to its content origin, in the cache's float list.
 pub struct FinalRange { pub valid: bool, pub start: usize, pub end: usize, pub floats: usize, pub floatCount: usize }
 impl Copy for FinalRange {}
 impl FinalRange {
@@ -94,20 +103,25 @@ pub struct LayoutCache {
   dead: usize,
   // The current compute, and how many entries the previous one used.
   generation: usize, touched: usize, previouslyTouched: usize,
-  // Final layout ranges recorded by this compute, and those of the previous
-  // one, whose fragments are in the LayoutTree's snapshot. A kept range is
-  // dropped once this compute records its box, which replaces the result.
+  // Final layout ranges, written in place: each box's range of this compute
+  // once it is laid out, copied or kept, and of the previous one, whose
+  // fragments are in the LayoutTree's snapshot or kept in place, until then.
+  // A box laid out again loses its range until it records one. The first
+  // write in a compute saves the previous range, stamped with `generation`,
+  // as the kept range keptRange reads; it is dropped once this compute
+  // records the box, which replaces the result.
   results: List<FinalResult>,
-  finals: List<FinalRange>,
-  kept: List<FinalRange>,
-  finalFloats: List<FloatBox>,
-  keptFloats: List<FloatBox>,
+  ranges: List<FinalRange>,
+  rangeStamps: List<usize>, rangeSlots: List<usize>, keptRanges: List<FinalRange>,
+  // Float lists of ranges, appended to; `floatsCompacted` is the length
+  // after the last compaction.
+  floats: List<FloatBox>, floatsCompacted: usize,
   // Each box's prepared paragraph from the compute that last laid it out.
   texts: List<List<KeptText>>,
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), finals: List<FinalRange>.make(), kept: List<FinalRange>.make(), finalFloats: List<FloatBox>.make(), keptFloats: List<FloatBox>.make(), texts: List<List<KeptText>>.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<FinalRange>.make(), rangeStamps: List<usize>.make(), rangeSlots: List<usize>.make(), keptRanges: List<FinalRange>.make(), floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
@@ -116,10 +130,12 @@ impl LayoutCache {
     self.dead = 0
     self.touched = 0
     self.results.clear()
-    self.finals.clear()
-    self.kept.clear()
-    self.finalFloats.clear()
-    self.keptFloats.clear()
+    self.ranges.clear()
+    self.keptRanges.clear()
+    self.rangeStamps.clear()
+    self.rangeSlots.clear()
+    self.floats.clear()
+    self.floatsCompacted = 0
     self.texts.clear()
   }
   // Starts a compute: the previous compute's final layouts become reusable.
@@ -127,29 +143,59 @@ impl LayoutCache {
     self.generation = self.generation + 1
     self.previouslyTouched = self.touched
     self.touched = 0
-    let previous = Intrinsic.replace(self.finals, List<FinalRange>.make())
-    let spare = Intrinsic.replace(self.kept, move previous)
-    self.finals = move spare
-    self.finals.clear()
-    let count = self.kept.length()
-    run self.finals.appendRepeated(FinalRange.none(), count)
-    let previousFloats = Intrinsic.replace(self.finalFloats, List<FloatBox>.make())
-    let spareFloats = Intrinsic.replace(self.keptFloats, move previousFloats)
-    self.finalFloats = move spareFloats
-    self.finalFloats.clear()
+    self.keptRanges.clear()
+    if self.floats.length() > 1024 && self.floats.length() > 4 * self.floatsCompacted { run self.compactFloats() }
+  }
+  // Rebuilds the float list with only the lists of valid ranges.
+  effect fn compactFloats(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
+    let mut floats = List<FloatBox>.make()
+    let ranges = self.ranges.asMutSlice()
+    let mut id: usize = 0
+    while id < ranges.length {
+      if ranges[id].valid && ranges[id].floatCount != 0 {
+        let first = floats.length()
+        run floats.appendSlice(Slice.view(self.floats.asSlice(), ranges[id].floats, ranges[id].floatCount))
+        ranges[id].floats = first
+      }
+      id = id + 1
+    }
+    self.floats = move floats
+    self.floatsCompacted = self.floats.length()
   }
   // The previous compute's range for a box and the result it holds.
   pub fn keptRange(self: &Self, id: usize) -> FinalRange {
-    if id >= self.kept.length() { return FinalRange.none() }
-    return self.kept.get(id)
+    if id >= self.ranges.length() { return FinalRange.none() }
+    if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { return self.keptRanges.get(self.rangeSlots.get(id)) }
+    return self.ranges.get(id)
   }
   pub fn result(self: &Self, id: usize) -> &FinalResult { return &self.results.asSlice()[id] }
-  effect fn setRange(self: &mut Self, id: usize, range: FinalRange) ! OutOfMemoryError ? &mut Allocator {
-    if id >= self.finals.length() {
-      let missing = id + 1 - self.finals.length()
-      run self.finals.appendRepeated(FinalRange.none(), missing)
+  // Saves a box's previous range before its first write in this compute.
+  effect fn writeRange(self: &mut Self, id: usize, range: FinalRange) ! OutOfMemoryError ? &mut Allocator {
+    if id >= self.ranges.length() {
+      let missing = id + 1 - self.ranges.length()
+      run self.ranges.appendRepeated(FinalRange.none(), missing)
     }
-    self.finals.set(id, range)
+    if id >= self.rangeStamps.length() {
+      let missing = id + 1 - self.rangeStamps.length()
+      run self.rangeStamps.appendRepeated(usize.MAX, missing)
+      run self.rangeSlots.appendRepeated(0, missing)
+    }
+    if self.rangeStamps.get(id) != self.generation {
+      run self.keptRanges.append(self.ranges.get(id))
+      self.rangeStamps.set(id, self.generation)
+      self.rangeSlots.set(id, self.keptRanges.length() - 1)
+    }
+    self.ranges.set(id, range)
+  }
+  // A box is being laid out again: it has no range of this compute until it
+  // records one.
+  pub effect fn beginLayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
+    if id >= self.ranges.length() || (id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation && !self.ranges.get(id).valid) { return }
+    run self.writeRange(id, FinalRange.none())
+  }
+  // A box of a subtree kept in place has its previous range again.
+  pub fn keepRange(self: &mut Self, id: usize) {
+    if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { self.ranges.set(id, self.keptRanges.get(self.rangeSlots.get(id))) }
   }
   pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize, floats: &[FloatBox]) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.results.length() {
@@ -157,24 +203,22 @@ impl LayoutCache {
       run self.results.reserve(missing)
       while self.results.length() <= id { run self.results.append(FinalResult { input: input.*, layout: layout.* }) }
     }
-    let first = self.finalFloats.length()
-    run self.finalFloats.appendSlice(floats)
-    run self.setRange(id, FinalRange { valid: true, start: start, end: end, floats: first, floatCount: floats.length })
+    let first = self.floats.length()
+    run self.floats.appendSlice(floats)
+    run self.writeRange(id, FinalRange { valid: true, start: start, end: end, floats: first, floatCount: floats.length })
+    self.keptRanges.set(self.rangeSlots.get(id), FinalRange.none())
     let results = self.results.asMutSlice()
     results[id].input = input.*
     results[id].layout = layout.*
-    if id < self.kept.length() { self.kept.set(id, FinalRange.none()) }
   }
   // Moves a kept range, unchanged in content, to where a copy put it.
   pub effect fn carryFinal(self: &mut Self, id: usize, kept: FinalRange, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator {
-    let first = self.finalFloats.length()
-    if kept.floatCount != 0 { run self.finalFloats.appendSlice(Slice.view(self.keptFloats.asSlice(), kept.floats, kept.floatCount)) }
-    run self.setRange(id, FinalRange { valid: true, start: start, end: end, floats: first, floatCount: kept.floatCount })
+    run self.writeRange(id, FinalRange { valid: true, start: start, end: end, floats: kept.floats, floatCount: kept.floatCount })
   }
   // Whether a kept range was laid out beside these floats.
   pub fn sameFloats(self: &Self, kept: FinalRange, floats: &[FloatBox]) -> bool {
     if kept.floatCount != floats.length { return false }
-    let recorded = self.keptFloats.asSlice()
+    let recorded = self.floats.asSlice()
     let mut index: usize = 0
     while index < floats.length {
       let a = &recorded[kept.floats + index]
@@ -186,8 +230,8 @@ impl LayoutCache {
   }
   pub fn clearBox(self: &mut Self, id: usize) {
     if id < self.texts.length() { self.texts.asMutSlice()[id].clear() }
-    if id < self.kept.length() { self.kept.set(id, FinalRange.none()) }
-    if id < self.finals.length() { self.finals.set(id, FinalRange.none()) }
+    if id < self.ranges.length() { self.ranges.set(id, FinalRange.none()) }
+    if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { self.keptRanges.set(self.rangeSlots.get(id), FinalRange.none()) }
     if id >= self.heads.length() { return }
     let mut index = self.heads.get(id)
     while index != ABSENT {
@@ -262,7 +306,7 @@ impl LayoutCache {
       let mut head = ABSENT
       let mut range = FinalRange.none()
       if from != ABSENT && from < self.heads.length() { head = self.heads.get(from) }
-      if from != ABSENT && from < self.kept.length() { range = self.kept.get(from) }
+      if from != ABSENT && from < self.ranges.length() { range = self.keptRange(from) }
       run heads.append(head)
       run kept.append(range)
       if from != ABSENT && from < self.results.length() { run results.append(self.results.asSlice()[from]) }
@@ -270,7 +314,10 @@ impl LayoutCache {
       id = id + 1
     }
     self.heads = move heads
-    self.kept = move kept
+    self.ranges = move kept
+    self.keptRanges.clear()
+    self.rangeStamps.clear()
+    self.rangeSlots.clear()
     self.results = move results
     let mut texts = List<List<KeptText>>.make()
     run texts.reserveExact(toOld.length)

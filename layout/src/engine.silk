@@ -722,7 +722,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   let previousParent = output.fragmentParent
   if input.performLayout {
     run output.preserveLayout(id)
-    run output.touch(id)
+    run output.relayout(id)
     output.boxes[id].location = Point { x: 0.0, y: 0.0 }
     if fragmented && id == 0 {
       let frame = output.frame
@@ -1022,17 +1022,6 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
 fn sameViewport(a: &OptionalSize, b: &OptionalSize) -> bool {
   return a.widthDefinite == b.widthDefinite && a.heightDefinite == b.heightDefinite && a.width == b.width && a.height == b.height
 }
-// Scroll offsets move fragments without a revision; boxes copy them.
-fn sameScrollOffsets(tree: &Tree, boxes: &[BoxNode]) -> bool {
-  let sources = tree.nodes.asSlice()
-  let mut index: usize = 0
-  while index < boxes.length {
-    let source = boxes[index].source
-    if source != NO_NODE && (sources[source].scrollOffset.x != boxes[index].scrollOffset.x || sources[source].scrollOffset.y != boxes[index].scrollOffset.y) { return false }
-    index = index + 1
-  }
-  return true
-}
 
 effect fn boxesFor<'source>(tree: &'source Tree, output: &mut LayoutTree, since: usize, restoring: bool) -> BoxTree<'source> ! OutOfMemoryError ? &mut Allocator {
   if !restoring { return run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) }
@@ -1042,7 +1031,15 @@ effect fn boxesFor<'source>(tree: &'source Tree, output: &mut LayoutTree, since:
   let texts = Intrinsic.replace(output.anonymousText, List<bool>.make())
   let first = Intrinsic.replace(output.firstBySource, List<usize>.make())
   let last = Intrinsic.replace(output.lastBySource, List<usize>.make())
-  let mut nodes = BoxTree.restore(tree.nodes.asSlice(), tree.styles.asSlice(), move boxes, move styles, move origins, move texts, move first, move last)
+  // Scroll offsets changed since: those boxes alone take the new offsets.
+  let mut scrolled = List<usize>.make()
+  let logged = run tree.scrolledNodes(output.keptScrolls, &mut scrolled)
+  let mut nodes = BoxTree.restore(tree.nodes.asSlice(), tree.styles.asSlice(), move boxes, move styles, move origins, move texts, move first, move last, !logged)
+  let mut at: usize = 0
+  while at < scrolled.length() {
+    nodes.refreshScroll(scrolled.get(at))
+    at = at + 1
+  }
   let mut slot: usize = 0
   while slot < nodes.anonymousOrigins.length() {
     let origin = nodes.anonymousOrigins.get(slot)
@@ -1056,7 +1053,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   TextMeasure.beginTextLayout(&mut measurer)
   // Nothing changed since the last compute: its output stands.
   let since = output.treeRevision()
-  if output.reusable() && tree.revision() == since && sameViewport(&output.keptViewport, &viewport) && output.keptScroll.x == tree.viewportScrollOffset.x && output.keptScroll.y == tree.viewportScrollOffset.y && sameScrollOffsets(tree, output.boxNodes.asSlice()) {
+  if output.reusable() && tree.revision() == since && sameViewport(&output.keptViewport, &viewport) && output.keptScroll.x == tree.viewportScrollOffset.x && output.keptScroll.y == tree.viewportScrollOffset.y && tree.scrollRevision() == output.keptScrolls {
     output.stats = LayoutStats.zero()
     return
   }
@@ -1132,6 +1129,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
   boxes.keyShapes = Intrinsic.replace(facts.keyShapes, List<u8>.make())
   boxes.visits = Intrinsic.replace(facts.visits, List<usize>.make())
+  boxes.parents = Intrinsic.replace(facts.parents, List<usize>.make())
   let mut input = Input.make(viewport)
   input.known = viewport
   input.blockRoot = true
@@ -1154,6 +1152,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       facts.viewportFree = Intrinsic.replace(boxes.viewportFrees, List<bool>.make())
       facts.keyShapes = Intrinsic.replace(boxes.keyShapes, List<u8>.make())
       facts.visits = Intrinsic.replace(boxes.visits, List<usize>.make())
+      facts.parents = Intrinsic.replace(boxes.parents, List<usize>.make())
       let usedWrites = Intrinsic.replace(boxes.writes, BoxWrites.make())
       drop boxes
       output.cache = move kept
@@ -1163,6 +1162,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       output.keep(tree.revision(), settled)
       output.keptViewport = viewport
       output.keptScroll = tree.viewportScrollOffset
+      output.keptScrolls = tree.scrollRevision()
       output.fragments.resolveLocations()
       output.viewportOverflow = overflow
       output.adopt(move nodes)

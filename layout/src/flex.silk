@@ -1215,6 +1215,8 @@ effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     run output.flexScratch.append(move scratch)
     return result
   }
+  // One request for every item: each item resets the fields it sets.
+  let mut finalInput = childInput.*
   lineIndex = 0
   while lineIndex < lines.length {
     let line = lines[lineIndex]
@@ -1240,7 +1242,11 @@ effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
       if !active(item, collapsed) { run zeroSubtree(nodes, &mut output, item.id) }
       else {
         let mut childCross = item.cross
-        let mut finalInput = childInput.*
+        finalInput.known = childInput.known
+        finalInput.indefiniteWidth = childInput.indefiniteWidth
+        finalInput.indefiniteHeight = childInput.indefiniteHeight
+        finalInput.availableWidth = childInput.availableWidth
+        finalInput.availableHeight = childInput.availableHeight
         setKnown(&mut finalInput, axis.horizontal, item.target)
         setIndefinite(&mut finalInput, axis.horizontal, !item.mainDefinite)
         if item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd {

@@ -54,13 +54,13 @@ fn normalChild(nodes: &BoxTree, candidate: usize) -> usize {
   }
   return NO_NODE
 }
-fn topMargins(layout: Layout) -> Margins {
+fn topMargins(layout: &Layout) -> Margins {
   return Margins { positive: layout.marginTopPositive, negative: layout.marginTopNegative }
 }
-fn bottomMargins(layout: Layout) -> Margins {
+fn bottomMargins(layout: &Layout) -> Margins {
   return Margins { positive: layout.marginBottomPositive, negative: layout.marginBottomNegative }
 }
-pub fn inlineOffset(style: &Style, input: &Input, axes: Axes, direction: Direction, margin: ResolvedEdges, width: f64, available: f64) -> f64 {
+pub fn inlineOffset(style: &Style, input: &Input, axes: &Axes, direction: Direction, margin: ResolvedEdges, width: f64, available: f64) -> f64 {
   let alignment = blockJustification(style, &input)
   if alignment == Align.Normal || axes.lowAuto(style) || axes.highAuto(style) {
     return blockInlineOffset(margin.left, margin.right, axes.lowAuto(style), axes.highAuto(style), direction == Direction.Rtl, width, available)
@@ -350,7 +350,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       }
     }
     let mut childLayout = Layout.zero()
-    let mut x = inlineOffset(childStyle, &item.input, axes, style.usedDirection(), item.margin, item.width, contentWidth)
+    let mut x = inlineOffset(childStyle, &item.input, &axes, style.usedDirection(), item.margin, item.width, contentWidth)
     let mut y = cursor
     let mut inlineStart = 0.0
     let mut inlineSpace = contentWidth
@@ -491,20 +491,20 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
           // A contained float may establish the BFC's end below normal flow.
           // Compare the retained margin envelope, not the already-trimmed
           // border rectangle. Actual chosen sibling breaks remain adjoining.
-          if bfc.bottom(origin) <= y + childLayout.size.height + bottomMargins(childLayout).value() {
+          if bfc.bottom(origin) <= y + childLayout.size.height + bottomMargins(&childLayout).value() {
             item.input.fragmentation.marginEnd = true
             bfc.restore(checkpoint)
             output.restoreCheckpoint(fragmentCheckpoint)
             continue
           }
         }
-        childTop = topMargins(childLayout)
+        childTop = topMargins(&childLayout)
         joined = pending.join(childTop)
         let mut nextY = cursor
         if item.parallel { nextY = 0.0 }
         else if !(leading && collapseTop) { nextY = cursor + joined.value() }
         nextY = max(nextY, clearMinimum)
-        let nextX = inlineOffset(childStyle, &item.input, axes, style.usedDirection(), item.margin, childLayout.size.width, contentWidth)
+        let nextX = inlineOffset(childStyle, &item.input, &axes, style.usedDirection(), item.margin, childLayout.size.width, contentWidth)
         let moved = nextX != x || nextY != y
         if moved && ((fragmented && nextY != y) || (!independent && checkpoint.count != 0)) {
           // Fragment capacity changes with the collapsed block position even
@@ -578,7 +578,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
             }
           }
         }
-        x = band.left + inlineOffset(childStyle, &item.input, axes, style.usedDirection(), item.margin, childLayout.size.width, band.right - band.left)
+        x = band.left + inlineOffset(childStyle, &item.input, &axes, style.usedDirection(), item.margin, childLayout.size.width, band.right - band.left)
         inlineStart = band.left
         inlineSpace = band.right - band.left
       }
@@ -663,7 +663,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
           continue
         }
       }
-      let childBottom = bottomMargins(childLayout)
+      let childBottom = bottomMargins(&childLayout)
       if fragmented && !item.parallel {
         let child = output.resumes.get(item.id)
         let mut own = output.resumes.get(id)

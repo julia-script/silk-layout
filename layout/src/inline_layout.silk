@@ -80,7 +80,7 @@ fn alignmentShift(style: &Style, lineHeight: f64, parent: &FontBox, mode: Writin
   if kind == VerticalAlignKind.Super { return over * parent.metrics.superscriptOffset }
   return 0.0
 }
-fn atomicBaseline(style: &Style, layout: &Layout, axes: Axes, margin: ResolvedEdges, parent: &Style) -> f64 {
+fn atomicBaseline(style: &Style, layout: &Layout, axes: &Axes, margin: ResolvedEdges, parent: &Style) -> f64 {
   let size = axes.size(layout.size)
   let childAxes = Axes.make(style.writingMode)
   let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && style.display.insideIs(DisplayInside.Flex))
@@ -92,7 +92,7 @@ fn atomicBaseline(style: &Style, layout: &Layout, axes: Axes, margin: ResolvedEd
     if childAxes.reverseBlock != axes.reverseBlock { baseline = size.height - baseline }
     return baseline
   }
-  return marginBaseline(style, size, axes, margin, parent)
+  return marginBaseline(style, size, axes.*, margin, parent)
 }
 
 fn marginBaseline(style: &Style, size: Size, axes: Axes, margin: ResolvedEdges, parent: &Style) -> f64 {
@@ -250,7 +250,7 @@ effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let mut baseline = 0.0
   let mut baselineFromMargin = false
   if item.kind == ItemKind.Atomic {
-    baseline = atomicBaseline(style, &layout, axes, resolved.margin, parentStyle)
+    baseline = atomicBaseline(style, &layout, &axes, resolved.margin, parentStyle)
     let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && style.display.insideIs(DisplayInside.Flex))
     baselineFromMargin = Axes.make(style.writingMode).vertical != axes.vertical || !((first && layout.hasFirstBaseline) || (!first && layout.hasLastBaseline))
   }
@@ -332,7 +332,7 @@ fn lineExtents(items: &[Item], scopes: &[Scope], extents: &mut [Extent], start: 
 
 // Resolve boundary margins before fitting and baseline export. Only an atomic
 // margin edge that actually defines the line envelope adjoins the boundary.
-fn atomicLineMargins(nodes: &BoxTree, items: &mut [Item], atomics: &mut [AtomicData], scopes: &[Scope], extents: &mut [Extent], axes: Axes, input: &Input, start: usize, end: usize, atStart: bool, atEnd: bool, real: bool) -> Size {
+fn atomicLineMargins(nodes: &BoxTree, items: &mut [Item], atomics: &mut [AtomicData], scopes: &[Scope], extents: &mut [Extent], axes: &Axes, input: &Input, start: usize, end: usize, atStart: bool, atEnd: bool, real: bool) -> Size {
   let mut index = start
   while index < end {
     let mut item = items[index]
@@ -367,7 +367,7 @@ fn atomicLineMargins(nodes: &BoxTree, items: &mut [Item], atomics: &mut [AtomicD
           if atEnd && baseline + item.after >= metrics.height && style.marginBreak == MarginBreak.Discard { margin.bottom = 0.0 }
           if margin.top != atomic.usedTop || margin.bottom != atomic.usedBottom {
             let mut usedBaseline = atomic.baseline
-            if atomic.baselineFromMargin { usedBaseline = marginBaseline(style, axes.size(atomic.size), axes, margin, nodes.style(scopes[item.scope].id)) }
+            if atomic.baselineFromMargin { usedBaseline = marginBaseline(style, axes.size(atomic.size), axes.*, margin, nodes.style(scopes[item.scope].id)) }
             item.before = margin.top + usedBaseline
             item.after = axes.size(atomic.size).height + margin.bottom - usedBaseline
             atomics[item.leaf].usedTop = margin.top
@@ -984,7 +984,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
       result.hasLastBaseline = true
     }
     if input.performLayout {
-      run emitLine(nodes, &mut output, &mut measurer, items.asSlice(), atomics.asSlice(), texts.asSlice(), fonts.asSlice(), scopes.asSlice(), &mut extents, &mut spans, id, style, axes, &box, result.size, line, lineBaselines, &input)
+      run emitLine(nodes, &mut output, &mut measurer, items.asSlice(), atomics.asSlice(), texts.asSlice(), fonts.asSlice(), scopes.asSlice(), &mut extents, &mut spans, id, style, &axes, &box, result.size, line, lineBaselines, &input)
     }
     index = index + 1
   }
@@ -1013,7 +1013,7 @@ fn startClones(nodes: &BoxTree, scopes: &[Scope], spans: &mut Spans, current: us
   cover(&mut spans, scopes, current, start, end)
   return end
 }
-effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], atomics: &[AtomicData], texts: &[TextLeaf], fonts: &[TextFont], scopes: &[Scope], extents: &mut List<Extent>, spans: &mut Spans, id: usize, style: &Style, axes: Axes, box: &ResolvedBox, container: Size, line: &LineBox, lineBaselines: BaselineSet, input: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], atomics: &[AtomicData], texts: &[TextLeaf], fonts: &[TextFont], scopes: &[Scope], extents: &mut List<Extent>, spans: &mut Spans, id: usize, style: &Style, axes: &Axes, box: &ResolvedBox, container: Size, line: &LineBox, lineBaselines: BaselineSet, input: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let previousParent = output.fragmentParent
   let physicalSize = axes.size(Size { width: line.width, height: line.height })
   let mut fragment = output.fragment(id, NO_NODE, FragmentKind.Line)
@@ -1205,7 +1205,7 @@ effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
         let atomic = &atomics[item.leaf]
         let parent = spans.values.get(0)
         let point = Point { x: atomic.location.x - line.left, y: atomic.location.y - line.y }
-        run emitFloat(nodes, &mut output, &mut measurer, id, item, atomic, &input, box.inset.top, parent.fragment, point, physicalSize, axes)
+        run emitFloat(nodes, &mut output, &mut measurer, id, item, atomic, &input, box.inset.top, parent.fragment, point, physicalSize, axes.*)
       }
       index = index + 1
     }
@@ -1313,7 +1313,7 @@ fn paragraphBidi(nodes: &BoxTree, id: usize) -> UnicodeBidi {
 fn inlineReplaced(style: &Style) -> bool {
   return style.replaced && style.display.outsideIs(DisplayOutside.Inline) && style.display.insideIs(DisplayInside.Flow)
 }
-fn shapingBarrier(nodes: &BoxTree, item: Item, scopes: &[Scope]) -> bool {
+fn shapingBarrier(nodes: &BoxTree, item: &Item, scopes: &[Scope]) -> bool {
   if item.kind != ItemKind.Open && item.kind != ItemKind.Close { return false }
   let scope = &scopes[item.scope]
   return scope.inset.horizontal() != 0.0 || scope.margin.left != 0.0 || scope.margin.right != 0.0 || nodes.style(item.id).verticalAlign.kind != VerticalAlignKind.Baseline
@@ -1343,7 +1343,7 @@ effect fn tokensFor<'a>(nodes: &BoxTree<'a>, items: &[Item], scopes: &[Scope]) -
         Option<string<'a>>.None => { fail TextError { source: node.source, message: "Generated text box has no source text" } }
       }
     }
-    let barrier = shapingBarrier(nodes, item, scopes)
+    let barrier = shapingBarrier(nodes, &item, scopes)
     run result.append(TextToken { kind: kind, text: value, source: node.source, sourceStart: 0, sourceEnd: String.byteLength(value), fontKey: style.fontKey, writingMode: style.writingMode, textOrientation: style.textOrientation, direction: style.usedDirection(), unicodeBidi: style.unicodeBidi, replacedInline: inlineReplaced(style), whiteSpaceCollapse: style.whiteSpaceCollapse, textJustify: style.textJustify, shapingBarrier: barrier })
     index = index + 1
   }
@@ -1657,7 +1657,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut reuse = saved.ready && saved.barriers.length() == raw.length
   let mut barrierIndex: usize = 0
   while reuse && barrierIndex < raw.length {
-    reuse = saved.barriers.get(barrierIndex) == shapingBarrier(nodes, raw[barrierIndex], scopes)
+    reuse = saved.barriers.get(barrierIndex) == shapingBarrier(nodes, &raw[barrierIndex], scopes)
     barrierIndex = barrierIndex + 1
   }
   let mut barriers = move saved.barriers
@@ -1669,7 +1669,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       barriers.clear()
       barrierIndex = 0
       while barrierIndex < raw.length {
-        run barriers.append(shapingBarrier(nodes, raw[barrierIndex], scopes))
+        run barriers.append(shapingBarrier(nodes, &raw[barrierIndex], scopes))
         barrierIndex = barrierIndex + 1
       }
     }
@@ -1927,9 +1927,9 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         let count = candidate.items.length()
         let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
         let atEnd = input.fragmentation.marginEnd && box.inset.bottom == 0.0 && point.at.equal(terminal) && !hasFloats
-        let full = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, candidate.real)
-        let ending = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, true, candidate.real)
-        metrics = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, candidate.real)
+        let full = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, 0, count, atStart, atEnd, candidate.real)
+        let ending = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, 0, count, atStart, true, candidate.real)
+        metrics = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, 0, count, atStart, atEnd, candidate.real)
         metrics.height = max(full.height, ending.height)
       }
       bfc.restore(checkpoint)
@@ -1959,7 +1959,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     if hasAtomicMargins {
       let count = accepted.items.length()
       let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
-      let retained = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, false, accepted.real)
+      let retained = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, 0, count, atStart, false, accepted.real)
       if hasFloats {
         bfc.restore(checkpoint)
         run placeFloats(nodes, &mut output, &mut measurer, accepted.items.asSlice(), &accepted.visual, atomics.asMutSlice(), 0, count, &mut bfc, input.bfcContentOrigin, width, sourceY, retained.height, axes, leading, &input, box.inset.top)
@@ -1968,14 +1968,14 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       // not manufacture a gap, but a taller contained float already does.
       terminalAdjoins = input.fragmentation.marginEndChosen || bfc.bottom(input.bfcContentOrigin) <= cursor + retained.height
       let atEnd = input.fragmentation.marginEnd && box.inset.bottom == 0.0 && end.equal(terminal) && terminalAdjoins
-      let full = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, accepted.real)
-      let ending = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, !end.equal(terminal) || terminalAdjoins, accepted.real)
+      let full = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, 0, count, atStart, atEnd, accepted.real)
+      let ending = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, 0, count, atStart, !end.equal(terminal) || terminalAdjoins, accepted.real)
       let available = input.fragmentation.limit - input.fragmentation.offset - box.inset.top - cursor
       boundaryOnly = full.height > available && ending.height <= full.height
       if boundaryOnly { metrics = ending
         reservedHeight = ending.height }
       else {
-        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, accepted.real)
+        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, 0, count, atStart, atEnd, accepted.real)
         // Reserve a possible final-line expansion caused by dropping a negative
         // margin, so a later boundary decision never publishes a rejected line.
         reservedHeight = max(full.height, ending.height)
@@ -2080,7 +2080,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         let count = accepted.items.length()
         let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
         let atEnd = boundaryOnly || input.fragmentation.marginEnd && box.inset.bottom == 0.0 && end.equal(terminal) && terminalAdjoins
-        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, accepted.real)
+        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, 0, count, atStart, atEnd, accepted.real)
       }
     }
     if accepted.real {
@@ -2135,7 +2135,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     let lastIndex = lines.length() - 1
     let line = &lines.asSlice()[lastIndex]
     let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && line.y == 0.0
-    let metrics = atomicLineMargins(nodes, finalItems.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, line.start, line.end, atStart, true, line.real)
+    let metrics = atomicLineMargins(nodes, finalItems.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), &axes, &input, line.start, line.end, atStart, true, line.real)
     cursor = line.y + metrics.height
     let exported = baselineOffsets.translated(box.inset.top + line.y + metrics.width)
     if line.real {
@@ -2160,7 +2160,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     index = 0
     while index < lines.length() {
       let line = &lines.asSlice()[index]
-      run emitLine(nodes, &mut output, &mut measurer, finalItems.asSlice(), atomics.asSlice(), finalTexts.asSlice(), fonts.asSlice(), scopes, &mut extents, &mut spans, id, style, axes, &box, result.size, line, baselineOffsets.translated(line.baseline), &input)
+      run emitLine(nodes, &mut output, &mut measurer, finalItems.asSlice(), atomics.asSlice(), finalTexts.asSlice(), fonts.asSlice(), scopes, &mut extents, &mut spans, id, style, &axes, &box, result.size, line, baselineOffsets.translated(line.baseline), &input)
       index = index + 1
     }
   }

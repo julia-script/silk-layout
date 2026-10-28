@@ -125,7 +125,7 @@ effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   let mut resolved = box.*
   let mut request = input.*
   if input.performLayout && input.fragmentation.active {
-    resolved = FragmentBox.current(nodes.style(id), &box, output.resumes.get(id), input.fragmentation, output.frames.writingMode)
+    resolved = FragmentBox.current(nodes.style(id), &box, &output.resumes.get(id), &input.fragmentation, output.frames.writingMode)
     // Slice defers the ending decoration, but does not make descendant
     // margins adjoining the eventual end of the fragmentation context.
     if Axes.make(output.frames.writingMode).box(box.*).inset.bottom != 0.0 {
@@ -754,7 +754,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       state.normalComplete = state.normalContentComplete
       state.contentComplete = state.descendantsComplete
     } else {
-      let current = FragmentBox.current(style, &box, state, incoming.fragmentation, output.frames.writingMode)
+      let current = FragmentBox.current(style, &box, &state, &incoming.fragmentation, output.frames.writingMode)
       naturalContent = max(0.0, previousExtent - frameAxes.box(current).inset.vertical())
       box = FragmentBox.finish(style, &incoming, &box, &current, &mut state, &mut result, output.frames.writingMode)
     }

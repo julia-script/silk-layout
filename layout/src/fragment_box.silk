@@ -77,7 +77,7 @@ pub fn endMargin(style: &Style, value: f64, complete: bool, contextEnd: bool, fr
 
 // Preserve the FULL content sizes used for percentages and flex distribution.
 // Only the current fragment's decorations differ from the resolved CSS box.
-pub fn current(style: &Style, full: &ResolvedBox, state: ResumeState, input: FragmentInput, frameMode: WritingMode) -> ResolvedBox {
+pub fn current(style: &Style, full: &ResolvedBox, state: &ResumeState, input: &FragmentInput, frameMode: WritingMode) -> ResolvedBox {
   let axes = Axes.make(frameMode)
   let mut box = axes.box(full.*)
   let old = box.inset
@@ -95,7 +95,7 @@ pub fn current(style: &Style, full: &ResolvedBox, state: ResumeState, input: Fra
       box.border.bottom = 0.0
       box.gutter.bottom = 0.0
     }
-    box.margin.top = startMargin(style, box.margin.top, state, input, frameMode)
+    box.margin.top = startMargin(style, box.margin.top, state.*, input.*, frameMode)
     if state.started && style.boxDecorationBreak == BoxDecorationBreak.Clone && style.marginBreak == MarginBreak.Auto { box.margin.bottom = 0.0 }
   }
   box.inset = ResolvedEdges {

@@ -1030,7 +1030,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
       input = run absoluteFrameInput(nodes, &output, id, parentBox, parent, frame, 0.0, BreakRelaxation.Strict, &input)
     }
     let full = run resolveFragmentBox(nodes, &mut output, &mut measurer, id, &input)
-    let current = FragmentBox.current(nodes.style(id), &full, output.resumes.get(id), input.fragmentation, output.frames.writingMode)
+    let current = FragmentBox.current(nodes.style(id), &full, &output.resumes.get(id), &input.fragmentation, output.frames.writingMode)
     let axes = Axes.make(input.parentWritingMode)
     let logical = axes.box(current)
     let parentSize = Size { width: parentContent.width, height: parentContent.height }
@@ -1038,7 +1038,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     let mut direction = output.frames.direction
     if parentBox != NO_NODE { direction = nodes.style(parentBox).usedDirection() }
     let margin = axes.edges(full.margin)
-    let mut offset = inlineOffset(nodes.style(id), &input, axes, direction, margin, logical.size.width, available)
+    let mut offset = inlineOffset(nodes.style(id), &input, &axes, direction, margin, logical.size.width, available)
     if nodes.style(id).float == Float.Left { offset = margin.left }
     if nodes.style(id).float == Float.Right { offset = available - logical.size.width - margin.right }
     let size = Size { width: current.size.width, height: current.size.height }

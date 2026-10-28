@@ -116,6 +116,9 @@ fn shiftedRange(range: FinalRange, shift: Shift) -> FinalRange {
 pub struct LayoutCache {
   heads: List<usize>,
   entries: List<Entry>,
+  // The storage compact last moved entries out of, kept so that neither list
+  // grows again in a steady state.
+  spare: List<Entry>,
   // Entries no longer reachable from a head; compacted when they dominate.
   dead: usize,
   // The current compute, and how many entries the previous one used.
@@ -142,7 +145,7 @@ pub struct LayoutCache {
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<FinalRange>.make(), rangeStamps: List<usize>.make(), rangeSlots: List<usize>.make(), keptRanges: List<FinalRange>.make(), rotatedRanges: List<FinalRange>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), spare: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<FinalRange>.make(), rangeStamps: List<usize>.make(), rangeSlots: List<usize>.make(), keptRanges: List<FinalRange>.make(), rotatedRanges: List<FinalRange>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
@@ -457,8 +460,9 @@ impl LayoutCache {
     if !stale && (self.dead < 256 || self.dead * 2 < self.entries.length()) { return }
     let mut oldest: usize = 0
     if stale && self.generation > 0 { oldest = self.generation - 1 }
-    let mut kept = List<Entry>.make()
-    run kept.reserveExact(self.entries.length() - self.dead)
+    let mut kept = Intrinsic.replace(self.spare, List<Entry>.make())
+    kept.clear()
+    run kept.reserve(self.entries.length() - self.dead)
     let mut chain = List<usize>.make()
     let mut id: usize = 0
     while id < self.heads.length() {
@@ -480,7 +484,8 @@ impl LayoutCache {
       self.heads.set(id, next)
       id = id + 1
     }
-    self.entries = move kept
+    self.spare = Intrinsic.replace(self.entries, move kept)
+    self.spare.clear()
     self.dead = 0
   }
 }

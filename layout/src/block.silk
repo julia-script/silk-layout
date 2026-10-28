@@ -89,27 +89,36 @@ fn settleCandidate(output: &mut LayoutPass, previous: Option<Candidate>, trial: 
 }
 
 fn prepareChild(nodes: &BoxTree, id: usize, base: &Input, axes: Axes, box: &ResolvedBox, availableInline: AvailableSpace, parallel: bool) -> Child {
+  let mut child = Child { id: id, margin: ResolvedEdges.zero(), inset: ResolvedEdges.zero(), input: base.*, width: 0.0, parallel: parallel }
+  prepareChildInto(nodes, id, base, axes, box, availableInline, parallel, &mut child)
+  return child
+}
+// prepareChild, written into an existing Child so its Input is copied once.
+fn prepareChildInto(nodes: &BoxTree, id: usize, base: &Input, axes: Axes, box: &ResolvedBox, availableInline: AvailableSpace, parallel: bool, child: &mut Child) with Intrinsic.inlineAlways() {
   let style = nodes.style(id)
-  let mut input = base.*
-  input.blockRoot = nodes.node(id).independentRoot || style.writingMode != base.parentWritingMode
+  child.input = base.*
+  child.input.blockRoot = nodes.node(id).independentRoot || style.writingMode != base.parentWritingMode
   if axes.vertical {
-    input.availableWidth = AvailableSpace.maxContent()
-    input.availableHeight = availableInline
-    if box.size.widthDefinite { input.availableHeight = AvailableSpace.definite(input.parent.height) }
+    child.input.availableWidth = AvailableSpace.maxContent()
+    child.input.availableHeight = availableInline
+    if box.size.widthDefinite { child.input.availableHeight = AvailableSpace.definite(base.parent.height) }
   } else {
-    input.availableWidth = availableInline
-    input.availableHeight = AvailableSpace.maxContent()
-    if box.size.widthDefinite { input.availableWidth = AvailableSpace.definite(input.parent.width) }
+    child.input.availableWidth = availableInline
+    child.input.availableHeight = AvailableSpace.maxContent()
+    if box.size.widthDefinite { child.input.availableWidth = AvailableSpace.definite(base.parent.width) }
   }
   if style.float != Float.None {
-    input.shrinkToFit = true
-    input.blockRoot = true
+    child.input.shrinkToFit = true
+    child.input.blockRoot = true
   }
-  let child = axes.box(resolveBox(style, &input))
-  let mut width = max(child.inset.horizontal(), box.size.width - box.inset.horizontal() - child.margin.horizontal())
-  if child.size.widthDefinite { width = child.size.width }
-  width = clamp(width, child.min.width, child.max.width)
-  return Child { id: id, margin: child.margin, inset: child.inset, input: input, width: width, parallel: parallel }
+  let resolved = axes.box(resolveBox(style, &child.input))
+  let mut width = max(resolved.inset.horizontal(), box.size.width - box.inset.horizontal() - resolved.margin.horizontal())
+  if resolved.size.widthDefinite { width = resolved.size.width }
+  child.id = id
+  child.margin = resolved.margin
+  child.inset = resolved.inset
+  child.width = clamp(width, resolved.min.width, resolved.max.width)
+  child.parallel = parallel
 }
 
 pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
@@ -292,7 +301,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   let mut childLayout = Layout.zero()
   while index < children.length() || ((lazy || streaming) && childId != NO_NODE) {
     if streaming {
-      current = prepareChild(nodes, childId, &childBase, axes, &box, availableInline, false)
+      prepareChildInto(nodes, childId, &childBase, axes, &box, availableInline, false, &mut current)
       childId = boxChild(nodes, nodes.node(childId).nextSibling)
     } else {
       if index == children.length() {

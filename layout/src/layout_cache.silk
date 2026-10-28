@@ -15,6 +15,10 @@ const ABSENT: usize = usize.MAX
 pub const REUSE_NONE: u8 = 0
 pub const REUSE_INDEPENDENT: u8 = 1
 pub const REUSE_IN_FLOW: u8 = 2
+pub const REUSE_LEVEL: u8 = 3
+// Set beside the level when no box in the subtree is relatively or sticky
+// positioned: its fragments' final overflow from the previous compute holds.
+pub const REUSE_STATIC: u8 = 4
 pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
 // `generation` is the last compute that created or hit the entry.
 struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }

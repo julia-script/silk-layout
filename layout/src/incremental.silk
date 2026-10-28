@@ -4,7 +4,7 @@ import context { outOfFlow }
 import style { Float, Dimension, Edges, Position, WritingMode }
 import tree { Tree, NO_NODE }
 import box_tree { BoxTree, BoxNode }
-import layout_cache { LayoutCache, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW }
+import layout_cache { LayoutCache, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW, REUSE_LEVEL, REUSE_STATIC }
 
 // Kept results are addressed by generated box index, so they survive only
 // while box construction yields the same boxes. Scroll offsets only move
@@ -204,6 +204,9 @@ pub fn invalidateUnmatched(nodes: &BoxTree, cache: &mut LayoutCache, changed: &[
 // floats would otherwise join exclusions it shares with its siblings. So is
 // one with negative margins, which could lift a box into the floats above it.
 //
+// It also carries REUSE_STATIC where no box in the subtree is relatively or
+// sticky positioned, so positioning moves none of its fragments.
+//
 // viewportFree: which boxes head a subtree whose layout never reads the
 // initial containing block or the scrollport limits passed down for
 // orthogonal flows: no box in it is replaced, fixed, or orthogonal to its
@@ -214,7 +217,7 @@ pub effect fn markSubtrees(nodes: &BoxTree, reusable: &mut List<u8>, viewportFre
   viewportFree.clear()
   run reusable.reserveExact(count)
   run viewportFree.reserveExact(count)
-  run reusable.appendRepeated(REUSE_IN_FLOW, count)
+  run reusable.appendRepeated(REUSE_IN_FLOW | REUSE_STATIC, count)
   run viewportFree.appendRepeated(true, count)
   let levels = reusable.asMutSlice()
   let frees = viewportFree.asMutSlice()
@@ -224,10 +227,12 @@ pub effect fn markSubtrees(nodes: &BoxTree, reusable: &mut List<u8>, viewportFre
     index = index - 1
     let node = nodes.node(index)
     let style = nodes.style(index)
-    let mut level = levels[index]
+    let mut level = levels[index] & REUSE_LEVEL
+    let mut still = levels[index] & REUSE_STATIC
     if outOfFlow(style) || node.interruptionFirst != NO_NODE { level = REUSE_NONE }
     else if level > REUSE_INDEPENDENT && !nonNegative(&style.margin) { level = REUSE_INDEPENDENT }
-    levels[index] = level
+    if style.position == Position.Relative || style.position == Position.Sticky { still = 0 }
+    levels[index] = level | still
     let horizontal = style.writingMode == WritingMode.HorizontalTb
     let mut free = frees[index] && !style.replaced && style.position != Position.Fixed
     if node.parent == NO_NODE {
@@ -239,7 +244,10 @@ pub effect fn markSubtrees(nodes: &BoxTree, reusable: &mut List<u8>, viewportFre
       if !free { frees[node.parent] = false }
       let mut inherited = level
       if style.float != Float.None && inherited > REUSE_INDEPENDENT { inherited = REUSE_INDEPENDENT }
-      if inherited < levels[node.parent] { levels[node.parent] = inherited }
+      let parentLevel = levels[node.parent] & REUSE_LEVEL
+      let parentStill = levels[node.parent] & still
+      if inherited < parentLevel { levels[node.parent] = inherited | parentStill }
+      else { levels[node.parent] = parentLevel | parentStill }
     }
   }
 }

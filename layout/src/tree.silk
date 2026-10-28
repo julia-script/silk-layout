@@ -365,6 +365,9 @@ pub struct LayoutTree {
   // Whether the last compute of the same boxes as the one before laid out
   // most of them again.
   pub relaidMost: bool,
+  // How many computes in a row laid out most boxes again and copied none
+  // (see compute).
+  pub reuseIdle: usize,
   pub boxes: List<Layout>, pub boxNodes: List<BoxNode>,
   pub anonymousStyles: List<Style>,
   pub anonymousOrigins: List<usize>, pub anonymousText: List<bool>,
@@ -382,7 +385,7 @@ impl LayoutTree {
   pub fn make() -> LayoutTree {
     return LayoutTree {
       stats: LayoutStats.zero(),
-      cache: LayoutCache.make(), snapshot: Snapshot.make(), facts: BoxFacts.make(), writes: BoxWrites.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 }, keptScrolls: 0, relaidMost: false,
+      cache: LayoutCache.make(), snapshot: Snapshot.make(), facts: BoxFacts.make(), writes: BoxWrites.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 }, keptScrolls: 0, relaidMost: false, reuseIdle: 0,
       boxes: List<Layout>.make(), boxNodes: List<BoxNode>.make(),
       anonymousStyles: List<Style>.make(),
       anonymousOrigins: List<usize>.make(), anonymousText: List<bool>.make(),

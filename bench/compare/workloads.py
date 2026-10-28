@@ -8,8 +8,8 @@ Supported properties: display (block | flex | grid), boxSizing (always border-bo
 flexDirection, flexWrap, flexGrow, flexShrink, flexBasis, width, height, minWidth,
 minHeight, maxWidth, maxHeight, padding, margin, border, rowGap, columnGap,
 alignItems, justifyContent, plus numeric grid placement, fixed/percent/fr/minmax,
-intrinsic and fit-content tracks, auto rows, and item/self alignment. Grid
-workloads compare only with taffy.
+intrinsic and fit-content tracks, cycling implicit tracks, row/column sparse/dense
+auto-placement, and item/self alignment. Grid workloads compare only with taffy.
 Leaf "measure" fixtures {minWidth, maxWidth, height, wrap?} clamp available width
 to [minWidth, maxWidth]; wrap=true multiplies height by the synthetic line count.
 Dimensions are numbers (px), "auto", or {"percent": fraction}.
@@ -217,6 +217,30 @@ def grid_nested(count=1000):
     return document(nodes, width, 800)
 
 
+def grid_auto_placement(count=10_000):
+    """Matching sparse/dense grids with automatic spans that leave reusable holes."""
+    columns = [48] * 10
+    width = sum(columns) + 4 * (len(columns) - 1)
+    nodes = [{"parent": None, "style": block(width=width)}]
+    for flow, item_count in [("row", (count + 1) // 2), ("row dense", count // 2)]:
+        grid = len(nodes)
+        nodes.append({"parent": 0, "style": {
+            "display": "grid", "boxSizing": "border-box", "width": width,
+            "gridTemplateColumns": columns, "gridTemplateRows": [24],
+            "gridAutoRows": [24, 32, 40], "gridAutoFlow": flow,
+            "columnGap": 4, "rowGap": 2,
+            "justifyContent": "start", "alignContent": "start",
+            "justifyItems": "start", "alignItems": "start",
+        }})
+        for i in range(item_count):
+            nodes.append({"parent": grid, "style": block(
+                width=24, height=12,
+                gridColumnStart="auto", gridColumnEnd={"span": (3, 3, 3, 2, 1)[i % 5]},
+                gridRowStart="auto", gridRowEnd={"span": 2 if i % 7 == 0 else 1},
+            )})
+    return document(nodes, width, 800)
+
+
 WORKLOADS = {
     "deep-random-1k": lambda: random_tree(1_000, 10, 1),
     "deep-random-10k": lambda: random_tree(10_000, 10, 2),
@@ -231,6 +255,7 @@ WORKLOADS = {
     "grid-fr": grid_fr,
     "grid-intrinsic": grid_intrinsic,
     "grid-nested": grid_nested,
+    "grid-auto-placement": grid_auto_placement,
 }
 
 

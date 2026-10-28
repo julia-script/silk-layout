@@ -4,8 +4,8 @@
 //! With --updates, one tree is kept: each iteration applies the next step of the cycle (a new
 //! viewport and/or node styles, as in the silk-layout CLI's "updates" field) and times one layout.
 //! Grid mapping is intentionally limited to numeric lines/spans, non-repeated tracks
-//! (fixed, percent, fr, auto, intrinsic keywords, minmax and fit-content), row flow,
-//! gaps and item/self alignment. Named placement/areas, repeat and calc are rejected
+//! (fixed, percent, fr, auto, intrinsic keywords, minmax and fit-content), row/column
+//! sparse/dense flow, gaps and item/self alignment. Named placement/areas, repeat and calc are rejected
 //! rather than approximated. Fixture wrapping models horizontal text without
 //! floats; it does not expose line boxes or baseline data to taffy.
 use serde_json::Value;
@@ -237,6 +237,9 @@ fn style(value: &Value) -> Style {
         grid_auto_flow: match s.get("gridAutoFlow") {
             None => GridAutoFlow::Row,
             Some(Value::String(s)) if s == "row" => GridAutoFlow::Row,
+            Some(Value::String(s)) if s == "column" => GridAutoFlow::Column,
+            Some(Value::String(s)) if s == "row dense" => GridAutoFlow::RowDense,
+            Some(Value::String(s)) if s == "column dense" => GridAutoFlow::ColumnDense,
             Some(other) => panic!("unsupported gridAutoFlow {other}"),
         },
         grid_column: Line { start: grid_placement(s.get("gridColumnStart")), end: grid_placement(s.get("gridColumnEnd")) },

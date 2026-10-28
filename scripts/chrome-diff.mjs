@@ -2,7 +2,7 @@
 // Independent Chromium observations are regression evidence, not the specification.
 // Usage: node scripts/chrome-diff.mjs --cli PATH [fixture.json | fixture-directory]
 //        --mode all|spec|chrome --chrome PATH --chrome-version Chrome/VERSION
-//        --tolerance 0.05 --fuzz 100 --seed 1
+//        --tolerance 0.05 --fuzz 100 --grid-fuzz 100 --seed 1
 import { spawn, spawnSync } from 'node:child_process';
 import { access, mkdtemp, readdir, readFile, rm, mkdir, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -22,7 +22,7 @@ const fontBaselineFields = ['alphabetic', 'ideographic', 'central', 'mathematica
 const baselineFields = [...fontBaselineFields, 'xMiddle', 'textOver', 'textUnder'];
 const options = { cli: process.env.SILK_LAYOUT_CLI, chrome: process.env.CHROME_PATH,
   chromeVersion: process.env.CHROME_VERSION, mode: 'all', tolerance: 0.05,
-  fuzz: 0, seed: 1, path: join(root, 'tests/fixtures') };
+  fuzz: 0, gridFuzz: 0, seed: 1, path: join(root, 'tests/fixtures') };
 const summary = { schemaVersion: 3, tolerance: options.tolerance, seed: 1, browser: null,
   totals: { discovered: 0, passed: 0, failed: 0, excludedUnsupported: 0,
     spec: 0, chrome: 0, fuzz: 0, mismatches: 0 },
@@ -66,11 +66,11 @@ async function fixtureFonts(input) {
 function parseArgs() {
   let positional = false;
   const values = { '--cli': 'cli', '--chrome': 'chrome', '--chrome-version': 'chromeVersion',
-    '--mode': 'mode', '--tolerance': 'tolerance', '--fuzz': 'fuzz', '--seed': 'seed' };
+    '--mode': 'mode', '--tolerance': 'tolerance', '--fuzz': 'fuzz', '--grid-fuzz': 'gridFuzz', '--seed': 'seed' };
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
     if (arg === '--help' || arg === '-h') {
-      process.stdout.write('Usage: node scripts/chrome-diff.mjs --cli PATH [fixture.json|directory]\n  --mode all|spec|chrome --chrome PATH --chrome-version Chrome/VERSION\n  --tolerance 0.05 --fuzz N --seed INTEGER\nSpec fixtures assert hand-derived expectations without Chrome. Differential failures\nare never excluded. Unsupported browser adapters are reported and exit nonzero.\nFuzz failures retain protocol JSON and a leaf-reduced reproduction in .cache/chrome-diff.\n');
+      process.stdout.write('Usage: node scripts/chrome-diff.mjs --cli PATH [fixture.json|directory]\n  --mode all|spec|chrome --chrome PATH --chrome-version Chrome/VERSION\n  --tolerance 0.05 --fuzz N --grid-fuzz N --seed INTEGER\nSpec fixtures assert hand-derived expectations without Chrome. Differential failures\nare never excluded. Unsupported browser adapters are reported and exit nonzero.\nGrid fuzz uses an independent seeded stream; --fuzz inputs are unchanged.\nBoth fuzz modes retain failures and leaf-reduced reproductions in .cache/chrome-diff.\n');
       return false;
     }
     if (values[arg]) {
@@ -81,12 +81,15 @@ function parseArgs() {
   }
   options.tolerance = Number(options.tolerance);
   options.fuzz = Number(options.fuzz);
+  options.gridFuzz = Number(options.gridFuzz);
   options.seed = Number(options.seed);
   if (!Number.isFinite(options.tolerance) || options.tolerance < 0) throw new Error('Tolerance must be finite and nonnegative');
   if (!Number.isSafeInteger(options.fuzz) || options.fuzz < 0) throw new Error('--fuzz must be a nonnegative safe integer');
+  if (!Number.isSafeInteger(options.gridFuzz) || options.gridFuzz < 0) throw new Error('--grid-fuzz must be a nonnegative safe integer');
   if (!Number.isInteger(options.seed) || options.seed < 0 || options.seed > 0xffffffff) throw new Error('--seed must be an unsigned 32-bit integer');
   if (!['all', 'spec', 'chrome'].includes(options.mode)) throw new Error('Invalid --mode');
   if (options.mode === 'spec' && options.fuzz) throw new Error('--fuzz requires Chrome mode');
+  if (options.mode === 'spec' && options.gridFuzz) throw new Error('--grid-fuzz requires Chrome mode');
   if (!options.cli) throw new Error('Supply the prebuilt native CLI using --cli PATH or SILK_LAYOUT_CLI; this harness never builds it');
   options.cli = resolve(options.cli);
   summary.tolerance = options.tolerance;
@@ -1239,6 +1242,44 @@ function fuzzInput(random) {
   return input;
 }
 
+function gridFuzzInput(random, index) {
+  const integer = (low, high) => low + Math.floor(random() * (high - low + 1));
+  const pick = values => values[integer(0, values.length - 1)];
+  const rows = integer(2, 5), columns = integer(2, 5);
+  const tracks = count => Array.from({ length: count }, () => pick([integer(24, 64), { fr: integer(1, 3) }]));
+  const implicitTracks = () => Array.from({ length: integer(2, 3) }, () => integer(24, 48));
+  const placement = (count, definite) => {
+    const span = { span: integer(1, 3) };
+    if (!definite) return pick([['auto', 'auto'], ['auto', span], [span, 'auto']]);
+    const line = () => pick([-1, 1]) * integer(1, count + 3);
+    const start = line(), end = line();
+    return pick([[start, 'auto'], ['auto', end], [start, span], [span, end],
+      [{ line: start }, { line: end }]]);
+  };
+  const input = { viewport: { width: 800, height: 600 }, nodes: [{
+    parent: null, style: {
+      display: 'grid', boxSizing: 'border-box', width: 720, height: 560,
+      gridTemplateRows: tracks(rows), gridTemplateColumns: tracks(columns),
+      gridAutoRows: implicitTracks(), gridAutoColumns: implicitTracks(),
+      gridAutoFlow: ['row', 'column', 'row dense', 'column dense'][index % 4],
+      rowGap: integer(0, 8), columnGap: integer(0, 8),
+      justifyContent: 'start', alignContent: 'start', justifyItems: 'start', alignItems: 'start'
+    }
+  }] };
+  const count = integer(8, 20);
+  for (let i = 0; i < count; i++) {
+    // Mix automatic, row-locked, column-locked and definite items in source order.
+    const [gridRowStart, gridRowEnd] = placement(rows, i % 6 === 3 || i % 6 === 5);
+    const [gridColumnStart, gridColumnEnd] = placement(columns, i % 6 === 4 || i % 6 === 5);
+    input.nodes.push({ parent: 0, style: {
+      display: 'block', boxSizing: 'border-box', width: integer(6, 18), height: integer(6, 18),
+      order: [-2, 1, -2, 0, 1][i % 5],
+      gridRowStart, gridRowEnd, gridColumnStart, gridColumnEnd
+    } });
+  }
+  return input;
+}
+
 // Bounded structural reduction preserves the discrepancy field and delta sign.
 // Original input is always retained; reduction stops after a bounded leaf sweep,
 // without claiming globally minimal CSS or a normative correctness oracle.
@@ -1269,7 +1310,7 @@ async function main() {
   if (!parseArgs()) return;
   await access(options.cli, constants.X_OK);
   const files = await fixtureFiles(options.path);
-  if (!files.length && !options.fuzz) throw new Error('No fixture files found');
+  if (!files.length && !options.fuzz && !options.gridFuzz) throw new Error('No fixture files found');
   for (const source of files) {
     let fixture;
     try {
@@ -1291,6 +1332,18 @@ async function main() {
     if (result.mismatches?.length) {
       const reduced = await reduceFailure(input, result.mismatches[0]);
       result.reducedReproduction = await saveFailure(name, reduced.input, { attempts: reduced.attempts, reduction: reduced.reduction }, '.reduced');
+    }
+  }
+  // Domain-separate the grid stream; neither its count nor its draws affect --fuzz.
+  const gridRandom = randomSource((options.seed ^ 0x67726964) >>> 0);
+  for (let index = 0; index < options.gridFuzz; index++) {
+    const input = gridFuzzInput(gridRandom, index), name = `grid-fuzz-${options.seed}-${index}`;
+    const result = await runFixture({ name, kind: 'chrome', input, features: ['seeded-grid-auto-placement'] }, name, true);
+    if (result.mismatches?.length) {
+      const reduced = await reduceFailure(input, result.mismatches[0]);
+      result.reducedReproduction = await saveFailure(name, reduced.input, {
+        seed: options.seed, index, attempts: reduced.attempts, reduction: reduced.reduction
+      }, '.reduced');
     }
   }
   if (!summary.totals.discovered) throw new Error('No fixtures selected');

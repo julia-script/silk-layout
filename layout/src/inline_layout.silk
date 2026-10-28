@@ -1367,18 +1367,18 @@ fn runUnit(value: TextRun) -> usize {
 }
 
 // Shapes [start, end) into `result`. Without a visual plan or tabs a range's
-// shaping does not depend on its inline origin, so the whole paragraph is
-// shaped once per pass and copied wherever a line or probe covers all of it.
-effect fn shapeRange<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, analysis: &TextAnalysis, visualPlan: &mut Visual.Plan, shapeText: bool, original: &[Item], scopes: &[Scope], memo: &mut TextMemo, shaped: &mut List<TextRun>, result: &mut TextCandidate, start: TextCursor, end: TextCursor, hyphenated: bool, inlineOrigin: f64, wholeReusable: bool) ! OutOfMemoryError | TextError ? &mut Allocator {
-  if wholeReusable && !hyphenated && start.unit == 0 && start.offset == 0 && end.unit == context.tokens.length && end.offset == 0 {
-    if !memo.hasWhole {
-      run shapeCandidate(nodes, &mut measurer, context, analysis, &mut visualPlan, shapeText, original, scopes, &mut memo.fonts, &mut shaped, &mut memo.whole, start, end, false, 0.0, inlineOrigin, &[])
-      memo.hasWhole = true
+// shaping does not depend on its inline origin, so each range is shaped once
+// and copied when a later line, probe or compute covers it again.
+effect fn shapeRange<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, analysis: &TextAnalysis, visualPlan: &mut Visual.Plan, shapeText: bool, original: &[Item], scopes: &[Scope], memo: &mut TextMemo, shaped: &mut List<TextRun>, result: &mut TextCandidate, start: TextCursor, end: TextCursor, hyphenated: bool, inlineOrigin: f64, reusable: bool, limit: usize) ! OutOfMemoryError | TextError ? &mut Allocator {
+  if reusable && !hyphenated {
+    let found = memo.segment(start, end)
+    if found != NO_NODE {
+      run result.copyPlain(&memo.segments.asSlice()[found].candidate)
+      return
     }
-    run result.copyPlain(&memo.whole)
-    return
   }
   run shapeCandidate(nodes, &mut measurer, context, analysis, &mut visualPlan, shapeText, original, scopes, &mut memo.fonts, &mut shaped, &mut result, start, end, hyphenated, 0.0, inlineOrigin, &[])
+  if reusable && !hyphenated { run memo.addSegment(start, end, &result, limit) }
 }
 
 effect fn shapeCandidate<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, analysis: &TextAnalysis, visualPlan: &mut Visual.Plan, shapeText: bool, original: &[Item], scopes: &[Scope], fonts: &mut List<TextFont>, shaped: &mut List<TextRun>, result: &mut TextCandidate, start: TextCursor, end: TextCursor, hyphenated: bool, justificationSpace: f64, inlineOrigin: f64, hangingRanges: &[TextRange]) ! OutOfMemoryError | TextError ? &mut Allocator {
@@ -1800,7 +1800,8 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     if !appendEnd { appendEnd = !points.get(points.length() - 1).at.equal(terminal) }
     if appendEnd { run points.append(TextBreak { at: terminal, kind: TextBreakKind.Soft }) }
   }
-  // The whole paragraph shapes alike wherever its lines start (see shapeRange).
+  // Ranges shape alike wherever their lines start (see shapeRange).
+  let segmentLimit = 2 * offered.length() + 16
   let mut wholeReusable = !visualPlan.active
   index = 0
   while wholeReusable && index < context.tokens.length {
@@ -1838,7 +1839,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         let point = points.get(index)
         if minimum || point.kind == TextBreakKind.Forced || point.at.equal(terminal) {
           let indent = lineIndent(style, nodes.node(id).firstFormattedRun, firstIntrinsic, afterForced, 0.0)
-          run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, start, point.at, minimum && point.kind == TextBreakKind.Hyphenated, indent, wholeReusable)
+          run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, start, point.at, minimum && point.kind == TextBreakKind.Hyphenated, indent, wholeReusable, segmentLimit)
           let edges = textEdge(nodes, original.asSlice(), scopes, start, true, rtl, visualPlan.active) + textEdge(nodes, original.asSlice(), scopes, point.at, false, rtl, visualPlan.active)
           let mut advance = candidate.advance
           if minimum { advance = advance - candidate.hanging }
@@ -1934,7 +1935,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut lineEnds = List<usize>.make()
   if fastFit && memoFirst == NO_NODE && memo.prefix.length() != context.tokens.length + 1 {
     memo.prefix.clear()
-    run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, TextCursor { unit: 0, offset: 0 }, terminal, false, 0.0, wholeReusable)
+    run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, TextCursor { unit: 0, offset: 0 }, terminal, false, 0.0, wholeReusable, segmentLimit)
     run memo.prefix.reserveExact(context.tokens.length + 1)
     while memo.prefix.length() <= context.tokens.length { run memo.prefix.append(0.0) }
     let prefix = memo.prefix.asMutSlice()
@@ -2003,7 +2004,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       let room = band.right - band.left
       let mut inlineOrigin = band.left
       if rtl { inlineOrigin = width - band.right }
-      run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, start, point.at, false, inlineOrigin, wholeReusable)
+      run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, start, point.at, false, inlineOrigin, wholeReusable, segmentLimit)
       let natural = leading + candidate.advance + textEdge(nodes, original.asSlice(), scopes, point.at, false, rtl, visualPlan.active)
       let old = move accepted
       accepted = move candidate
@@ -2041,7 +2042,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       // The first exact fit is accepted as the loop below would accept it.
       while guess > next {
         let point = points.get(guess)
-        run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, start, point.at, false, inlineOrigin, wholeReusable)
+        run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, start, point.at, false, inlineOrigin, wholeReusable, segmentLimit)
         let natural = leading + candidate.advance + textEdge(nodes, original.asSlice(), scopes, point.at, false, rtl, visualPlan.active)
         let proposed = natural - candidate.hanging
         if proposed <= room {
@@ -2075,7 +2076,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       }
       let mut inlineOrigin = band.left
       if rtl { inlineOrigin = width - band.right }
-      run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, start, point.at, point.kind == TextBreakKind.Hyphenated, inlineOrigin, wholeReusable)
+      run shapeRange(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut memo, &mut shaped, &mut candidate, start, point.at, point.kind == TextBreakKind.Hyphenated, inlineOrigin, wholeReusable, segmentLimit)
       let natural = leading + candidate.advance + textEdge(nodes, original.asSlice(), scopes, point.at, false, rtl, visualPlan.active)
       let proposed = natural - candidate.hanging
       let mut metrics = lineExtents(candidate.items.asSlice(), scopes, extents.asMutSlice(), 0, candidate.items.length(), candidate.real)

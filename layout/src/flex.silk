@@ -78,7 +78,7 @@ fn setKnown(input: &mut Input, horizontal: bool, value: f64) {
 fn setAvailable(input: &mut Input, horizontal: bool, value: AvailableSpace) {
   if horizontal { input.availableWidth = value } else { input.availableHeight = value }
 }
-fn available(input: Input, horizontal: bool) -> AvailableSpace { if horizontal { return input.availableWidth }
+fn available(input: &Input, horizontal: bool) -> AvailableSpace { if horizontal { return input.availableWidth }
   return input.availableHeight }
 fn alignment(style: &Style, parent: &Style) -> Align {
   let mut value = style.alignSelf
@@ -93,7 +93,7 @@ fn transfer(cross: f64, ratio: f64, horizontal: bool, insetMain: f64, insetCross
   if !borderBox { value = value + insetMain }
   return value
 }
-fn indefinite(input: Input, horizontal: bool) -> bool {
+fn indefinite(input: &Input, horizontal: bool) -> bool {
   if horizontal { return input.indefiniteWidth }
   return input.indefiniteHeight
 }
@@ -151,18 +151,18 @@ fn contribution(value: f64, preferred: f64, item: Item) -> f64 {
   if item.shrink == 0.0 { result = max(result, item.base) }
   return clamp(result, item.minimum, item.maximum) + item.marginStart + item.marginEnd
 }
-effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: Input, horizontal: bool, constraint: AvailableSpace) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  let mut input = childInput
+effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut input = childInput.*
   input.performLayout = false
   if horizontal { input.intrinsicWidth = true
     input.known.widthDefinite = false } else { input.intrinsicHeight = true
     input.known.heightDefinite = false }
   setAvailable(&mut input, horizontal, constraint)
-  return run layoutNode(nodes, &mut output, &mut measurer, id, input)
+  return run layoutNode(nodes, &mut output, &mut measurer, id, &input)
 }
-effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: Input, axis: Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) -> Item ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, axis: Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) -> Item ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
-  let box = resolveBox(style, childInput)
+  let box = resolveBox(style, &childInput)
   let mut item = Item.make(id)
   // Flex weights use allotted inner bases; used content layout deducts gutters.
   item.inset = edgeTotal(box.inset, axis.horizontal)
@@ -214,7 +214,7 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
     crossSize = clamp(optionalSize(childInput.parent, !axis.horizontal) - item.crossStart - item.crossEnd, item.crossMin, item.crossMax)
     crossDefinite = true
   }
-  let mut measureInput = childInput
+  let mut measureInput = childInput.*
   if crossDefinite { setKnown(&mut measureInput, !axis.horizontal, crossSize) }
   let mut minimumDimension = style.minHeight
   let mut maximumDimension = style.maxHeight
@@ -227,7 +227,7 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let mut minContent = item.inset
   let mut minimumCross = crossSize
   if autoMinimum || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
-    let measured = run probe(nodes, &mut output, &mut measurer, id, measureInput, axis.horizontal, AvailableSpace.minContent())
+    let measured = run probe(nodes, &mut output, &mut measurer, id, &measureInput, axis.horizontal, AvailableSpace.minContent())
     minContent = axisSize(measured.size, axis.horizontal)
     minimumCross = axisSize(measured.size, !axis.horizontal)
     ratio = measured.preferredRatio
@@ -236,7 +236,7 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let mut maxContent = minContent
   let mut contentCross = crossSize
   if !basisDefinite || intrinsic || minimumDimension.kind == DimensionKind.MaxContent || maximumDimension.kind == DimensionKind.MaxContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
-    let measured = run probe(nodes, &mut output, &mut measurer, id, measureInput, axis.horizontal, AvailableSpace.maxContent())
+    let measured = run probe(nodes, &mut output, &mut measurer, id, &measureInput, axis.horizontal, AvailableSpace.maxContent())
     maxContent = axisSize(measured.size, axis.horizontal)
     contentCross = axisSize(measured.size, !axis.horizontal)
     ratio = measured.preferredRatio
@@ -449,7 +449,7 @@ fn baselineDistance(layout: Layout, style: &Style, containerMode: WritingMode, c
 fn lineOverReverse(mode: WritingMode) -> bool {
   return mode == WritingMode.VerticalRl || mode == WritingMode.VerticalLr || mode == WritingMode.SidewaysRl
 }
-effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: Line, input: Input, axis: Axes, parentStyle: &Style, collapsed: bool) -> Line ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: Line, input: &Input, axis: Axes, parentStyle: &Style, collapsed: bool) -> Line ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut result = line
   // §9.4 floors the line size at zero, not the signed distances of its items.
   let mut before = -UNBOUNDED
@@ -468,11 +468,11 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   while index < line.end {
     let mut item = items[index]
     if active(item, collapsed) {
-      let mut childInput = input
+      let mut childInput = input.*
       childInput.performLayout = false
       setKnown(&mut childInput, axis.horizontal, item.target)
       setIndefinite(&mut childInput, axis.horizontal, !item.mainDefinite)
-      let layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, childInput)
+      let layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &childInput)
       item.cross = axisSize(layout.size, !axis.horizontal)
       item.baseline = baselineDistance(layout, nodes.style(item.id), input.parentWritingMode, input.parentTextOrientation, axis, false)
       item.lastBaseline = baselineDistance(layout, nodes.style(item.id), input.parentWritingMode, input.parentTextOrientation, axis, true)
@@ -671,12 +671,12 @@ fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer
   }
 }
 
-pub effect fn layoutFlex<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+pub effect fn layoutFlex<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut items = List<Item>.make()
   let mut lines = List<Line>.make()
-  return run layoutFlexPass(nodes, &mut output, &mut measurer, id, input, box, false, &mut items, &mut lines)
+  return run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &box, false, &mut items, &mut lines)
 }
-effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, resolvedIntrinsicInline: bool, items: &mut List<Item>, lines: &mut List<Line>) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, resolvedIntrinsicInline: bool, items: &mut List<Item>, lines: &mut List<Line>) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let axis = axes(style)
   let inlineHorizontal = style.writingMode == WritingMode.HorizontalTb
@@ -686,10 +686,10 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   let crossInset = edgeTotal(box.inset, !axis.horizontal)
   let mainKnown = definite(box.size, axis.horizontal)
   let crossKnown = definite(box.size, !axis.horizontal)
-  let mainDefinite = mainKnown && !indefinite(input, axis.horizontal) && !(resolvedIntrinsicInline && axis.row)
-  let crossDefinite = crossKnown && !indefinite(input, !axis.horizontal)
-  let mut mainConstraint = available(input, axis.horizontal)
-  let crossConstraint = available(input, !axis.horizontal)
+  let mainDefinite = mainKnown && !indefinite(&input, axis.horizontal) && !(resolvedIntrinsicInline && axis.row)
+  let crossDefinite = crossKnown && !indefinite(&input, !axis.horizontal)
+  let mut mainConstraint = available(&input, axis.horizontal)
+  let crossConstraint = available(&input, !axis.horizontal)
   let mut main = max(0.0, optionalSize(box.size, axis.horizontal) - mainInset)
   let mut cross = max(0.0, optionalSize(box.size, !axis.horizontal) - crossInset)
   // §9.2 step 3C still uses an intrinsic main-axis constraint for content
@@ -700,7 +700,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     parent.widthDefinite = inlineHorizontal || !input.indefiniteWidth }
   if box.size.heightDefinite { parent.height = max(0.0, box.size.height - box.inset.vertical())
     parent.heightDefinite = !inlineHorizontal || !input.indefiniteHeight }
-  let mut childInput = childrenInput(input, style, box, parent)
+  let mut childInput = childrenInput(&input, style, &box, parent)
   childInput.blockRoot = true
   childInput.blockify = true
   childInput.shrinkToFit = true
@@ -726,12 +726,12 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     let mut crossIndex: usize = 0
     while crossIndex < count {
       let child = items.get(crossIndex).id
-      let childBox = resolveBox(nodes.style(child), childInput)
+      let childBox = resolveBox(nodes.style(child), &childInput)
       // §9.9.2 uses ordinary cross-size contributions (Sizing §5.2),
       // not §9.9.3's main-axis maximum of content and preferred sizes.
       let mut contributionSize = optionalSize(childBox.size, !axis.horizontal)
       if !definite(childBox.size, !axis.horizontal) {
-        let measured = run probe(nodes, &mut output, &mut measurer, child, childInput, !axis.horizontal, crossConstraint)
+        let measured = run probe(nodes, &mut output, &mut measurer, child, &childInput, !axis.horizontal, crossConstraint)
         contributionSize = axisSize(measured.size, !axis.horizontal)
       }
       contributionSize = clamp(contributionSize, axisSize(childBox.min, !axis.horizontal), axisSize(childBox.max, !axis.horizontal))
@@ -743,7 +743,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   let mut index: usize = 0
   let mut hasCollapsed = false
   while index < count {
-    let item = run prepare(nodes, &mut output, &mut measurer, items.get(index).id, childInput, axis, style, mainConstraint, !mainKnown, mainDefinite)
+    let item = run prepare(nodes, &mut output, &mut measurer, items.get(index).id, &childInput, axis, style, mainConstraint, !mainKnown, mainDefinite)
     hasCollapsed = hasCollapsed || item.collapsed
     items.set(index, item)
     index = index + 1
@@ -793,7 +793,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     while lineIndex < lines.length() {
       let line = lines.get(lineIndex)
       resolveFlexible(items.asMutSlice(), line, main, mainGap, collapsed)
-      let mut measuredLine = run crossSizes(nodes, &mut output, &mut measurer, items.asMutSlice(), line, childInput, axis, style, collapsed)
+      let mut measuredLine = run crossSizes(nodes, &mut output, &mut measurer, items.asMutSlice(), line, &childInput, axis, style, collapsed)
       if style.flexWrap == FlexWrap.NoWrap {
         if crossKnown { measuredLine.cross = cross }
         else { measuredLine.cross = max(0.0, clamp(measuredLine.cross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
@@ -832,7 +832,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   // Keep auto block sizes indefinite, and do not resolve cycles during probes.
   // This is before placement: the measuring pass publishes no fragments.
   if !definite(box.size, inlineHorizontal) && !intrinsicInline {
-    let mut resolvedBox = box
+    let mut resolvedBox = box.*
     let mut inlineSize = cross + crossInset
     if axis.row { inlineSize = main + mainInset }
     if inlineHorizontal {
@@ -842,10 +842,10 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
       resolvedBox.size.height = inlineSize
       resolvedBox.size.heightDefinite = true
     }
-    return run layoutFlexPass(nodes, &mut output, &mut measurer, id, input, resolvedBox, true, &mut items, &mut lines)
+    return run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &resolvedBox, true, &mut items, &mut lines)
   }
   if input.fragmentation.active && input.performLayout {
-    return run layoutFlexFragment(nodes, &mut output, &mut measurer, id, input, box, childInput, axis, items.asSlice(), lines.asSlice(), main, cross, mainGap, crossGap, collapsed)
+    return run layoutFlexFragment(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, axis, items.asSlice(), lines.asSlice(), main, cross, mainGap, crossGap, collapsed)
   }
   let mut totalCross = gaps(lines.length(), crossGap)
   let mut lineIndex: usize = 0
@@ -903,7 +903,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
         }
         // Hypothetical cross sizing needs only metrics. Materialize descendants
         // once, with the final cross constraint and percentage definiteness.
-        let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, finalInput)
+        let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &finalInput)
         childCross = axisSize(childLayout.size, !axis.horizontal)
         let crossOffset = fragmentCrossOffset(nodes, item, line, style, axis, childCross)
         if item.autoStart { setEdge(&mut childLayout.usedMargin, axis.horizontal, axis.mainReverse, autoShare) }
@@ -1000,8 +1000,8 @@ fn lineBoundary(nodes: &BoxTree, output: &LayoutPass, items: &[Item], line: Line
   return boundary
 }
 
-fn fragmentItemInput(nodes: &BoxTree, item: Item, line: Line, childInput: Input, axis: Axes) -> Input {
-  let mut result = childInput
+fn fragmentItemInput(nodes: &BoxTree, item: Item, line: Line, childInput: &Input, axis: Axes) -> Input {
+  let mut result = childInput.*
   setKnown(&mut result, axis.horizontal, item.target)
   setIndefinite(&mut result, axis.horizontal, !item.mainDefinite)
   if item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd {
@@ -1081,10 +1081,10 @@ fn placeFragment(layout: &mut Layout, blockHorizontal: bool, position: f64, inli
 
 // Only a boundary-bearing nested flex scope needs this discovery pass. It
 // resolves its first logical line, not its physically earlier reverse lines.
-effect fn discoverItemBefore<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: Item, line: Line, childInput: Input, axis: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn discoverItemBefore<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: Item, line: Line, childInput: &Input, axis: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if !nodes.node(item.id).dynamicBefore { return }
   let checkpoint = output.checkpoint()
-  let mut request = fragmentItemInput(nodes, item, line, childInput, axis)
+  let mut request = fragmentItemInput(nodes, item, line, &childInput, axis)
   request.performLayout = true
   request.fragmentation.active = true
   request.fragmentation.boundaryProbe = BoundaryProbe.Before
@@ -1093,7 +1093,7 @@ effect fn discoverItemBefore<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
   request.fragmentation.canBreakBefore = false
   request.fragmentation.forcedStart = false
   request.fragmentation.relaxation = BreakRelaxation.Avoidance
-  drop run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+  drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
   let before = output.resumes.get(item.id).before
   output.restoreCheckpoint(checkpoint)
   output.closeCheckpoint(checkpoint)
@@ -1102,7 +1102,7 @@ effect fn discoverItemBefore<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
   run output.resumes.set(item.id, state)
 }
 
-effect fn layoutFlexFragment<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, childInput: Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutFlexFragment<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let blockHorizontal = output.frames.writingMode != WritingMode.HorizontalTb
   let reverse = blockReverseMode(output.frames.writingMode)
@@ -1133,7 +1133,7 @@ effect fn layoutFlexFragment<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
         let first = lines[0]
         let mut index = first.start
         while index < first.end {
-          if active(items[index], collapsed) { run discoverItemBefore(nodes, &mut output, &mut measurer, items[index], first, childInput, axis) }
+          if active(items[index], collapsed) { run discoverItemBefore(nodes, &mut output, &mut measurer, items[index], first, &childInput, axis) }
           index = index + 1
         }
       }
@@ -1145,7 +1145,7 @@ effect fn layoutFlexFragment<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
       if first < items.length {
         if !state.started && !state.beforeHandled {
           let firstLine = output.resumes.get(items[first].id).flexLine
-          run discoverItemBefore(nodes, &mut output, &mut measurer, items[first], lines[firstLine], childInput, axis)
+          run discoverItemBefore(nodes, &mut output, &mut measurer, items[first], lines[firstLine], &childInput, axis)
         }
         state.before.merge(itemBoundary(nodes, &output, items[first], true, input.fragmentation.rectoOnRight))
         state.after.merge(itemBoundary(nodes, &output, items[last], false, input.fragmentation.rectoOnRight))
@@ -1172,9 +1172,9 @@ effect fn layoutFlexFragment<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
   if axis.horizontal { result.size = Size { width: main + box.inset.horizontal(), height: cross + box.inset.vertical() } }
   else { result.size = Size { width: cross + box.inset.horizontal(), height: main + box.inset.vertical() } }
   if row {
-    run fragmentRows(nodes, &mut output, &mut measurer, id, input, box, childInput, axis, items, lines, main, cross, mainGap, crossGap, collapsed, blockHorizontal, reverse, &mut result)
+    run fragmentRows(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, axis, items, lines, main, cross, mainGap, crossGap, collapsed, blockHorizontal, reverse, &mut result)
   } else {
-    run fragmentColumns(nodes, &mut output, &mut measurer, id, input, box, childInput, axis, items, lines, main, cross, mainGap, crossGap, collapsed, blockHorizontal, reverse, &mut result)
+    run fragmentColumns(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, axis, items, lines, main, cross, mainGap, crossGap, collapsed, blockHorizontal, reverse, &mut result)
   }
   containerBaselines(nodes, &output, &mut measurer, items, lines, lines.length, style, axis, true, &mut result)
   return result
@@ -1194,7 +1194,7 @@ effect fn handleLineBefore(output: &mut LayoutPass, items: &[Item], line: Line) 
   }
 }
 
-effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, childInput: Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let initial = output.resumes.get(id)
   let mut before = initial.before
@@ -1320,7 +1320,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
         let mut old = output.resumes.get(item.id)
         if !old.contentComplete {
           anyReady = anyReady || old.notBeforeFrame <= output.frame
-          let mut finalInput = fragmentItemInput(nodes, item, line, childInput, axis)
+          let mut finalInput = fragmentItemInput(nodes, item, line, &childInput, axis)
           let mut childCross = item.cross
           if definite(finalInput.known, !axis.horizontal) { childCross = optionalSize(finalInput.known, !axis.horizontal) }
           let mut aligned = fragmentCrossOffset(nodes, item, line, style, axis, childCross)
@@ -1368,7 +1368,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
             run output.resumes.set(item.id, old)
           }
           let childCheckpoint = output.checkpoint()
-          let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, finalInput)
+          let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &finalInput)
           let child = output.resumes.get(item.id)
           if child.blocked {
             output.restoreCheckpoint(childCheckpoint)
@@ -1520,7 +1520,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   }
 }
 
-effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, childInput: Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let initial = output.resumes.get(id)
   let firstItem = boundaryItemIndex(items, collapsed, true)
@@ -1642,7 +1642,7 @@ effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
             if axis.mainReverse != reverse { authoredMargin = item.marginEnd }
             position = position + FragmentBox.startMargin(itemStyle, authoredMargin, old, marginInput, output.frames.writingMode)
           }
-          let mut finalInput = fragmentItemInput(nodes, item, line, childInput, axis)
+          let mut finalInput = fragmentItemInput(nodes, item, line, &childInput, axis)
           finalInput.fragmentation = input.fragmentation
           finalInput.fragmentation.marginStart = marginInput.marginStart
           finalInput.fragmentation.marginEnd = marginInput.marginEnd
@@ -1654,7 +1654,7 @@ effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
           if explicitMargins { finalInput.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || boundaryCursor > 0.0 }
           finalInput.fragmentation.avoidInside = avoidedInside
           let childCheckpoint = output.checkpoint()
-          let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, finalInput)
+          let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &finalInput)
           let child = output.resumes.get(item.id)
           let mut discovered = boundary
           discovered.merge(child.before)

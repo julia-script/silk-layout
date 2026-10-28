@@ -184,7 +184,7 @@ fn indentBand(band: Band, indent: f64, rtl: bool) -> Band {
   return result
 }
 
-effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut List<Item>, atomics: &mut List<AtomicData>, scopes: &mut List<Scope>, extents: &mut List<Extent>, id: usize, parentScope: usize, input: Input, axes: Axes, mode: WritingMode) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut List<Item>, atomics: &mut List<AtomicData>, scopes: &mut List<Scope>, extents: &mut List<Extent>, id: usize, parentScope: usize, input: &Input, axes: Axes, mode: WritingMode) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let node = nodes.node(id)
   let style = nodes.style(id)
   let parent = scopes.get(parentScope)
@@ -195,7 +195,7 @@ effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
     run items.append(item)
     return
   }
-  let resolved = axes.box(resolveBox(style, input))
+  let resolved = axes.box(resolveBox(style, &input))
   if outOfFlow(style) { run items.append(item)
     return }
   if node.kind == BoxKind.Inline {
@@ -240,13 +240,13 @@ effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   }
   item.kind = ItemKind.Atomic
   if style.float != Float.None { item.kind = ItemKind.Float }
-  let mut childInput = input
+  let mut childInput = input.*
   childInput.parentWritingMode = parentStyle.writingMode
   childInput.parentTextOrientation = parentStyle.textOrientation
   childInput.performLayout = false
   childInput.blockRoot = true
   childInput.shrinkToFit = true
-  let layout = run layoutNode(nodes, &mut output, &mut measurer, id, childInput)
+  let layout = run layoutNode(nodes, &mut output, &mut measurer, id, &childInput)
   let mut baseline = 0.0
   let mut baselineFromMargin = false
   if item.kind == ItemKind.Atomic {
@@ -332,7 +332,7 @@ fn lineExtents(items: &[Item], scopes: &[Scope], extents: &mut [Extent], start: 
 
 // Resolve boundary margins before fitting and baseline export. Only an atomic
 // margin edge that actually defines the line envelope adjoins the boundary.
-fn atomicLineMargins(nodes: &BoxTree, items: &mut [Item], atomics: &mut [AtomicData], scopes: &[Scope], extents: &mut [Extent], axes: Axes, input: Input, start: usize, end: usize, atStart: bool, atEnd: bool, real: bool) -> Size {
+fn atomicLineMargins(nodes: &BoxTree, items: &mut [Item], atomics: &mut [AtomicData], scopes: &[Scope], extents: &mut [Extent], axes: Axes, input: &Input, start: usize, end: usize, atStart: bool, atEnd: bool, real: bool) -> Size {
   let mut index = start
   while index < end {
     let mut item = items[index]
@@ -496,7 +496,7 @@ fn sourceBoundaryCursor(items: &[Item], tokens: &[TextToken], scopes: &[Scope], 
 
 // Class A float controls act at source adjacency, not at the exclusion's
 // bottom or at completion of its independent fragmented formatting context.
-effect fn sourceBoundaries<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], tokens: &[TextToken], scopes: &[Scope], atomics: &[AtomicData], input: Input) -> SourceBoundaries ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn sourceBoundaries<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], tokens: &[TextToken], scopes: &[Scope], atomics: &[AtomicData], input: &Input) -> SourceBoundaries ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut result = SourceBoundaries { events: List<SourceBoundary>.make(), after: BreakBoundary.none(), afterValid: false }
   let mut seen = false
   let mut previousFloat = false
@@ -528,13 +528,13 @@ effect fn sourceBoundaries<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
           probe.fragmentation.sourceBoundary = BreakBoundary.none()
           if nodes.node(item.id).dynamicBefore {
             probe.fragmentation.boundaryProbe = BoundaryProbe.Before
-            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, probe)
+            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &probe)
             before.merge(output.resumes.get(item.id).before)
             output.restoreCheckpoint(checkpoint)
           }
           if nodes.node(item.id).dynamicAfter {
             probe.fragmentation.boundaryProbe = BoundaryProbe.After
-            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, probe)
+            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &probe)
             following.merge(output.resumes.get(item.id).after)
             output.restoreCheckpoint(checkpoint)
           }
@@ -563,7 +563,7 @@ effect fn sourceBoundaries<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   return move result
 }
 
-fn sourceAvoided(events: &[SourceBoundary], at: TextCursor, input: Input) -> bool {
+fn sourceAvoided(events: &[SourceBoundary], at: TextCursor, input: &Input) -> bool {
   let mut index: usize = 0
   while index < events.length {
     let event = events[index]
@@ -582,7 +582,7 @@ effect fn acknowledgeFloatBefore<'pass, 'source>(output: &mut LayoutPass<'pass, 
   }
 }
 
-fn floatRequest(atomic: &AtomicData, input: Input, blockInset: f64) -> Input {
+fn floatRequest(atomic: &AtomicData, input: &Input, blockInset: f64) -> Input {
   let mut request = atomic.input
   request.performLayout = true
   request.fragmentation = input.fragmentation
@@ -596,7 +596,7 @@ fn floatRequest(atomic: &AtomicData, input: Input, blockInset: f64) -> Input {
   return request
 }
 
-effect fn placeFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], visual: &Line, atomics: &mut [AtomicData], start: usize, end: usize, bfc: &mut BfcState, origin: Point, width: f64, sourceY: f64, lineHeight: f64, axes: Axes, leading: f64, input: Input, blockInset: f64) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn placeFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], visual: &Line, atomics: &mut [AtomicData], start: usize, end: usize, bfc: &mut BfcState, origin: Point, width: f64, sourceY: f64, lineHeight: f64, axes: Axes, leading: f64, input: &Input, blockInset: f64) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let fragmented = input.fragmentation.active && input.performLayout
   let mut advance = leading
   let mut index = start
@@ -637,8 +637,8 @@ effect fn placeFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<
           atomics[item.leaf].location = Point { x: 0.0, y: y + margin.top }
           let checkpoint = output.checkpoint()
           run acknowledgeFloatBefore(&mut output, item.id)
-          let request = floatRequest(&atomics[item.leaf], input, blockInset)
-          let layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+          let request = floatRequest(&atomics[item.leaf], &input, blockInset)
+          let layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
           let state = output.resumes.get(item.id)
           output.restoreCheckpoint(checkpoint)
           output.closeCheckpoint(checkpoint)
@@ -679,7 +679,7 @@ effect fn placeFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<
   }
 }
 
-effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, item: Item, atomic: &AtomicData, input: Input, blockInset: f64, parent: usize, point: Point, container: Size, axes: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, item: Item, atomic: &AtomicData, input: &Input, blockInset: f64, parent: usize, point: Point, container: Size, axes: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if atomic.deferred {
     if output.resumes.get(item.id).notBeforeFrame <= output.frame { run output.defer(item.id, atomic.requested) }
     run output.enqueuePending(owner, item.id)
@@ -689,8 +689,8 @@ effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   run acknowledgeFloatBefore(&mut output, item.id)
   let previousParent = output.fragmentParent
   output.fragmentParent = parent
-  let request = floatRequest(atomic, input, blockInset)
-  let mut layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+  let request = floatRequest(atomic, &input, blockInset)
+  let mut layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
   let state = output.resumes.get(item.id)
   if state.blocked || state.skipped {
     output.restoreCheckpoint(checkpoint)
@@ -706,7 +706,7 @@ effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   output.closeCheckpoint(checkpoint)
 }
 
-effect fn fitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, original: &[Item], atomics: &mut [AtomicData], input: Input, box: ResolvedBox, bfc: &mut BfcState, width: f64, axes: Axes) -> bool ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn fitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, original: &[Item], atomics: &mut [AtomicData], input: &Input, box: &ResolvedBox, bfc: &mut BfcState, width: f64, axes: Axes) -> bool ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut current = output.resumes.get(owner).pendingFirst
   let noVisual = Line.make()
   let mut progress = false
@@ -716,14 +716,14 @@ effect fn fitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     if index == original.length || original[index].kind != ItemKind.Float {
       fail FragmentationError { frame: output.frame, message: "Inline continuation queue contains a non-float box" }
     }
-    run placeFloats(nodes, &mut output, &mut measurer, original, &noVisual, &mut atomics, index, index + 1, &mut bfc, input.bfcContentOrigin, width, 0.0, 0.0, axes, 0.0, input, box.inset.top)
+    run placeFloats(nodes, &mut output, &mut measurer, original, &noVisual, &mut atomics, index, index + 1, &mut bfc, input.bfcContentOrigin, width, 0.0, 0.0, axes, 0.0, &input, box.inset.top)
     progress = progress || !atomics[original[index].leaf].deferred
     current = output.resumes.get(current).nextPending
   }
   return progress
 }
 
-effect fn emitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, original: &[Item], atomics: &[AtomicData], input: Input, box: ResolvedBox, container: Size, axes: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn emitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, original: &[Item], atomics: &[AtomicData], input: &Input, box: &ResolvedBox, container: Size, axes: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let last = output.resumes.get(owner).pendingLast
   if last == NO_NODE { return }
   while true {
@@ -737,7 +737,7 @@ effect fn emitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
     let atomic = &atomics[item.leaf]
     let point = Point { x: box.inset.left + atomic.location.x, y: box.inset.top + atomic.location.y }
     let parent = output.fragmentParent
-    run emitFloat(nodes, &mut output, &mut measurer, owner, item, atomic, input, box.inset.top, parent, point, container, axes)
+    run emitFloat(nodes, &mut output, &mut measurer, owner, item, atomic, &input, box.inset.top, parent, point, container, axes)
     if current == last { break }
   }
 }
@@ -827,10 +827,10 @@ fn suppressPhantomClones(nodes: &BoxTree, items: &mut [Item], scopes: &mut [Scop
   }
 }
 
-pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, physicalBox: ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let axes = Axes.make(style.writingMode)
-  let box = axes.box(physicalBox)
+  let box = axes.box(physicalBox.*)
   let rtl = style.usedDirection() == Direction.Rtl
   let rootFont = fontBox(&mut measurer, style)
   let mut scopes = List<Scope>.make()
@@ -851,7 +851,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   if physicalBox.size.heightDefinite { childInput.availableHeight = AvailableSpace.definite(max(0.0, physicalBox.size.height - physicalBox.inset.vertical())) }
   let mut child = nodes.node(id).firstChild
   while child != NO_NODE {
-    run collect(nodes, &mut output, &mut measurer, &mut items, &mut atomics, &mut scopes, &mut extents, child, 0, childInput, axes, style.writingMode)
+    run collect(nodes, &mut output, &mut measurer, &mut items, &mut atomics, &mut scopes, &mut extents, child, 0, &childInput, axes, style.writingMode)
     child = nodes.node(child).nextSibling
   }
   suppressPhantomClones(nodes, items.asMutSlice(), scopes.asMutSlice())
@@ -874,7 +874,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     textIndex = textIndex + 1
   }
   if needsAnalysis || needsVisual || (input.fragmentation.active && input.performLayout) {
-    return run layoutText(nodes, &mut output, &mut measurer, id, rootBidi, needsAnalysis, input, box, &mut bfc, items.asSlice(), &mut atomics, scopes.asSlice(), &mut extents)
+    return run layoutText(nodes, &mut output, &mut measurer, id, rootBidi, needsAnalysis, &input, &box, &mut bfc, items.asSlice(), &mut atomics, scopes.asSlice(), &mut extents)
   }
   let chunks = run chunksFor(nodes, items.asSlice(), scopes.asSlice())
   let mut maximum = 0.0
@@ -932,7 +932,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
       if bfc.count != 0 || hasFloats {
         let metrics = lineExtents(items.asSlice(), scopes.asSlice(), extents.asMutSlice(), start, chunk.end, candidateReal)
         bfc.restore(checkpoint)
-        if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, items.asSlice(), &noVisual, atomics.asMutSlice(), start, chunk.end, &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, input, box.inset.top) }
+        if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, items.asSlice(), &noVisual, atomics.asMutSlice(), start, chunk.end, &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, &input, box.inset.top) }
         band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, rtl)
         while next == first && candidate > band.right - band.left && band.occupied && band.nextBottom > cursor {
           cursor = band.nextBottom
@@ -947,7 +947,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     }
     let metrics = lineExtents(items.asSlice(), scopes.asSlice(), extents.asMutSlice(), start, end, real)
     bfc.restore(checkpoint)
-    if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, items.asSlice(), &noVisual, atomics.asMutSlice(), start, end, &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, input, box.inset.top) }
+    if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, items.asSlice(), &noVisual, atomics.asMutSlice(), start, end, &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, &input, box.inset.top) }
     band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, rtl)
     advance = leading + advance + continuationEdges(nodes, items.asSlice(), scopes.asSlice(), end, false, rtl)
     run lines.append(LineBox { start: start, end: end, y: cursor, left: band.left, width: band.right - band.left, advance: advance, hangingStart: 0.0, height: metrics.height, baseline: metrics.width, real: real, last: next == chunks.length(), direction: style.usedDirection(), visual: Line.make() })
@@ -984,7 +984,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
       result.hasLastBaseline = true
     }
     if input.performLayout {
-      run emitLine(nodes, &mut output, &mut measurer, items.asSlice(), atomics.asSlice(), texts.asSlice(), fonts.asSlice(), scopes.asSlice(), &mut extents, &mut spans, id, style, axes, box, result.size, line, lineBaselines, input)
+      run emitLine(nodes, &mut output, &mut measurer, items.asSlice(), atomics.asSlice(), texts.asSlice(), fonts.asSlice(), scopes.asSlice(), &mut extents, &mut spans, id, style, axes, &box, result.size, line, lineBaselines, &input)
     }
     index = index + 1
   }
@@ -1013,7 +1013,7 @@ fn startClones(nodes: &BoxTree, scopes: &[Scope], spans: &mut Spans, current: us
   cover(&mut spans, scopes, current, start, end)
   return end
 }
-effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], atomics: &[AtomicData], texts: &[TextLeaf], fonts: &[TextFont], scopes: &[Scope], extents: &mut List<Extent>, spans: &mut Spans, id: usize, style: &Style, axes: Axes, box: ResolvedBox, container: Size, line: &LineBox, lineBaselines: BaselineSet, input: Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], atomics: &[AtomicData], texts: &[TextLeaf], fonts: &[TextFont], scopes: &[Scope], extents: &mut List<Extent>, spans: &mut Spans, id: usize, style: &Style, axes: Axes, box: &ResolvedBox, container: Size, line: &LineBox, lineBaselines: BaselineSet, input: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let previousParent = output.fragmentParent
   let physicalSize = axes.size(Size { width: line.width, height: line.height })
   let mut fragment = output.fragment(id, NO_NODE, FragmentKind.Line)
@@ -1205,7 +1205,7 @@ effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
         let atomic = &atomics[item.leaf]
         let parent = spans.values.get(0)
         let point = Point { x: atomic.location.x - line.left, y: atomic.location.y - line.y }
-        run emitFloat(nodes, &mut output, &mut measurer, id, item, atomic, input, box.inset.top, parent.fragment, point, physicalSize, axes)
+        run emitFloat(nodes, &mut output, &mut measurer, id, item, atomic, &input, box.inset.top, parent.fragment, point, physicalSize, axes)
       }
       index = index + 1
     }
@@ -1245,7 +1245,7 @@ effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
         point = Point { x: atomic.location.x - line.left, y: atomic.location.y - line.y }
       }
       output.fragmentParent = parent.fragment
-      let mut layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+      let mut layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
       if item.kind == ItemKind.Atomic { layout.usedMargin = axes.physicalEdges(margin) }
       let physical = axes.physicalPoint(point, layout.size, physicalSize)
       layout.location = Point { x: physical.x - parent.origin.x, y: physical.y - parent.origin.y }
@@ -1642,7 +1642,7 @@ effect fn analyzeAnchors<M: TextMeasure>(nodes: &BoxTree, measurer: &mut M, cont
   }
 }
 
-effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, unicodeBidi: UnicodeBidi, externalAnalysis: bool, input: Input, box: ResolvedBox, bfc: &mut BfcState, raw: &[Item], atomics: &mut List<AtomicData>, scopes: &[Scope], extents: &mut List<Extent>) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, unicodeBidi: UnicodeBidi, externalAnalysis: bool, input: &Input, box: &ResolvedBox, bfc: &mut BfcState, raw: &[Item], atomics: &mut List<AtomicData>, scopes: &[Scope], extents: &mut List<Extent>) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let axes = Axes.make(style.writingMode)
   let rtl = style.usedDirection() == Direction.Rtl
@@ -1817,10 +1817,10 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut boundaries = SourceBoundaries { events: List<SourceBoundary>.make(), after: BreakBoundary.none(), afterValid: false }
   if fragmented && (hasFloats || input.fragmentation.sourceAdjacent
     && (input.fragmentation.sourceBoundary.forced.kinds.any() || input.fragmentation.sourceBoundary.avoided.any())) {
-    boundaries = run sourceBoundaries(nodes, &mut output, &mut measurer, original.asSlice(), context.tokens, scopes, atomics.asSlice(), input)
+    boundaries = run sourceBoundaries(nodes, &mut output, &mut measurer, original.asSlice(), context.tokens, scopes, atomics.asSlice(), &input)
   }
   let mut floatProgress = false
-  if fragmented { floatProgress = run fitPendingFloats(nodes, &mut output, &mut measurer, id, original.asSlice(), atomics.asMutSlice(), input, box, &mut bfc, width, axes) }
+  if fragmented { floatProgress = run fitPendingFloats(nodes, &mut output, &mut measurer, id, original.asSlice(), atomics.asMutSlice(), &input, &box, &mut bfc, width, axes) }
   let mut finalItems = List<Item>.make()
   let mut finalTexts = List<TextLeaf>.make()
   let mut lines = List<LineBox>.make()
@@ -1927,13 +1927,13 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         let count = candidate.items.length()
         let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
         let atEnd = input.fragmentation.marginEnd && box.inset.bottom == 0.0 && point.at.equal(terminal) && !hasFloats
-        let full = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, candidate.real)
-        let ending = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, true, candidate.real)
-        metrics = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, candidate.real)
+        let full = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, candidate.real)
+        let ending = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, true, candidate.real)
+        metrics = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, candidate.real)
         metrics.height = max(full.height, ending.height)
       }
       bfc.restore(checkpoint)
-      if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, candidate.items.asSlice(), &candidate.visual, atomics.asMutSlice(), 0, candidate.items.length(), &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, input, box.inset.top) }
+      if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, candidate.items.asSlice(), &candidate.visual, atomics.asMutSlice(), 0, candidate.items.length(), &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, &input, box.inset.top) }
       band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, indentRtl)
       while next == first && proposed > band.right - band.left && band.occupied && band.nextBottom > cursor {
         cursor = band.nextBottom
@@ -1959,23 +1959,23 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     if hasAtomicMargins {
       let count = accepted.items.length()
       let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
-      let retained = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, false, accepted.real)
+      let retained = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, false, accepted.real)
       if hasFloats {
         bfc.restore(checkpoint)
-        run placeFloats(nodes, &mut output, &mut measurer, accepted.items.asSlice(), &accepted.visual, atomics.asMutSlice(), 0, count, &mut bfc, input.bfcContentOrigin, width, sourceY, retained.height, axes, leading, input, box.inset.top)
+        run placeFloats(nodes, &mut output, &mut measurer, accepted.items.asSlice(), &accepted.visual, atomics.asMutSlice(), 0, count, &mut bfc, input.bfcContentOrigin, width, sourceY, retained.height, axes, leading, &input, box.inset.top)
       }
       // Measure adjacency before discarding: the removed margin itself must
       // not manufacture a gap, but a taller contained float already does.
       terminalAdjoins = input.fragmentation.marginEndChosen || bfc.bottom(input.bfcContentOrigin) <= cursor + retained.height
       let atEnd = input.fragmentation.marginEnd && box.inset.bottom == 0.0 && end.equal(terminal) && terminalAdjoins
-      let full = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, accepted.real)
-      let ending = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, !end.equal(terminal) || terminalAdjoins, accepted.real)
+      let full = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, accepted.real)
+      let ending = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, !end.equal(terminal) || terminalAdjoins, accepted.real)
       let available = input.fragmentation.limit - input.fragmentation.offset - box.inset.top - cursor
       boundaryOnly = full.height > available && ending.height <= full.height
       if boundaryOnly { metrics = ending
         reservedHeight = ending.height }
       else {
-        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, accepted.real)
+        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, accepted.real)
         // Reserve a possible final-line expansion caused by dropping a negative
         // margin, so a later boundary decision never publishes a rejected line.
         reservedHeight = max(full.height, ending.height)
@@ -2007,7 +2007,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     }
     if fragmented && accepted.real {
       let exceeds = input.fragmentation.offset + box.inset.top + cursor + reservedHeight > input.fragmentation.limit
-        || (boundaryOnly && !sourceEnding && !end.equal(terminal) && !allowsLineBreak(frameLines + 1, 1, style.orphans, 1, input.fragmentation.avoidInside || sourceAvoided(boundaries.events.asSlice(), end, input), input.fragmentation.relaxation))
+        || (boundaryOnly && !sourceEnding && !end.equal(terminal) && !allowsLineBreak(frameLines + 1, 1, style.orphans, 1, input.fragmentation.avoidInside || sourceAvoided(boundaries.events.asSlice(), end, &input), input.fragmentation.relaxation))
       let capped = frameLines >= lineLimit
       let emergency = frameLines == 0 && !input.fragmentation.canBreakBefore && input.fragmentation.relaxation == BreakRelaxation.Avoidance && !capped
       if capped || (exceeds && !emergency) {
@@ -2017,7 +2017,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         lineDirection = previousDirection
         // Future widows are checked by a transactional root preview using the
         // next fragmentainer's actual ancestor widths and parallel float flows.
-        let allowed = allowsLineBreak(frameLines, 1, style.orphans, 1, input.fragmentation.avoidInside || sourceAvoided(boundaries.events.asSlice(), start, input), input.fragmentation.relaxation)
+        let allowed = allowsLineBreak(frameLines, 1, style.orphans, 1, input.fragmentation.avoidInside || sourceAvoided(boundaries.events.asSlice(), start, &input), input.fragmentation.relaxation)
         if !allowed && frameLines == 0 && floatProgress { break }
         if !allowed {
           blocked = true
@@ -2042,7 +2042,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       }
     }
     bfc.restore(checkpoint)
-    if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, accepted.items.asSlice(), &accepted.visual, atomics.asMutSlice(), 0, accepted.items.length(), &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, input, box.inset.top) }
+    if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, accepted.items.asSlice(), &accepted.visual, atomics.asMutSlice(), 0, accepted.items.length(), &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, &input, box.inset.top) }
     if fragmented {
       let mut floatIndex: usize = 0
       while floatIndex < accepted.items.length() {
@@ -2080,7 +2080,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         let count = accepted.items.length()
         let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
         let atEnd = boundaryOnly || input.fragmentation.marginEnd && box.inset.bottom == 0.0 && end.equal(terminal) && terminalAdjoins
-        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, accepted.real)
+        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, 0, count, atStart, atEnd, accepted.real)
       }
     }
     if accepted.real {
@@ -2135,7 +2135,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     let lastIndex = lines.length() - 1
     let line = &lines.asSlice()[lastIndex]
     let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && line.y == 0.0
-    let metrics = atomicLineMargins(nodes, finalItems.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, line.start, line.end, atStart, true, line.real)
+    let metrics = atomicLineMargins(nodes, finalItems.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, &input, line.start, line.end, atStart, true, line.real)
     cursor = line.y + metrics.height
     let exported = baselineOffsets.translated(box.inset.top + line.y + metrics.width)
     if line.real {
@@ -2151,7 +2151,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   result.size = axes.size(Size { width: width + box.inset.horizontal(), height: height })
   result.contentSize = axes.size(Size { width: width, height: cursor })
   if input.performLayout {
-    if fragmented && !blocked { run emitPendingFloats(nodes, &mut output, &mut measurer, id, original.asSlice(), atomics.asSlice(), input, box, result.size, axes) }
+    if fragmented && !blocked { run emitPendingFloats(nodes, &mut output, &mut measurer, id, original.asSlice(), atomics.asSlice(), &input, &box, result.size, axes) }
     let mut spans = Spans { values: List<Span>.make(), first: NO_NODE, last: NO_NODE }
     run spans.values.reserveExact(scopes.length)
     index = 0
@@ -2160,7 +2160,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     index = 0
     while index < lines.length() {
       let line = &lines.asSlice()[index]
-      run emitLine(nodes, &mut output, &mut measurer, finalItems.asSlice(), atomics.asSlice(), finalTexts.asSlice(), fonts.asSlice(), scopes, &mut extents, &mut spans, id, style, axes, box, result.size, line, baselineOffsets.translated(line.baseline), input)
+      run emitLine(nodes, &mut output, &mut measurer, finalItems.asSlice(), atomics.asSlice(), finalTexts.asSlice(), fonts.asSlice(), scopes, &mut extents, &mut spans, id, style, axes, &box, result.size, line, baselineOffsets.translated(line.baseline), &input)
       index = index + 1
     }
   }

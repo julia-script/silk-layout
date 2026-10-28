@@ -43,11 +43,11 @@ fn rootInput(output: &LayoutPass, frame: Fragmentainer, first: Fragmentainer) ->
 // Search legal points before relaxing rules. Descendant algorithms backtrack
 // to their latest eligible boundary; only exhaustion of the entire frame drops
 // line-count constraints, then avoidance, then permits emergency progress.
-effect fn fitRoot<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, input: Input) -> BreakRelaxation ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn fitRoot<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, input: &Input) -> BreakRelaxation ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let checkpoint = output.checkpoint()
-  let mut request = input
+  let mut request = input.*
   while true {
-    drop run layoutNode(nodes, &mut output, &mut measurer, 0, request)
+    drop run layoutNode(nodes, &mut output, &mut measurer, 0, &request)
     let state = output.resumes.get(0)
     if !state.blocked {
       output.closeCheckpoint(checkpoint)
@@ -74,7 +74,7 @@ effect fn fitWithWidows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   let start = output.fragments.values.length()
   while true {
     let input = rootInput(&output, frame, first)
-    let relaxation = run fitRoot(nodes, &mut output, &mut measurer, input)
+    let relaxation = run fitRoot(nodes, &mut output, &mut measurer, &input)
     run collectWidows(nodes, &output, start, relaxation, &mut checks)
     if checks.length() == 0 { break }
     let preview = output.checkpoint()
@@ -86,7 +86,7 @@ effect fn fitWithWidows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
       drop run output.ensureFrameRoot(future)
       let geometry = run output.requiredFrame(future)
       let futureInput = rootInput(&output, geometry, first)
-      drop run fitRoot(nodes, &mut output, &mut measurer, futureInput)
+      drop run fitRoot(nodes, &mut output, &mut measurer, &futureInput)
       let decision = validateWidows(&output, checks.asMutSlice())
       failed = decision.failed
       limit = decision.limit

@@ -354,16 +354,16 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
   return input
 }
 fn usedBox(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize) -> ResolvedBox {
-  return withGutter(resolveBox(nodes.style(id), usedInput(nodes, output, id, viewport)), output.boxes[id].scrollbarGutter)
+  return withGutter(&resolveBox(nodes.style(id), &usedInput(nodes, output, id, viewport)), output.boxes[id].scrollbarGutter)
 }
 fn usedChildrenInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize, parent: OptionalSize) -> Input {
   let input = usedInput(nodes, output, id, viewport)
-  let mut box = withGutter(resolveBox(nodes.style(id), input), output.boxes[id].scrollbarGutter)
+  let mut box = withGutter(&resolveBox(nodes.style(id), &input), output.boxes[id].scrollbarGutter)
   box.size = OptionalSize {
     width: output.boxes[id].size.width, height: output.boxes[id].size.height,
     widthDefinite: output.boxes[id].widthDefinite, heightDefinite: output.boxes[id].heightDefinite,
   }
-  return childrenInput(input, nodes.style(id), box, parent)
+  return childrenInput(&input, nodes.style(id), &box, parent)
 }
 fn nextPositionSource(nodes: &BoxTree, id: usize) -> usize {
   if !nodes.styles[nodes.sources[id].styleIndex].display.isNone() && nodes.sources[id].firstChild != NO_NODE { return nodes.sources[id].firstChild }
@@ -655,7 +655,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   input.shrinkToFit = true
   input.parentWritingMode = cbStyle.writingMode
   input.parentTextOrientation = cbStyle.textOrientation
-  let box = resolveBox(style, input)
+  let box = resolveBox(style, &input)
   let inlineHorizontal = cbStyle.writingMode == WritingMode.HorizontalTb
   let mut xAlign = style.alignSelf
   let mut yAlign = style.justifySelf
@@ -702,7 +702,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   output.fragmentParent = physicalParent
   let checkpoint = output.checkpoint()
   if fragmented { input.performLayout = false }
-  let mut result = run layoutNode(nodes, &mut output, &mut measurer, id, input)
+  let mut result = run layoutNode(nodes, &mut output, &mut measurer, id, &input)
   if fragmented { output.restoreCheckpoint(checkpoint) }
   output.closeCheckpoint(checkpoint)
   input.performLayout = true
@@ -719,7 +719,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   if !anchor.valid {
     let mut staticRoot = parent
     if staticRoot == NO_NODE { staticRoot = 0 }
-    let mut parentBox = resolveBox(&viewportStyle, Input.make(viewport))
+    let mut parentBox = resolveBox(&viewportStyle, &Input.make(viewport))
     let mut ps = &viewportStyle
     let mut innerWidth = viewport.width
     let mut innerHeight = viewport.height
@@ -882,7 +882,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   x = origin.x + insetPosition(left, right, hasLeft, hasRight, result.size.width, containing.width, limits.left - origin.x, limits.right - origin.x, box.margin.left, box.margin.right, style.margin.left.kind == DimensionKind.Auto, style.margin.right.kind == DimensionKind.Auto, startReverse(cbStyle, true), inlineHorizontal, x - origin.x, xAlign, xSafety, startReverse(style, true), true)
   y = origin.y + insetPosition(top, bottom, hasTop, hasBottom, result.size.height, containing.height, limits.top - origin.y, limits.bottom - origin.y, box.margin.top, box.margin.bottom, style.margin.top.kind == DimensionKind.Auto, style.margin.bottom.kind == DimensionKind.Auto, startReverse(cbStyle, false), !inlineHorizontal, y - origin.y, yAlign, ySafety, startReverse(style, false), false)
   if fragmented {
-    run fragmentedAbsolute(nodes, &mut output, &mut measurer, id, cb, input, Point { x: x, y: y }, result.size)
+    run fragmentedAbsolute(nodes, &mut output, &mut measurer, id, cb, &input, Point { x: x, y: y }, result.size)
     return
   }
   // Scalar layout remains normal and generated-parent-relative. The physical
@@ -931,7 +931,7 @@ effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &
   let mut input = usedInput(nodes, &output, parentBox, initial)
   input.parent = metadata.parent
   input.known = metadata.known
-  let box = resolveBox(nodes.style(parentBox), input)
+  let box = resolveBox(nodes.style(parentBox), &input)
   input.known = OptionalSize.definite(metadata.content.width + box.inset.horizontal(), metadata.content.height + box.inset.vertical())
   input.indefiniteWidth = !metadata.content.widthDefinite
   input.indefiniteHeight = !metadata.content.heightDefinite
@@ -943,7 +943,7 @@ effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &
   }
   let checkpoint = output.checkpoint()
   let mut bfc = BfcState.make()
-  drop run layoutInBfc(nodes, &mut output, &mut measurer, parentBox, input, &mut bfc)
+  drop run layoutInBfc(nodes, &mut output, &mut measurer, parentBox, &input, &mut bfc)
   let mut child = nodes.node(parentBox).firstChild
   while child != NO_NODE {
     if nodes.node(child).needsFragmentGeometry && !outOfFlow(nodes.style(child)) {
@@ -1027,10 +1027,10 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
       input.indefiniteHeight = !allocation.heightDefinite
     }
     if outOfFlow(nodes.style(id)) {
-      input = run absoluteFrameInput(nodes, &output, id, parentBox, parent, frame, 0.0, BreakRelaxation.Strict, input)
+      input = run absoluteFrameInput(nodes, &output, id, parentBox, parent, frame, 0.0, BreakRelaxation.Strict, &input)
     }
-    let full = run resolveFragmentBox(nodes, &mut output, &mut measurer, id, input)
-    let current = FragmentBox.current(nodes.style(id), full, output.resumes.get(id), input.fragmentation, output.frames.writingMode)
+    let full = run resolveFragmentBox(nodes, &mut output, &mut measurer, id, &input)
+    let current = FragmentBox.current(nodes.style(id), &full, output.resumes.get(id), input.fragmentation, output.frames.writingMode)
     let axes = Axes.make(input.parentWritingMode)
     let logical = axes.box(current)
     let parentSize = Size { width: parentContent.width, height: parentContent.height }
@@ -1038,7 +1038,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     let mut direction = output.frames.direction
     if parentBox != NO_NODE { direction = nodes.style(parentBox).usedDirection() }
     let margin = axes.edges(full.margin)
-    let mut offset = inlineOffset(nodes.style(id), input, axes, direction, margin, logical.size.width, available)
+    let mut offset = inlineOffset(nodes.style(id), &input, axes, direction, margin, logical.size.width, available)
     if nodes.style(id).float == Float.Left { offset = margin.left }
     if nodes.style(id).float == Float.Right { offset = available - logical.size.width - margin.right }
     let size = Size { width: current.size.width, height: current.size.height }
@@ -1049,7 +1049,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     if outOfFlow(nodes.style(id)) {
       let containing = run frameContainingRect(nodes, &output, parentBox, parent, frame)
       let desired = flowPosition(&output, first)
-      let placed = placedInline(nodes, &output, id, parentBox, input, containing, desired, size)
+      let placed = placedInline(nodes, &output, id, parentBox, &input, containing, desired, size)
       point = Point { x: placed.x - parentOrigin.x, y: placed.y - parentOrigin.y }
     }
     if output.frames.writingMode == WritingMode.HorizontalTb {
@@ -1131,11 +1131,11 @@ effect fn frameContainingRect(nodes: &BoxTree, output: &LayoutPass, cb: usize, p
   return output.fragments.values.get(parent).paddingRect.translated(fragmentPosition(output, parent, false))
 }
 
-effect fn absoluteFrameInput(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, parent: usize, frame: usize, offset: f64, relaxation: BreakRelaxation, original: Input) -> Input ! FragmentationError {
+effect fn absoluteFrameInput(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, parent: usize, frame: usize, offset: f64, relaxation: BreakRelaxation, original: &Input) -> Input ! FragmentationError {
   let geometry = run output.requiredFrame(frame)
   let containing = run frameContainingRect(nodes, output, cb, parent, frame)
   let style = nodes.style(id)
-  let mut input = original
+  let mut input = original.*
   input.fragmentation = FragmentInput.continuous()
   input.fragmentation.active = true
   input.fragmentation.offset = offset
@@ -1158,7 +1158,7 @@ effect fn absoluteFrameInput(nodes: &BoxTree, output: &LayoutPass, id: usize, cb
     let right = resolve(style.inset.right, containing.width, true, 0.0)
     input.availableWidth = AvailableSpace.definite(max(0.0, containing.width - left - right))
     if original.known.widthDefinite && style.width.kind == DimensionKind.Auto {
-      let box = resolveBox(style, input)
+      let box = resolveBox(style, &input)
       input.known.width = clamp(containing.width - left - right - box.margin.horizontal(), box.min.width, box.max.width)
     }
   } else {
@@ -1168,19 +1168,19 @@ effect fn absoluteFrameInput(nodes: &BoxTree, output: &LayoutPass, id: usize, cb
     let bottom = resolve(style.inset.bottom, containing.height, true, 0.0)
     input.availableHeight = AvailableSpace.definite(max(0.0, containing.height - top - bottom))
     if original.known.heightDefinite && style.height.kind == DimensionKind.Auto {
-      let box = resolveBox(style, input)
+      let box = resolveBox(style, &input)
       input.known.height = clamp(containing.height - top - bottom - box.margin.vertical(), box.min.height, box.max.height)
     }
   }
   return input
 }
 
-fn placedInline(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, input: Input, containing: Rect, desired: Point, size: Size) -> Point {
+fn placedInline(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, input: &Input, containing: Rect, desired: Point, size: Size) -> Point {
   let style = nodes.style(id)
   let viewportStyle = Style.make()
   let mut cbStyle = &viewportStyle
   if cb != NO_NODE { cbStyle = nodes.style(cb) }
-  let box = resolveBox(style, input)
+  let box = resolveBox(style, &input)
   let mut point = desired
   let mut firstOrigin = Point { x: 0.0, y: 0.0 }
   if cb != NO_NODE {
@@ -1379,7 +1379,7 @@ effect fn semanticStaticPosition(nodes: &BoxTree, output: &LayoutPass, cb: usize
   return result
 }
 
-effect fn previewPositionedWidows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, cb: usize, original: Input, checks: &mut List<WidowCheck>) -> WidowDecision ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn previewPositionedWidows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, cb: usize, original: &Input, checks: &mut List<WidowCheck>) -> WidowDecision ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut frame = output.frame + 1
   let waiting = output.resumes.get(id).notBeforeFrame
   if waiting > frame { frame = waiting }
@@ -1392,8 +1392,8 @@ effect fn previewPositionedWidows<'pass, 'source, M: Measure + TextMeasure>(node
     let mut relaxation = BreakRelaxation.Strict
     let mut deferred = false
     while true {
-      let input = run absoluteFrameInput(nodes, &output, id, cb, parent, frame, 0.0, relaxation, original)
-      drop run layoutNode(nodes, &mut output, &mut measurer, id, input)
+      let input = run absoluteFrameInput(nodes, &output, id, cb, parent, frame, 0.0, relaxation, &original)
+      drop run layoutNode(nodes, &mut output, &mut measurer, id, &input)
       let state = output.resumes.get(id)
       if !state.blocked { break }
       let forced = state.before.forced.active(input.fragmentation.activeKinds())
@@ -1423,7 +1423,7 @@ effect fn previewPositionedWidows<'pass, 'source, M: Measure + TextMeasure>(node
 
 // Continuous measurement resolves positioning only. Each physical instance is
 // laid out against its real frame; no rectangles from the probe are sliced.
-effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, cb: usize, original: Input, location: Point, fullSize: Size) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, cb: usize, original: &Input, location: Point, fullSize: Size) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let attached = fixedTree(nodes, id)
   let unfragmented = attached || monolithicContaining(nodes, &output, cb)
   let savedFrame = output.frame
@@ -1450,18 +1450,18 @@ effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     if parent == NO_NODE && !attached { parent = run containingInstance(nodes, &mut output, &mut measurer, cb, frame) }
     output.fragmentParent = parent
     let mut point = Point { x: location.x - shift.x, y: location.y - shift.y }
-    let mut input = original
+    let mut input = original.*
     if !unfragmented {
       let mut offset = 0.0
       if first { offset = startOffset }
-      input = run absoluteFrameInput(nodes, &output, id, cb, parent, frame, offset, relaxation, original)
+      input = run absoluteFrameInput(nodes, &output, id, cb, parent, frame, offset, relaxation, &original)
       if output.frames.writingMode == WritingMode.HorizontalTb { point.y = geometry.rect.y + offset }
       else if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl { point.x = geometry.rect.x + geometry.rect.width - offset }
       else { point.x = geometry.rect.x + offset }
     }
     let checkpoint = output.checkpoint()
     let emissionStart = output.fragments.values.length()
-    let mut result = run layoutNode(nodes, &mut output, &mut measurer, id, input)
+    let mut result = run layoutNode(nodes, &mut output, &mut measurer, id, &input)
     let state = output.resumes.get(id)
     if !unfragmented && state.blocked {
       let forced = state.before.forced.active(input.fragmentation.activeKinds())
@@ -1485,7 +1485,7 @@ effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
       run collectWidows(nodes, &output, emissionStart, relaxation, &mut checks)
       if checks.length() > 0 {
         let preview = output.checkpoint()
-        let decision = run previewPositionedWidows(nodes, &mut output, &mut measurer, id, cb, original, &mut checks)
+        let decision = run previewPositionedWidows(nodes, &mut output, &mut measurer, id, cb, &original, &mut checks)
         output.restoreCheckpoint(preview)
         output.closeCheckpoint(preview)
         if decision.failed != NO_NODE {
@@ -1509,7 +1509,7 @@ effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     if fragment != NO_NODE {
       if !unfragmented {
         let containing = run frameContainingRect(nodes, &output, cb, parent, frame)
-        let inlinePoint = placedInline(nodes, &output, id, cb, input, containing, location, result.size)
+        let inlinePoint = placedInline(nodes, &output, id, cb, &input, containing, location, result.size)
         if output.frames.writingMode == WritingMode.HorizontalTb { point.x = inlinePoint.x }
         else { point.y = inlinePoint.y }
       }

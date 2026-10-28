@@ -41,8 +41,8 @@ pub struct ResolvedBox {
 impl Copy for ResolvedBox {}
 // Gutters participate in content geometry, never CSS padding or the
 // border/padding floor of a specified outer size.
-pub fn withGutter(box: ResolvedBox, gutter: ResolvedEdges) -> ResolvedBox {
-  let mut result = box
+pub fn withGutter(box: &ResolvedBox, gutter: ResolvedEdges) -> ResolvedBox {
+  let mut result = box.*
   result.inset = ResolvedEdges {
     top: box.border.top + box.padding.top + gutter.top,
     right: box.border.right + box.padding.right + gutter.right,
@@ -87,7 +87,7 @@ pub fn edges(value: Edges, basis: f64, definite: bool) -> ResolvedEdges {
     bottom: resolve(value.bottom, basis, definite, value.bottom.value), left: resolve(value.left, basis, definite, value.left.value),
   }
 }
-pub fn resolveBox(style: &Style, input: Input) -> ResolvedBox {
+pub fn resolveBox(style: &Style, input: &Input) -> ResolvedBox {
   let mut basis = input.parent.width
   let mut basisDefinite = input.parent.widthDefinite
   if input.parentWritingMode != WritingMode.HorizontalTb {
@@ -128,7 +128,7 @@ pub fn resolveBox(style: &Style, input: Input) -> ResolvedBox {
   return result
 }
 
-pub fn childrenInput(input: Input, style: &Style, box: ResolvedBox, parent: OptionalSize) -> Input {
+pub fn childrenInput(input: &Input, style: &Style, box: &ResolvedBox, parent: OptionalSize) -> Input {
   let mut result = Input.make(parent)
   result.initialContainingBlock = input.initialContainingBlock
   result.performLayout = input.performLayout
@@ -176,7 +176,7 @@ pub fn childrenInput(input: Input, style: &Style, box: ResolvedBox, parent: Opti
   return result
 }
 pub fn outOfFlow(style: &Style) -> bool { return style.position == Position.Absolute || style.position == Position.Fixed }
-pub fn effectiveDisplay(style: &Style, input: Input) -> Display {
+pub fn effectiveDisplay(style: &Style, input: &Input) -> Display {
   if input.blockify || style.float != Float.None || outOfFlow(style) { return style.display.blockified() }
   if input.atomicInline { return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.FlowRoot } }
   return style.display
@@ -200,8 +200,8 @@ pub fn usedOverflowForAxis(style: &Style, horizontal: bool) -> Overflow {
   if style.replaced && value != Overflow.Visible { return Overflow.Clip }
   return value
 }
-pub fn establishesContext(style: &Style, input: Input) -> bool {
-  let display = effectiveDisplay(style, input)
+pub fn establishesContext(style: &Style, input: &Input) -> bool {
+  let display = effectiveDisplay(style, &input)
   return display.insideIs(DisplayInside.Flex) || style.alignContent != Align.Normal || (style.float != Float.None && !input.blockify) || display.insideIs(DisplayInside.FlowRoot) || outOfFlow(style) || scrollable(style.overflowX) || scrollable(style.overflowY)
 }
 
@@ -220,12 +220,12 @@ pub fn blockInlineOffset(marginLow: f64, marginHigh: f64, autoLow: bool, autoHig
 
 // Align 3 §6.1.1: justify-self applies to in-flow block-level boxes, not
 // floats or flex items. Auto takes the containing block's justify-items.
-pub fn blockJustification(style: &Style, input: Input) -> Align {
-  if input.blockify || style.float != Float.None || outOfFlow(style) || !effectiveDisplay(style, input).outsideIs(DisplayOutside.Block) { return Align.Normal }
+pub fn blockJustification(style: &Style, input: &Input) -> Align {
+  if input.blockify || style.float != Float.None || outOfFlow(style) || !effectiveDisplay(style, &input).outsideIs(DisplayOutside.Block) { return Align.Normal }
   if style.justifySelf == Align.Auto { return input.parentJustifyItems }
   return style.justifySelf
 }
-pub fn blockJustificationSafety(style: &Style, input: Input) -> OverflowAlignment {
+pub fn blockJustificationSafety(style: &Style, input: &Input) -> OverflowAlignment {
   if style.justifySelf == Align.Auto { return input.parentJustifyItemsSafety }
   return style.justifySelfSafety
 }

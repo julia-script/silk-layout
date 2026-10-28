@@ -77,7 +77,7 @@ pub struct LayoutPass<'a, 'source> {
   pub visits: List<usize>,
   // Each box's parent; see BoxWrites.below.
   pub parents: List<usize>,
-  pub keyShapes: List<u8>,
+  pub keyShapes: List<u16>,
   // Set when `boxes` holds the previous compute's layouts of the same boxes,
   // which reused subtrees keep: the first write of a box saves its previous
   // layout in `writes` (see touch).
@@ -99,7 +99,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   pub effect fn make(boxes: &'a mut [Layout], fragments: &'a mut FragmentArena, sources: &'source [Node]) -> LayoutPass<'a, 'source> ! OutOfMemoryError ? &mut Allocator {
     // The paragraph cache may borrow text from these source nodes.
     drop sources
-    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), visits: List<usize>.make(), parents: List<usize>.make(), keyShapes: List<u8>.make(), inPlace: false, writes: BoxWrites.make(), tracking: true, anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero(), flexScratch: List<FlexScratch>.make() }
+    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), visits: List<usize>.make(), parents: List<usize>.make(), keyShapes: List<u16>.make(), inPlace: false, writes: BoxWrites.make(), tracking: true, anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero(), flexScratch: List<FlexScratch>.make() }
   }
   pub effect fn beginFrame(self: &mut Self, frame: usize) ! OutOfMemoryError ? &mut Allocator {
     if self.frame == NO_NODE { run self.resumes.prepare(self.boxes.length) }
@@ -767,7 +767,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   }
   // cacheKey's style facts for the box; without them (passes built by hand)
   // the key keeps the full request.
-  pub fn keyShape(self: &Self, id: usize) -> u8 {
+  pub fn keyShape(self: &Self, id: usize) -> u16 {
     if id < self.keyShapes.length() { return self.keyShapes.get(id) }
     return 1
   }

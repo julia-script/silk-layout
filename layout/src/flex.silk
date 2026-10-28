@@ -9,7 +9,7 @@ import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrie
 import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
 import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, isFlex, scrollable, overflowForAxis, UNBOUNDED }
-import engine { layoutNode, probeNode, probeFresh, normalizeKey }
+import engine { layoutNode, probeNode, probeFresh, normalizeKey, constraintFreeProbe }
 import layout_pass { LayoutPass, CacheKind }
 import layout_cache { LayoutCache }
 import text { TextMeasure, TextError }
@@ -170,6 +170,7 @@ fn sort(items: &mut [Item], nodes: &BoxTree, count: usize) {
   }
 }
 struct Probe { size: Size, preferredRatio: f64, ratioBorderBox: bool }
+impl Copy for Probe {}
 fn contribution(value: f64, preferred: f64, item: &Item) -> f64 {
   let mut result = max(value, preferred)
   if item.grow == 0.0 { result = min(result, item.base) }
@@ -294,6 +295,8 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   let mut borderRatio = style.boxSizing == BoxSizing.BorderBox && style.aspectRatio > 0.0 && !style.aspectRatioAuto
   let mut minContent = item.inset
   let mut minimumCross = crossSize
+  let mut minProbe = Probe { size: Size.zero(), preferredRatio: 0.0, ratioBorderBox: false }
+  let mut minProbed = false
   // §4.5: the automatic minimum is at most the preferred size. When the flex
   // base is at least that large, the minimum cannot change the hypothetical
   // size or a growing line; only a shrinking line reads it, so measure the
@@ -310,11 +313,15 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
     minimumCross = axisSize(measured.size, !axis.horizontal)
     ratio = measured.preferredRatio
     borderRatio = measured.ratioBorderBox
+    minProbe = measured
+    minProbed = true
   }
   let mut maxContent = minContent
   let mut contentCross = crossSize
   if !basisDefinite || intrinsic || minimumDimension.kind == DimensionKind.MaxContent || maximumDimension.kind == DimensionKind.MaxContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
-    let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, AvailableSpace.maxContent(), crossDefinite, crossSize)
+    // An empty box's max-content probe has its min-content probe's key.
+    let mut measured = minProbe
+    if !minProbed || !constraintFreeProbe(output.keyShape(id)) { measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, AvailableSpace.maxContent(), crossDefinite, crossSize) }
     maxContent = axisSize(measured.size, axis.horizontal)
     contentCross = axisSize(measured.size, !axis.horizontal)
     ratio = measured.preferredRatio

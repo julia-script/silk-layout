@@ -90,7 +90,7 @@ pub fn edges(value: Edges, basis: f64, definite: bool) -> ResolvedEdges {
     bottom: resolve(value.bottom, basis, definite, value.bottom.value), left: resolve(value.left, basis, definite, value.left.value),
   }
 }
-pub fn resolveBox(style: &Style, input: &Input) -> ResolvedBox {
+pub fn resolveBox(style: &Style, input: &Input) -> ResolvedBox with Intrinsic.inlineAlways() {
   let mut basis = input.parent.width
   let mut basisDefinite = input.parent.widthDefinite
   if input.parentWritingMode != WritingMode.HorizontalTb {

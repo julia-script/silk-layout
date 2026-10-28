@@ -1658,6 +1658,9 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
   if output.frame != NO_NODE { settled = 0 }
   let mut limitsParent = NO_NODE
   let mut parentLimits = unlimited
+  // Whether the parent's layout-time scrollable overflow already holds the
+  // margin and border rects of its unmoved in-flow children (overflowGeometry).
+  let mut parentCovers = false
   while index > 0 {
     index = index - 1
     if settled > 0 && index + 1 == output.fragments.settled.get(settled - 1).end {
@@ -1711,13 +1714,16 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
           if parentId != limitsParent {
             let mut normal = parent.contentRect
             if output.frame == NO_NODE { normal = output.boxes[cb].normalFlowOverflow() }
-            parentLimits = reachableLimits(nodes.style(cb), parent.paddingRect, normal, cb == 0)
+            let parentStyle = nodes.style(cb)
+            parentLimits = reachableLimits(parentStyle, parent.paddingRect, normal, cb == 0)
+            parentCovers = output.frame == NO_NODE && usedOverflowForAxis(parentStyle, true) == Overflow.Visible && usedOverflowForAxis(parentStyle, false) == Overflow.Visible
             limitsParent = parentId
           }
           limits = parentLimits
         }
-        if !nonpainting { combined = addOverflow(combined, border, limits) }
-        if !positioned && !nonpainting {
+        let covered = cb != NO_NODE && parentBox && parentCovers && kind == FragmentKind.Box && id != NO_NODE && !positioned && !nonpainting && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0
+        if !nonpainting && !covered { combined = addOverflow(combined, border, limits) }
+        if !positioned && !nonpainting && !covered {
           let mut margin = bounds.translated(position)
           if output.frame == NO_NODE && kind == FragmentKind.Box && parentBox && id != NO_NODE && cb != NO_NODE {
             let layout = &output.boxes[id]

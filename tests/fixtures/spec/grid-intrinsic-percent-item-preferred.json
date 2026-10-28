@@ -1,0 +1,72 @@
+{
+  "name": "grid-intrinsic-percent-item-preferred",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#min-size-auto",
+    "https://drafts.csswg.org/css-grid-2/#algo-content",
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes"
+  ],
+  "derivation": "The cyclic preferred percentage acts as auto in the item contribution, so the track is 40px. Final width resolves to 20px; the specified-size suggestion caps the automatic minimum at that width.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "auto"
+          ],
+          "gridTemplateRows": [
+            20
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "width": {
+            "percent": 0.5
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 40,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 40,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 40,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "name": "grid-intrinsic-container-max-content",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes",
+    "https://drafts.csswg.org/css-grid-2/#algo-grow-tracks"
+  ],
+  "derivation": "Container intrinsic size is the sum of tracks and the 10px gutter. Under min-content no maximization occurs; under max-content both finite growth limits are reached.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "gridTemplateRows": [
+            20
+          ],
+          "width": "max-content",
+          "columnGap": 10,
+          "gridTemplateColumns": [
+            {
+              "minmax": [
+                10,
+                40
+              ]
+            },
+            {
+              "minmax": [
+                20,
+                100
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 150,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 40,
+        "height": 20
+      },
+      {
+        "x": 50,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      }
+    ]
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "name": "grid-intrinsic-span-infinitely-growable",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-spanning-items",
+    "https://drafts.csswg.org/css-grid-2/#infinitely-growable",
+    "https://drafts.csswg.org/css-grid-2/#extra-space"
+  ],
+  "derivation": "The first track has base/limit 10px. The spanning text has min-content 40px and max-content 85px. The second track first grows to 30px, remains infinitely growable for maximum contributions, and reaches 75px; the first stays 10px.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "auto",
+            "auto"
+          ],
+          "gridTemplateRows": [
+            20,
+            20
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 2,
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 3,
+        "text": "aaaaaaaa aaaaaaaa"
+      }
+    ],
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 85,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 20
+      },
+      {
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 85,
+        "height": 20
+      },
+      {
+        "height": 10
+      }
+    ]
+  }
+}

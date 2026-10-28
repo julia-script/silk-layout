@@ -1,0 +1,306 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.testing { Testing, AssertionError }
+import context { UNBOUNDED }
+import geometry { AvailableKind, AvailableSpace }
+import grid_style { GridBreadth, GridBreadthKind, GridTrack }
+import grid_tracks {
+  TrackState,
+  TrackContribution,
+  initializeTracks,
+  resolveIntrinsic,
+  maximizeTracks,
+  expandFlexible
+}
+
+fn intrinsic(minimum: GridBreadthKind, maximum: GridBreadthKind) -> TrackState {
+  let mut track = TrackState.fixed(0.0)
+  track.minimum = minimum
+  track.maximum = maximum
+  track.growthLimit = UNBOUNDED
+  track.cap = UNBOUNDED
+  return track
+}
+
+// CSS Grid 2 §12.5.1: overlapping equal-span items plan increases independently.
+test effect fn gridPlannedIncreasesIgnoreItemOrder()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut work = List<usize>.make()
+  let track = intrinsic(GridBreadthKind.MinContent, GridBreadthKind.MaxContent)
+  let mut forward: [TrackState; 3] = [track, track, track]
+  let mut reverse: [TrackState; 3] = [track, track, track]
+  let a = TrackContribution.make(0, 2, 36.0, 36.0, 36.0)
+  let b = TrackContribution.make(1, 3, 60.0, 60.0, 60.0)
+  let first: [TrackContribution; 2] = [a, b]
+  let second: [TrackContribution; 2] = [b, a]
+  run resolveIntrinsic(&mut forward, &first, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run resolveIntrinsic(&mut reverse, &second, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    forward[0].base == 18.0 && forward[1].base == 30.0 && forward[2].base == 30.0,
+    "overlap takes the maximum planned increase rather than accumulating it",
+  )
+  run Testing.expect(
+    reverse[0].base == forward[0].base && reverse[1].base == forward[1].base
+      && reverse[2].base == forward[2].base,
+    "reversing equal-span items cannot change track bases",
+  )
+}
+
+// CSS Grid 2 §12.5.1: use non-affected capacity before exceeding affected limits.
+test effect fn gridNonAffectedTracksReceiveRemainingSpace()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut work = List<usize>.make()
+  let mut affected = intrinsic(GridBreadthKind.MinContent, GridBreadthKind.Length)
+  affected.growthLimit = 12.0
+  affected.cap = 12.0
+  let mut other = TrackState.fixed(4.0)
+  other.growthLimit = 40.0
+  other.cap = 40.0
+  let mut tracks: [TrackState; 2] = [affected, other]
+  let items: [TrackContribution; 1] = [TrackContribution.make(0, 2, 30.0, 30.0, 30.0)]
+  run resolveIntrinsic(&mut tracks, &items, AvailableKind.Definite, 2.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    tracks[0].base == 12.0 && tracks[1].base == 16.0,
+    "the fixed minimum track absorbs the remaining twelve units up to its maximum",
+  )
+}
+
+// CSS Grid 2 §12.5: a newly finite limit remains infinitely growable for one step.
+test effect fn gridNewFiniteLimitAbsorbsMaxContentGrowth()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut work = List<usize>.make()
+  let track = intrinsic(GridBreadthKind.Auto, GridBreadthKind.Auto)
+  let mut tracks: [TrackState; 2] = [track, track]
+  let items: [TrackContribution; 2] = [
+    TrackContribution.make(0, 1, 14.0, 14.0, 14.0),
+    TrackContribution.make(0, 2, 40.0, 40.0, 94.0),
+  ]
+  run resolveIntrinsic(&mut tracks, &items, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    tracks[0].growthLimit == 14.0 && tracks[1].growthLimit == 80.0,
+    "newly resolved second track absorbs max-content excess without growing the first",
+  )
+}
+
+// CSS Grid 2 §12.5.1: reaching fit-content changes beyond-limit eligibility.
+test effect fn gridFitContentCapRedirectsBeyondLimitSpace()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut work = List<usize>.make()
+  let mut fit = intrinsic(GridBreadthKind.Auto, GridBreadthKind.MaxContent)
+  fit.fitContent = true
+  fit.cap = 24.0
+  let other = intrinsic(GridBreadthKind.Auto, GridBreadthKind.MaxContent)
+  let mut tracks: [TrackState; 2] = [fit, other]
+  let items: [TrackContribution; 3] = [
+    TrackContribution.make(0, 1, 0.0, 0.0, 12.0),
+    TrackContribution.make(1, 2, 0.0, 0.0, 12.0),
+    TrackContribution.make(0, 2, 0.0, 0.0, 84.0),
+  ]
+  run resolveIntrinsic(&mut tracks, &items, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    tracks[0].growthLimit == 24.0 && tracks[1].growthLimit == 60.0,
+    "fit-content freezes at its argument and redirects excess to the uncapped track",
+  )
+}
+
+// CSS Grid 2 §12.5: flex-span intrinsic growth uses factor ratios, not equal shares.
+test effect fn gridFlexSpanContributionsAreWeighted()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut work = List<usize>.make()
+  let mut tracks: [TrackState; 3] = [
+    TrackState.fixed(9.0),
+    TrackState.flexible(0.0, 1.0),
+    TrackState.flexible(0.0, 3.0),
+  ]
+  let items: [TrackContribution; 1] = [TrackContribution.make(0, 3, 101.0, 101.0, 101.0)]
+  run resolveIntrinsic(&mut tracks, &items, AvailableKind.Definite, 2.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    tracks[0].base == 9.0 && tracks[1].base == 22.0 && tracks[2].base == 66.0,
+    "fixed tracks and gutters are subtracted before weighted flex growth",
+  )
+  let mut small: [TrackState; 2] = [
+    TrackState.flexible(0.0, 0.125),
+    TrackState.flexible(0.0, 0.375),
+  ]
+  let partial: [TrackContribution; 1] = [TrackContribution.make(0, 2, 80.0, 80.0, 80.0)]
+  run resolveIntrinsic(&mut small, &partial, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    small[0].base == 30.0 && small[1].base == 50.0,
+    "a sub-unit factor sum distributes its remainder equally",
+  )
+}
+
+// CSS Grid 2 §12.6: unequal growth limits freeze independently; max bounds restart.
+test effect fn gridMaximizationFreezesAndHonorsBounds()
+  ! AssertionError<'static> {
+  let mut a = TrackState.fixed(4.0)
+  a.growthLimit = 10.0
+  let mut b = TrackState.fixed(8.0)
+  b.growthLimit = 40.0
+  let mut tracks: [TrackState; 2] = [a, b]
+  maximizeTracks(&mut tracks, AvailableSpace.maxContent(), 3.0, 37.0)
+  run Testing.expect(
+    tracks[0].base == 10.0 && tracks[1].base == 24.0,
+    "max-content growth respects a definite maximum including gutters",
+  )
+  maximizeTracks(&mut tracks, AvailableSpace.minContent(), 3.0, UNBOUNDED)
+  run Testing.expect(tracks[1].base == 24.0, "min-content maximization has zero free space")
+}
+
+// CSS Grid 2 §12.7: indefinite fractions consider each item, then restart at bounds.
+test effect fn gridIndefiniteFlexibleFractionAndBounds()
+  ! AssertionError<'static> {
+  let mut tracks: [TrackState; 3] = [
+    TrackState.fixed(8.0),
+    TrackState.flexible(12.0, 1.0),
+    TrackState.flexible(0.0, 2.0),
+  ]
+  let items: [TrackContribution; 1] = [TrackContribution.make(0, 3, 0.0, 0.0, 110.0)]
+  expandFlexible(&mut tracks, &items, AvailableSpace.maxContent(), 3.0, 0.0, UNBOUNDED)
+  run Testing.expect(
+    tracks[1].base == 32.0 && tracks[2].base == 64.0,
+    "the item max-content size supplies a fraction after subtracting fixed tracks and gaps",
+  )
+  let mut bounded: [TrackState; 2] = [TrackState.flexible(0.0, 1.0), TrackState.flexible(0.0, 2.0)]
+  let wide: [TrackContribution; 1] = [TrackContribution.make(0, 2, 0.0, 0.0, 120.0)]
+  expandFlexible(&mut bounded, &wide, AvailableSpace.maxContent(), 0.0, 0.0, 72.0)
+  run Testing.expect(
+    bounded[0].base == 24.0 && bounded[1].base == 48.0,
+    "maximum restart uses original bases rather than already-expanded tracks",
+  )
+  let mut minimum: [TrackState; 2] = [TrackState.flexible(0.0, 1.0), TrackState.flexible(0.0, 2.0)]
+  expandFlexible(&mut minimum, &wide, AvailableSpace.maxContent(), 0.0, 150.0, UNBOUNDED)
+  run Testing.expect(
+    minimum[0].base == 50.0 && minimum[1].base == 100.0,
+    "minimum restart expands using the definite minimum",
+  )
+}
+
+// CSS Grid 2 §12.4 and §12.5: preserve the original cap even when a base exceeds it.
+test effect fn gridInitializationPreservesCapsAndPercentageIndefiniteness()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tracks = List<TrackState>.make()
+  let percent = GridBreadth { kind: GridBreadthKind.Percent, length: 0.0, percent: 0.5 }
+  let explicit: [GridTrack; 3] = [
+    GridTrack.minmax(GridBreadth.fixed(45.0), GridBreadth.fixed(20.0)),
+    GridTrack.breadth(percent),
+    GridTrack.fitContent(GridBreadth.fixed(27.0)),
+  ]
+  run initializeTracks(&explicit, 0, 3, 100.0, false, &mut tracks)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let values = tracks.asSlice()
+  run Testing.expect(
+    values[0].base == 45.0 && values[0].growthLimit == 45.0 && values[0].cap == 20.0,
+    "raising growth limit does not erase the fixed maximum cap",
+  )
+  run Testing.expect(
+    values[1].minimum == GridBreadthKind.Auto && values[1].maximum == GridBreadthKind.Auto,
+    "indefinite percentage breadth behaves as auto",
+  )
+  run Testing.expect(
+    values[2].fitContent && values[2].maximum == GridBreadthKind.MaxContent
+      && values[2].cap == 27.0,
+    "fit-content keeps an auto minimum and distinct cap",
+  )
+}
+
+// CSS Grid 2 §12.5: intrinsic constraints use limited min-content, floored by
+// minimum contribution; definite sizing uses the minimum contribution itself.
+test effect fn gridLimitedMinimumKeepsTheMinimumFloor()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut work = List<usize>.make()
+  let mut track = intrinsic(GridBreadthKind.Auto, GridBreadthKind.Length)
+  track.cap = 23.0
+  track.growthLimit = 23.0
+  let mut constrained: [TrackState; 2] = [track, track]
+  let mut definite: [TrackState; 2] = [track, track]
+  let items: [TrackContribution; 2] = [
+    TrackContribution.make(0, 1, 9.0, 40.0, 80.0),
+    TrackContribution.make(1, 2, 31.0, 40.0, 80.0),
+  ]
+  run resolveIntrinsic(&mut constrained, &items, AvailableKind.MinContent, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run resolveIntrinsic(&mut definite, &items, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    constrained[0].base == 23.0 && constrained[1].base == 31.0,
+    "fixed maxima cap min-content but never lower the minimum contribution",
+  )
+  run Testing.expect(
+    definite[0].base == 9.0 && definite[1].base == 31.0,
+    "definite sizing uses minimum contributions rather than limited min-content",
+  )
+  run Testing.expect(
+    constrained[1].growthLimit == 31.0 && constrained[1].cap == 23.0,
+    "growth limits rise to an oversized minimum without changing the original cap",
+  )
+}
+
+// CSS Grid 2 §12.5.1: fit-content caps growth limits, not intrinsic minima
+// when every affected track has exhausted its intrinsic maximum.
+test effect fn gridFitContentMinimumCanExceedItsArgument()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut work = List<usize>.make()
+  let mut fit = intrinsic(GridBreadthKind.Auto, GridBreadthKind.MaxContent)
+  fit.fitContent = true
+  fit.cap = 15.0
+  let mut tracks: [TrackState; 2] = [fit, fit]
+  let items: [TrackContribution; 1] = [TrackContribution.make(0, 2, 54.0, 54.0, 90.0)]
+  run resolveIntrinsic(&mut tracks, &items, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    tracks[0].base == 27.0 && tracks[1].base == 27.0,
+    "after every fit-content cap is reached, minimum excess falls back to all affected tracks",
+  )
+  run Testing.expect(
+    tracks[0].growthLimit == 27.0 && tracks[1].growthLimit == 27.0,
+    "max-content growth cannot exceed the cap further but growth limits still floor at bases",
+  )
+}
+
+// CSS Grid 2 §12.5: process shorter spans before longer spans, regardless of
+// input order, and treat min-content and max-content minimums separately.
+test effect fn gridIncreasingSpansAndContentMinimums()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut work = List<usize>.make()
+  let track = intrinsic(GridBreadthKind.MinContent, GridBreadthKind.MaxContent)
+  let mut tracks: [TrackState; 3] = [track, track, track]
+  let items: [TrackContribution; 2] = [
+    TrackContribution.make(0, 3, 72.0, 72.0, 72.0),
+    TrackContribution.make(0, 2, 48.0, 48.0, 48.0),
+  ]
+  run resolveIntrinsic(&mut tracks, &items, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    tracks[0].base == 24.0 && tracks[1].base == 24.0 && tracks[2].base == 24.0,
+    "shorter spans establish finite limits before the longer span fills the untouched track",
+  )
+  let mut mixed: [TrackState; 2] = [
+    intrinsic(GridBreadthKind.MinContent, GridBreadthKind.MaxContent),
+    intrinsic(GridBreadthKind.MaxContent, GridBreadthKind.MaxContent),
+  ]
+  let content: [TrackContribution; 1] = [TrackContribution.make(0, 2, 12.0, 36.0, 84.0)]
+  run resolveIntrinsic(&mut mixed, &content, AvailableKind.Definite, 0.0, &mut work)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    mixed[0].base == 18.0 && mixed[1].base == 66.0,
+    "min-content is shared, but the max-content minimum alone receives the remaining max-content requirement",
+  )
+}

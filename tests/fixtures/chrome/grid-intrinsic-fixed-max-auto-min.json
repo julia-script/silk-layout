@@ -1,0 +1,87 @@
+{
+  "name": "grid-intrinsic-fixed-max-auto-min",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#min-size-auto",
+    "https://drafts.csswg.org/css-grid-2/#algo-content"
+  ],
+  "derivation": "The 20px content-based automatic minimum is capped by the fixed 15px maximum of the only spanned track.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "gridTemplateRows": [
+            20
+          ],
+          "width": 100,
+          "gridTemplateColumns": [
+            {
+              "minmax": [
+                "auto",
+                15
+              ]
+            }
+          ],
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "fontKey": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "text": "aaaa aaaa"
+      }
+    ],
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 15,
+        "height": 20
+      },
+      {
+        "height": 20
+      }
+    ]
+  }
+}

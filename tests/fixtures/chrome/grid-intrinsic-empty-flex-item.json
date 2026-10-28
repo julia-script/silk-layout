@@ -1,0 +1,61 @@
+{
+  "name": "grid-intrinsic-empty-flex-item",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes",
+    "https://drafts.csswg.org/css-grid-2/#algo-grow-tracks"
+  ],
+  "derivation": "The empty grid has min-content width 10px and max-content width 100px. Its nonshrinking auto flex basis is 100px, even if a min-content probe was cached first.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 300,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "flexShrink": 0,
+          "gridTemplateColumns": [
+            {
+              "minmax": [
+                10,
+                100
+              ]
+            }
+          ],
+          "gridTemplateRows": [
+            20
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 300,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      }
+    ]
+  }
+}

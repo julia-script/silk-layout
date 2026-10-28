@@ -1,0 +1,72 @@
+{
+  "name": "grid-intrinsic-cyclic-column-track",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#track-sizing",
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes"
+  ],
+  "derivation": "For intrinsic width the percentage track is auto and contributes 20px, giving 60px total. Final percentage resolution makes it 30px and leaves the fixed 40px track overflowing the container.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            {
+              "percent": 0.5
+            },
+            40
+          ],
+          "gridTemplateRows": [
+            20
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "width": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 60,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 20
+      },
+      {
+        "x": 30,
+        "y": 0,
+        "width": 40,
+        "height": 20
+      }
+    ]
+  }
+}

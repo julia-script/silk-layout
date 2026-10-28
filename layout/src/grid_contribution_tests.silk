@@ -1,0 +1,516 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.testing { Testing, AssertionError }
+import geometry {
+  Measure,
+  MeasureRequest,
+  Measured,
+  NaturalDimensions,
+  FontRequest,
+  FontMetrics,
+  ScrollbarRequest,
+  ScrollbarMetrics,
+  Size,
+  Rect,
+  BaselineSet,
+  OptionalSize,
+  AvailableKind,
+  abs
+}
+import text {
+  TextMeasure,
+  TextContext,
+  TextBreak,
+  TextAnalysis,
+  TextShapeRequest,
+  TextRun,
+  TextError
+}
+import fragmentation { FragmentationError }
+import style {
+  Style,
+  Display,
+  DisplayOutside,
+  DisplayInside,
+  Dimension,
+  DimensionKind,
+  WritingMode,
+  Direction,
+  Overflow,
+  BoxSizing
+}
+import tree { Tree, LayoutTree, InvalidNode }
+import box_tree as Boxes
+import context { Input, UNBOUNDED }
+import layout_pass { LayoutPass }
+import grid_contributions { ItemContribution, measureContribution }
+
+struct ContributionMeasure {
+  calls: usize
+}
+
+impl Measure for ContributionMeasure {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    return FontMetrics.zero()
+  }
+
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop provider
+    drop request
+    return ScrollbarMetrics.zero()
+  }
+
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop key
+    provider.calls = provider.calls + 1
+    let mut width = 91.0
+    let mut height = 67.0
+    if request.width.kind == AvailableKind.MinContent {
+      width = 23.0
+    }
+    if request.height.kind == AvailableKind.MinContent {
+      height = 17.0
+    }
+    if request.known.widthDefinite {
+      width = request.known.width
+    }
+    if request.known.heightDefinite {
+      height = request.known.height
+    }
+    return Measured {
+      size: Size { width: width, height: height },
+      scrollableOverflow: Rect { x: 0.0, y: 0.0, width: width, height: height },
+      contentBlockSize: height,
+      firstBaselines: BaselineSet.uniform(0.0),
+      lastBaselines: BaselineSet.uniform(0.0),
+      hasBaseline: false,
+      hasLineBoxes: false,
+    }
+  }
+}
+
+impl TextMeasure for ContributionMeasure {
+  fn beginTextLayout(provider: &mut Self) {
+    drop provider
+  }
+
+  effect fn analyze(
+    provider: &mut Self,
+    context: TextContext,
+    output: &mut List<TextBreak>,
+  ) -> TextAnalysis
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    drop context
+    drop output
+    fail TextError { source: 0, message: "contribution fixture contains no text" }
+  }
+
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>)
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    drop request
+    drop output
+    fail TextError { source: 0, message: "contribution fixture contains no text" }
+  }
+}
+
+effect fn check(
+  style: Style,
+  input: Input,
+  horizontal: bool,
+  allowed: bool,
+  cap: f64,
+  expected: ItemContribution,
+)
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static>
+  ? &mut Allocator {
+  run checkWithOptions(move style, input, horizontal, allowed, cap, UNBOUNDED, false, expected)
+}
+
+effect fn checkWithOptions(
+  style: Style,
+  input: Input,
+  horizontal: bool,
+  allowed: bool,
+  cap: f64,
+  crossCap: f64,
+  minimumOnly: bool,
+  expected: ItemContribution,
+)
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static>
+  ? &mut Allocator {
+  let mut rootStyle = Style.make()
+  rootStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  let mut tree = run Tree.make(move rootStyle)
+  let root = tree.root()
+  let item = run tree.append(root, move style)
+  run tree.setMeasurement(item, 0)
+  let boxes = run Boxes.build(
+    tree.nodes.asSlice(),
+    tree.styles.asSlice(),
+    tree.grids.asSlice(),
+    tree.gridNames.asSlice(),
+    WritingMode.HorizontalTb,
+    Direction.Ltr,
+  )
+  let mut output = LayoutTree.make()
+  run output.prepare(boxes.boxes.length())
+  let mut pass = run LayoutPass.make(
+    output.boxes.asMutSlice(),
+    &mut output.fragments,
+    boxes.sources,
+  )
+  let mut measurer = ContributionMeasure { calls: 0 }
+  let id = boxes.firstBySource.get(item.index)
+  let result = run measureContribution(
+    &boxes,
+    &mut pass,
+    &mut measurer,
+    id,
+    &input,
+    horizontal,
+    allowed,
+    cap,
+    crossCap,
+    !minimumOnly,
+    !minimumOnly,
+  )
+  run Testing.expect(
+    abs(result.minimum - expected.minimum) < 0.00001,
+    "minimum contribution follows Grid 12.5",
+  )
+  if !minimumOnly {
+    run Testing.expect(
+      abs(result.minContent - expected.minContent) < 0.00001,
+      "min-content contribution includes sizing constraints",
+    )
+    run Testing.expect(
+      abs(result.maxContent - expected.maxContent) < 0.00001,
+      "max-content contribution includes sizing constraints",
+    )
+  } else {
+    run Testing.expect(
+      measurer.calls == 0,
+      "a definite minimum-only request performs no content measurement",
+    )
+  }
+  run Testing.expect(
+    abs(result.usedMinimum - expected.usedMinimum) < 0.00001,
+    "automatic minimum follows Grid 6.6",
+  )
+  let calls = measurer.calls
+  let repeated = run measureContribution(
+    &boxes,
+    &mut pass,
+    &mut measurer,
+    id,
+    &input,
+    horizontal,
+    allowed,
+    cap,
+    crossCap,
+    !minimumOnly,
+    !minimumOnly,
+  )
+  run Testing.expect(
+    measurer.calls == calls && repeated.minimum == result.minimum
+      && repeated.maxContent == result.maxContent,
+    "repeat contributions reuse cached probes",
+  )
+}
+
+// Grid 6.6 selects the specified suggestion, not min(content, specified).
+test effect fn gridSpecifiedSuggestionCanExceedContent()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.width = Dimension.px(73.0)
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 73.0, minContent: 73.0, maxContent: 73.0, usedMinimum: 73.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6 does not apply Flexbox's max(content, transferred) to non-replaced items.
+test effect fn gridNonReplacedMinimumIgnoresPreferredRatioTransfer()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.height = Dimension.px(40.0)
+  style.aspectRatio = 2.0
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 23.0, minContent: 80.0, maxContent: 80.0, usedMinimum: 23.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6 selects a replaced transferred suggestion even above min-content.
+test effect fn gridReplacedMinimumUsesPreferredRatioTransfer()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.replaced = true
+  style.height = Dimension.px(40.0)
+  style.aspectRatio = 2.0
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 80.0, minContent: 80.0, maxContent: 80.0, usedMinimum: 80.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6 caps the border box at stretch-fit: margins consume the fixed area.
+test effect fn gridFixedMaximumCapsContentSuggestionNotIntrinsicContribution()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.padding.left = Dimension.px(6.0)
+  style.margin.left = Dimension.px(3.0)
+  style.margin.right = Dimension.px(5.0)
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    19.0,
+    ItemContribution { minimum: 19.0, minContent: 37.0, maxContent: 105.0, usedMinimum: 11.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6 uses computed scrollability, including visible becoming auto.
+test effect fn gridComputedScrollableOverflowDisablesAutomaticMinimum()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.overflowY = Overflow.Hidden
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 0.0, minContent: 23.0, maxContent: 91.0, usedMinimum: 0.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6 requires an auto-min track and forbids multi-track flexible spans.
+test effect fn gridTrackEligibilityDisablesAutomaticMinimum()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run check(
+    Style.make(),
+    Input.make(OptionalSize.none()),
+    true,
+    false,
+    UNBOUNDED,
+    ItemContribution { minimum: 0.0, minContent: 23.0, maxContent: 91.0, usedMinimum: 0.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Sizing 3 5.2: an explicit max-content minimum also floors min-content contribution.
+test effect fn gridIntrinsicMinimumWinsOverSmallerMaximum()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.minWidth = Dimension.keyword(DimensionKind.MaxContent)
+  style.maxWidth = Dimension.px(31.0)
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 91.0, minContent: 91.0, maxContent: 91.0, usedMinimum: 91.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 12.5 applies to physical axes, including a vertical orthogonal inline axis.
+test effect fn gridOrthogonalVerticalContributionsUseHeight()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.writingMode = WritingMode.VerticalRl
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    false,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 17.0, minContent: 17.0, maxContent: 67.0, usedMinimum: 17.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6's transferred percentage caps resolve indefinite percentages to zero.
+test effect fn gridReplacedTransferHonorsIndefinitePercentageMaximum()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.replaced = true
+  style.height = Dimension.px(40.0)
+  style.aspectRatio = 2.0
+  style.maxWidth = Dimension.pct(0.5)
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 0.0, minContent: 0.0, maxContent: 80.0, usedMinimum: 0.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6 converts ratio suggestions in the ratio's box, not the margin box.
+test effect fn gridBorderBoxRatioUsesCrossBorderBox()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.replaced = true
+  style.boxSizing = BoxSizing.BorderBox
+  style.height = Dimension.px(40.0)
+  style.padding.left = Dimension.px(7.0)
+  style.padding.top = Dimension.px(3.0)
+  style.aspectRatio = 2.0
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 80.0, minContent: 80.0, maxContent: 80.0, usedMinimum: 80.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6 caps the opposite input, rather than the transferred output.
+test effect fn gridTransferredSuggestionUsesOppositeFixedTrackCap()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.replaced = true
+  style.height = Dimension.px(40.0)
+  style.aspectRatio = 2.0
+  style.margin.top = Dimension.px(3.0)
+  run checkWithOptions(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    9.0,
+    30.0,
+    false,
+    ItemContribution { minimum: 54.0, minContent: 80.0, maxContent: 80.0, usedMinimum: 54.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// A stretched opposite size affects contributions, not the specified suggestion.
+test effect fn gridStretchedKnownSizesDoNotBecomePreferredSuggestions()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.aspectRatio = 2.0
+  let mut input = Input.make(OptionalSize.definite(200.0, 100.0))
+  input.known = OptionalSize.definite(200.0, 46.0)
+  run check(
+    move style,
+    input,
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 23.0, minContent: 92.0, maxContent: 92.0, usedMinimum: 23.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 12.5 needs only the explicit used minimum for an auto preferred size.
+test effect fn gridMinimumOnlyRequestDoesNotMeasureContent()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.minWidth = Dimension.px(7.0)
+  style.maxWidth = Dimension.keyword(DimensionKind.MaxContent)
+  run checkWithOptions(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    UNBOUNDED,
+    true,
+    ItemContribution { minimum: 7.0, minContent: 0.0, maxContent: 0.0, usedMinimum: 7.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 6.6 ratio transfer removes cross insets and restores measured-axis insets.
+test effect fn gridContentBoxRatioPreservesIndependentInsets()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.replaced = true
+  style.height = Dimension.px(40.0)
+  style.padding.left = Dimension.px(7.0)
+  style.padding.top = Dimension.px(3.0)
+  style.aspectRatio = 2.0
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 87.0, minContent: 87.0, maxContent: 87.0, usedMinimum: 87.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Sizing 3 §5.2.1 preserves the opposite minimum when compressing cyclic sizes.
+test effect fn gridCyclicReplacedContributionTransfersOppositeMinimumFloor()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.replaced = true
+  style.maxWidth = Dimension.pct(0.5)
+  style.minHeight = Dimension.px(17.0)
+  style.aspectRatio = 2.0
+  run check(
+    move style,
+    Input.make(OptionalSize.none()),
+    true,
+    true,
+    UNBOUNDED,
+    ItemContribution { minimum: 34.0, minContent: 34.0, maxContent: 91.0, usedMinimum: 34.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}

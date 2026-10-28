@@ -1,0 +1,74 @@
+{
+  "name": "grid-intrinsic-cross-axis-explicit-minimum",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing",
+    "https://drafts.csswg.org/css-grid-2/#min-size-auto",
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes"
+  ],
+  "derivation": "The explicit 40px minimum establishes the row contribution. On the single column adjustment, height:100% resolves against that row and transfers through the 2:1 ratio, changing the inline contribution from 10px to 80px.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "auto"
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "aspectRatio": 2,
+          "height": {
+            "percent": 1
+          },
+          "minHeight": 40
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 10,
+          "height": 40
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 80,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 40
+      }
+    ]
+  }
+}

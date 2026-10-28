@@ -1,0 +1,104 @@
+{
+  "name": "grid-intrinsic-keyword-columns",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-content",
+    "https://drafts.csswg.org/css-grid-2/#algo-grow-tracks"
+  ],
+  "derivation": "At 5px per glyph, the longest word is 20px and the complete line is 45px. The min-content and max-content tracks retain those sizes; neither is an auto maximum.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "gridTemplateRows": [
+            20
+          ],
+          "width": 200,
+          "gridTemplateColumns": [
+            "min-content",
+            "max-content"
+          ],
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "fontKey": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "text": "aaaa aaaa"
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "fontKey": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 3,
+        "text": "aaaa aaaa"
+      }
+    ],
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 200,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 20
+      },
+      {
+        "height": 20
+      },
+      {
+        "x": 20,
+        "y": 0,
+        "width": 45,
+        "height": 20
+      },
+      {
+        "height": 10
+      }
+    ]
+  }
+}

@@ -461,7 +461,12 @@ effect fn deferredMinimums<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   if !pending || hypothetical <= main - gaps(line.count, gap) { return () }
   index = line.start
   while index < line.end {
-    if items[index].minimumPending {
+    // A childless box without measured content has a min-content size of
+    // its inset (an empty content box), so its automatic minimum is that.
+    if items[index].minimumPending && constraintFreeProbe(output.keyShape(items[index].id)) {
+      items[index].minimum = items[index].inset
+      items[index].minimumPending = false
+    } else if items[index].minimumPending {
       let measured = run probe(nodes, &mut output, &mut measurer, items[index].id, &childInput, axis.horizontal, AvailableSpace.minContent(), items[index].knownCrossDefinite, items[index].knownCross)
       let item = &mut items[index]
       let minimum = min(axisSize(measured.size, axis.horizontal), item.pendingPreferred)

@@ -51,13 +51,13 @@ fn scrollbarApplies(style: &Style, input: &Input) -> bool {
   let display = effectiveDisplay(style, &input)
   return !display.outsideIs(DisplayOutside.Inline) || !display.insideIs(DisplayInside.Flow)
 }
-fn configureScrollbars<M: Measure>(style: &Style, output: &mut LayoutPass, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox) -> ResolvedBox {
-  if !scrollbarApplies(style, &input) { return box.* }
+fn configureScrollbars<M: Measure>(style: &Style, output: &mut LayoutPass, measurer: &mut M, id: usize, input: &Input, box: &mut ResolvedBox) {
+  if !scrollbarApplies(style, &input) { return }
   let x = overflowForAxis(style, true)
   let y = overflowForAxis(style, false)
   let stable = style.scrollbarGutter != ScrollbarGutter.Auto
   let inlineHorizontal = style.writingMode == WritingMode.HorizontalTb
-  if x != Overflow.Auto && x != Overflow.Scroll && y != Overflow.Auto && y != Overflow.Scroll && !(stable && scrollable(overflowForAxis(style, !inlineHorizontal))) { return box.* }
+  if x != Overflow.Auto && x != Overflow.Scroll && y != Overflow.Auto && y != Overflow.Scroll && !(stable && scrollable(overflowForAxis(style, !inlineHorizontal))) { return }
   output.hasAutoScrollbars = output.hasAutoScrollbars || x == Overflow.Auto || y == Overflow.Auto
   let mut available = box.size
   if available.widthDefinite { available.width = max(0.0, available.width - box.border.horizontal() - box.padding.horizontal()) }
@@ -65,9 +65,9 @@ fn configureScrollbars<M: Measure>(style: &Style, output: &mut LayoutPass, measu
   let metrics = Measure.scrollbars(&mut measurer, ScrollbarRequest { width: style.scrollbarWidth, gutter: style.scrollbarGutter, writingMode: style.writingMode, direction: style.usedDirection(), available: available })
   let horizontal = x == Overflow.Scroll || output.selected(id, true)
   let vertical = y == Overflow.Scroll || output.selected(id, false)
-  let mut result = withGutter(&box, scrollbarGutter(style, metrics, horizontal, vertical))
+  let mut result = withGutter(&box.*, scrollbarGutter(style, metrics, horizontal, vertical))
   result.scrollbarMetrics = metrics
-  return result
+  box.* = result
 }
 fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, bfc: &BfcState) -> Layout {
   let mut known = box.size
@@ -207,7 +207,8 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     }
     Option<Layout>.None => {}
   }
-  let box = configureScrollbars(nodes.style(id), &mut output, &mut measurer, id, &request, &resolveBox(nodes.style(id), &request))
+  let mut box = resolveBox(nodes.style(id), &request)
+  configureScrollbars(nodes.style(id), &mut output, &mut measurer, id, &request, &mut box)
   let mut bfc = BfcState.make()
   let result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
   run output.remember(id, &key, CacheKind.IntrinsicContents, &result)
@@ -609,7 +610,7 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
       box.size.height = clamp(box.size.height, box.min.height, box.max.height)
     }
   }
-  box = configureScrollbars(style, &mut output, &mut measurer, id, &request, &box)
+  configureScrollbars(style, &mut output, &mut measurer, id, &request, &mut box)
   return BoxSizing { box: box, request: request, natural: natural, ratio: ratio, ratioBorder: ratioBorder, ratioInsetWidth: ratioInsetWidth, ratioInsetHeight: ratioInsetHeight }
 }
 
@@ -736,7 +737,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       box.size.widthDefinite = true }
     if height != result.size.height { box.size.height = height
       box.size.heightDefinite = true }
-    box = configureScrollbars(style, &mut output, &mut measurer, id, &request, &box)
+    configureScrollbars(style, &mut output, &mut measurer, id, &request, &mut box)
     bfc.restore(checkpoint)
     output.restoreCheckpoint(passCheckpoint)
     result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
@@ -782,7 +783,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       transferred = true
     }
     if transferred {
-      box = configureScrollbars(style, &mut output, &mut measurer, id, &request, &box)
+      configureScrollbars(style, &mut output, &mut measurer, id, &request, &mut box)
       bfc.restore(checkpoint)
       output.restoreCheckpoint(passCheckpoint)
       result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
@@ -805,7 +806,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       let originalSize = box.size
       let previous = box.gutter
       box.size = available
-      box = configureScrollbars(style, &mut output, &mut measurer, id, &request, &box)
+      configureScrollbars(style, &mut output, &mut measurer, id, &request, &mut box)
       box.size = originalSize
       if previous.top == box.gutter.top && previous.right == box.gutter.right && previous.bottom == box.gutter.bottom && previous.left == box.gutter.left { break }
       bfc.restore(checkpoint)

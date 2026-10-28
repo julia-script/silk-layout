@@ -486,6 +486,12 @@ pub effect fn layoutInFlow<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     Option<Layout>.Some { value: reused } => { return reused }
     Option<Layout>.None => {}
   }
+  return run layoutInFlowFresh(nodes, &mut output, &mut measurer, id, &input, &mut bfc, &key)
+}
+
+// layoutInFlow without a reusable result. It returns one local, so the result
+// is built in the caller's slot.
+effect fn layoutInFlowFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, bfc: &mut BfcState, key: &Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let start = output.fragments.checkpoint()
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
   if bfc.settled() {

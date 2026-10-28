@@ -8,7 +8,7 @@ import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrie
 import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
 import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, scrollable, overflowForAxis, UNBOUNDED }
-import engine { layoutNode, probeNode }
+import engine { layoutNode, probeNode, probeSize }
 import layout_pass { LayoutPass }
 import text { TextMeasure, TextError }
 import fragmentation { FlowCursor, FragmentationError, BoundaryProbe }
@@ -183,9 +183,8 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sourc
     input.known.heightDefinite = false }
   setAvailable(&mut input, horizontal, constraint)
   if crossKnown { setKnown(&mut input, !horizontal, cross) }
-  run probeNode(nodes, &mut output, &mut measurer, id, &input)
-  let layout = &output.boxes[id]
-  return Probe { size: layout.size, preferredRatio: layout.preferredRatio, ratioBorderBox: layout.ratioBorderBox }
+  let probed = run probeSize(nodes, &mut output, &mut measurer, id, &input)
+  return Probe { size: probed.size, preferredRatio: probed.preferredRatio, ratioBorderBox: probed.ratioBorderBox }
 }
 effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let id = item.id

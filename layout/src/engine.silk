@@ -10,7 +10,7 @@ import positioned { positionTree, reachableLimits, addOverflow }
 import bfc { BfcState }
 import silk.option { Option }
 import layout_pass { LayoutPass, CacheKind, FullBoxGeometry, REUSE_INDEPENDENT, REUSE_IN_FLOW }
-import layout_cache { LayoutCache, Snapshot, BoxFacts }
+import layout_cache { LayoutCache, Snapshot, BoxFacts, BoxWrites }
 import incremental as Incremental
 import replaced { layoutReplaced, preferredRatio, borderRatio }
 import box_tree as Boxes
@@ -125,6 +125,7 @@ fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: 
 }
 
 effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if !(input.performLayout && input.fragmentation.active) { return run contentAlgorithm(nodes, &mut output, &mut measurer, id, &input, &box, natural, &mut bfc) }
   let mut resolved = box.*
   let mut request = input.*
   if input.performLayout && input.fragmentation.active {
@@ -425,17 +426,16 @@ pub effect fn probeNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
 // formatting context.
 pub effect fn layoutInFlow<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let reusable = input.performLayout && !input.fragmentation.active && output.frame == NO_NODE && bfc.settled()
+  if !reusable { return run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc) }
   let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
-  if reusable {
-    run bfc.collectBelow(input.bfcContentOrigin, &mut output.floatContext)
-    match run output.reuseFinal(nodes, id, &key, REUSE_IN_FLOW, true) {
-      Option<Layout>.Some { value: reused } => { return reused }
-      Option<Layout>.None => {}
-    }
+  run bfc.collectBelow(input.bfcContentOrigin, &mut output.floatContext)
+  match run output.reuseFinal(nodes, id, &key, REUSE_IN_FLOW, true) {
+    Option<Layout>.Some { value: reused } => { return reused }
+    Option<Layout>.None => {}
   }
   let start = output.fragments.checkpoint()
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
-  if reusable && bfc.settled() {
+  if bfc.settled() {
     run bfc.collectBelow(input.bfcContentOrigin, &mut output.floatContext)
     run output.recordFinal(id, &key, &result, start, true)
   }
@@ -696,6 +696,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   let previousParent = output.fragmentParent
   if input.performLayout {
     run output.preserveLayout(id)
+    run output.touch(id)
     output.boxes[id].location = Point { x: 0.0, y: 0.0 }
     if fragmented && id == 0 {
       let frame = output.frame
@@ -1047,12 +1048,13 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   let kept = output.reusable() && output.boxNodes.length() != 0
   let restoring = kept && tree.structureRevision() <= since && tree.boxRevision() <= since
   let nodes = run boxesFor(tree, &mut output, since, restoring)
-  // The previous output becomes the snapshot reused subtrees are copied from.
-  output.snapshot.takeOutput(&mut output.fragments, &mut output.boxes)
+  let sameBoxes = restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice()))
+  // The previous output becomes the snapshot reused subtrees are copied from,
+  // except box layouts of the same boxes, which stay in place.
+  output.snapshot.takeOutput(&mut output.fragments, &mut output.boxes, sameBoxes)
   let mut facts = Intrinsic.replace(output.facts, BoxFacts.make())
-  let mut sameBoxes = false
-  if restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice())) {
-    sameBoxes = true
+  let mut writes = Intrinsic.replace(output.writes, BoxWrites.make())
+  if sameBoxes {
     run output.cache.rotateFinals()
     Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
     run output.cache.compact()
@@ -1071,11 +1073,14 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   let snapshot = Intrinsic.replace(output.snapshot, Snapshot.make())
   // A compute that fails part way leaves nothing to reuse.
   output.keep(since, false)
-  run output.prepare(nodes.boxes.length())
+  run output.prepareBoxes(nodes.boxes.length(), sameBoxes)
+  run writes.begin(nodes.boxes.length())
   output.viewportOverflow = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
   let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
   boxes.cache = move cache
   boxes.previous = move snapshot
+  boxes.inPlace = sameBoxes
+  boxes.writes = move writes
   // Style facts of the same boxes need refreshing only where styles changed.
   if sameBoxes && facts.covers(nodes.boxes.length()) {
     let restyled = run Incremental.remarkSubtrees(tree, &nodes, since, &mut facts)
@@ -1112,10 +1117,12 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       facts.reusable = Intrinsic.replace(boxes.reusable, List<u8>.make())
       facts.viewportFree = Intrinsic.replace(boxes.viewportFrees, List<bool>.make())
       facts.keyShapes = Intrinsic.replace(boxes.keyShapes, List<u8>.make())
+      let usedWrites = Intrinsic.replace(boxes.writes, BoxWrites.make())
       drop boxes
       output.cache = move kept
       output.snapshot = move captured
       output.facts = move facts
+      output.writes = move usedWrites
       output.keep(tree.revision(), settled)
       output.keptViewport = viewport
       output.keptScroll = tree.viewportScrollOffset

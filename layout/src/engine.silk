@@ -1351,8 +1351,12 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   // boxes themselves when no change since could alter them.
   // When they differ, carry results over to the matching new boxes.
   let kept = output.reusable() && output.boxNodes.length() != 0
-  let restoring = kept && tree.structureRevision() <= since && tree.boxRevision() <= since
-  let nodes = run boxesFor(tree, &mut output, since, restoring)
+  let restoringKept = kept && tree.structureRevision() <= since && tree.boxRevision() <= since
+  // After invalidate() with the tree unchanged since, the boxes still stand:
+  // only the cached results are gone, so the compute is fresh on old boxes.
+  let boxesStand = !kept && output.boxNodes.length() != 0 && tree.revision() == since && tree.scrollRevision() == output.keptScrolls
+  let nodes = run boxesFor(tree, &mut output, since, restoringKept || boxesStand)
+  let restoring = restoringKept
   let sameBoxes = restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice()))
   // The previous output becomes the snapshot reused subtrees are copied from,
   // except that of the same boxes, which stays in place (see below).
@@ -1402,6 +1406,8 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       run positionVisits(&nodes, &mut facts.visits)
       run Incremental.indexStyleSources(tree, &nodes, &mut facts.styledOffsets, &mut facts.styledBoxes)
     }
+  } else if boxesStand && facts.covers(nodes.boxes.length()) && facts.styledOffsets.length() == tree.nodes.length() + 1 && facts.styledBoxes.length() == nodes.boxes.length() {
+    // Facts read only styles and structure, which stand with the boxes.
   } else {
     run Incremental.markSubtrees(&nodes, &mut facts)
     run keyShapes(&nodes, &mut facts.keyShapes)

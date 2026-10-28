@@ -38,6 +38,10 @@ Grid containers are **monolithic in fragmented layout**: internal row breaks and
 
 Grid probes and final layout share numeric item placement within a compute. A grid-specific scratch pool keeps nested grids' item and track buffers separate and retains their capacity across normal, early-cutoff and fragmented computes. Its box-id index is rebuilt lazily when a compute encounters a grid; no item identity survives into the next compute. Track sizes are recomputed for each request, while placement is reused. This is scratch reuse, not cross-compute placement caching.
 
+Empty grid containers retain distinct min-content and max-content probe constraints. Their track definitions can supply different intrinsic sizes even without children ([Grid §5.2](https://drafts.csswg.org/css-grid-2/#intrinsic-sizes)); the ordinary empty-box cache-key shortcut must not erase that distinction.
+
+A reused final subtree may still depend on intrinsic probes older than the previous compute. Early-cutoff validation rejects candidates with such probes instead of silently omitting those dependencies. Otherwise, a retained viewport-only compute followed by a text edit can leave content-sized grid tracks stale even when the item's previous final box still fits the edited text.
+
 Original `grid-*.json` fixtures include hand-derived geometry and normative anchors. Fifteen phase-2 cases cover fixed/percentage/flexible tracks, fraction restarts, numeric placement, area-relative descendants, self-alignment, empty explicit grids and logical axes; all fifteen match Chrome 155.0.8059.85. Native pure tests cover numeric endpoint repairs and flex-fraction edge cases. The Chrome adapter serializes the structured longhand schema and retains requested, specified, computed and `CSS.supports` evidence, including used-value track-list serialization. Grid fuzzing and a full Grid performance/conformance headline remain deferred.
 
 ### Existing block and flex coverage

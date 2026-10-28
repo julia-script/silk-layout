@@ -366,7 +366,8 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   let style = nodes.style(id)
   if node.kind == BoxKind.InlineFormatting || style.replaced { return KEY_FIXED }
   let mut shape: u16 = 0
-  if node.firstChild == NO_NODE && node.measurement == Measurement.None && node.kind != BoxKind.Text { shape = shape | KEY_EMPTY }
+  // Empty grids can still have different min/max-content track sizes (§5.2).
+  if node.firstChild == NO_NODE && node.measurement == Measurement.None && node.kind != BoxKind.Text && node.kind != BoxKind.Grid { shape = shape | KEY_EMPTY }
   if style.width.kind == DimensionKind.Length { shape = shape | KEY_WIDTH_LENGTH }
   if style.height.kind == DimensionKind.Length { shape = shape | KEY_HEIGHT_LENGTH }
   if node.kind == BoxKind.Block && node.measurement == Measurement.None && !isFlex(style) && style.writingMode == WritingMode.HorizontalTb && style.height.kind != DimensionKind.MinContent && style.height.kind != DimensionKind.MaxContent && style.height.kind != DimensionKind.FitContent { shape = shape | KEY_BLOCK }

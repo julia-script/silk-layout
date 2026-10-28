@@ -434,16 +434,19 @@ impl LayoutCache {
     }
     return AGES_RECENT
   }
-  // Appends the box's size probes made or used since `generation`, and
-  // returns whether every cached result of the box is a probe or one of its
-  // own intrinsic sizes.
+  // Appends recent size probes. Older probes may still be dependencies of a
+  // retained final ancestor, so omitting them cannot justify an early cutoff.
+  // Only recent independent probes and own intrinsic results are eligible.
   pub effect fn probesOf(self: &Self, id: usize, generation: usize, result: &mut List<CachedProbe>) -> bool ! OutOfMemoryError ? &mut Allocator {
     if id >= self.heads.length() { return true }
     let mut index = self.heads.get(id)
     while index != ABSENT {
       let entry = self.entries.get(index)
       if entry.kind == CacheKind.FlexAllocation { return false }
-      if entry.kind == CacheKind.IndependentBox && entry.generation >= generation { run result.append(CachedProbe { input: self.inputs.asSlice()[index], layout: self.layouts.asSlice()[index] }) }
+      if entry.kind == CacheKind.IndependentBox {
+        if entry.generation < generation { return false }
+        run result.append(CachedProbe { input: self.inputs.asSlice()[index], layout: self.layouts.asSlice()[index] })
+      }
       index = entry.next
     }
     return true

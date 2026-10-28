@@ -332,6 +332,12 @@ fn cacheKey(nodes: &BoxTree, id: usize, input: &Input, viewportFree: bool) -> In
   if node.kind == BoxKind.InlineFormatting { return key }
   let style = nodes.style(id)
   if style.replaced { return key }
+  // An empty box has the same min- and max-content contribution, and a
+  // fixed length leaves it nothing to do with available space on that axis.
+  if node.firstChild == NO_NODE && node.measurement == Measurement.None && node.kind != BoxKind.Text {
+    if key.intrinsicWidth || style.width.kind == DimensionKind.Length { key.availableWidth = AvailableSpace.maxContent() }
+    if key.intrinsicHeight || style.height.kind == DimensionKind.Length { key.availableHeight = AvailableSpace.maxContent() }
+  }
   // A horizontal block container never reads its available block size: its
   // children get max-content block space and it has no stretch or
   // fit-content block sizing in a horizontal parent.

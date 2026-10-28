@@ -777,6 +777,12 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   if !incoming.fragmentation.active && !boxInputChanges(nodes, id, &incoming) {
     return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &incoming, &mut bfc, false)
   }
+  return run layoutChangedBox(nodes, &mut output, &mut measurer, id, &incoming, &mut bfc)
+}
+
+// layoutBox for a request that adjustBoxInput changes or that fragments, kept out of line so the
+// common path's code stays small.
+effect fn layoutChangedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator with Intrinsic.inlineNever() {
   let mut input = incoming.*
   adjustBoxInput(nodes, id, &mut input)
   let monolithic = incoming.performLayout && incoming.fragmentation.active && nodes.node(id).fragmentMonolithic

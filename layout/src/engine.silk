@@ -310,6 +310,16 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
   result.scrollableOverflow = overflow
 }
 
+// overflowGeometry of a box emptyBoxApplies to: no children, no measured
+// content, and visible overflow on both axes.
+fn emptyOverflowGeometry(box: &ResolvedBox, result: &mut Layout) with Intrinsic.inlineAlways() {
+  let padding = Rect { x: box.border.left + box.gutter.left, y: box.border.top + box.gutter.top, width: max(0.0, result.size.width - box.border.horizontal() - box.gutter.horizontal()), height: max(0.0, result.size.height - box.border.vertical() - box.gutter.vertical()) }
+  let content = Rect { x: box.inset.left, y: box.inset.top, width: result.contentSize.width, height: result.contentSize.height }
+  let flow = padFlow(content, box.padding)
+  result.setOverflowGeometry(content, padding, flow)
+  result.scrollableOverflow = padding.unionWith(flow)
+}
+
 fn orthogonalAvailable(input: &Input, available: AvailableSpace, horizontal: bool) -> AvailableSpace {
   let mut limit = min(input.parentMaxSize.width, input.scrollportSize.width)
   let mut initial = input.initialContainingBlock.width
@@ -634,7 +644,7 @@ effect fn layoutEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut 
   let mut box = resolveBox(style, &input)
   let mut result = Layout.zero()
   emptyBoxLayout(style, &input, &bfc, &mut box, &mut result)
-  overflowGeometry(nodes, &output, id, &box, &mut result)
+  emptyOverflowGeometry(&box, &mut result)
   run output.store(id, &result, true)
   output.fragmentParent = previousParent
   return result

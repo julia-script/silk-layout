@@ -114,6 +114,9 @@ fn prepareChild(nodes: &BoxTree, id: usize, base: &Input, axes: Axes, box: &Reso
 
 pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if !input.performLayout || !input.fragmentation.active {
+    // Leaves skip layoutBlockPass and its large frame entirely.
+    let afterProbe = input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After && nodes.node(id).dynamicAfter
+    if !afterProbe && boxChild(nodes, nodes.node(id).firstChild) == NO_NODE { return leafBlock(style, &input, &physicalBox, &bfc) }
     return run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, &input, &physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
   }
   let pass = output.checkpoint()
@@ -149,7 +152,12 @@ pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
 
 /// `layoutBlockPass` for a block without in-flow children outside fragmentation: no child
 /// loop, so the box's size and margins follow from its own style alone.
-fn leafBlock(style: &Style, input: &Input, physicalBox: &ResolvedBox, box: &ResolvedBox, axes: &Axes, formattingRoot: bool, collapseTop: bool, collapseBottom: bool, bfc: &BfcState) -> Layout {
+fn leafBlock(style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &BfcState) -> Layout {
+  let axes = Axes.make(style.writingMode)
+  let box = axes.box(physicalBox.*)
+  let formattingRoot = input.blockRoot || establishesContext(style, &input) || style.writingMode != input.parentWritingMode
+  let collapseTop = !formattingRoot && box.inset.top == 0.0
+  let collapseBottom = !formattingRoot && box.inset.bottom == 0.0 && !box.size.heightDefinite
   let externalAxes = Axes.make(input.parentWritingMode)
   let externalMargin = externalAxes.edges(physicalBox.margin)
   let top = Margins.single(externalMargin.top)
@@ -193,9 +201,6 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   if physicalBox.size.heightDefinite {
     parent.height = max(0.0, physicalBox.size.height - physicalBox.inset.vertical())
     parent.heightDefinite = axes.vertical || !input.indefiniteHeight
-  }
-  if !fragmented && !afterProbe && boxChild(nodes, nodes.node(id).firstChild) == NO_NODE {
-    return leafBlock(style, &input, &physicalBox, &box, &axes, formattingRoot, collapseTop, collapseBottom, &bfc)
   }
   let mut availableInline = input.availableWidth
   if axes.vertical { availableInline = input.availableHeight }

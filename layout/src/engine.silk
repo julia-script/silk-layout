@@ -410,9 +410,14 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   }
   let start = output.fragments.checkpoint()
   let mut bfc = BfcState.make()
-  let mut request = input.*
-  request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
-  let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
+  if input.bfcContentOrigin.x != 0.0 || input.bfcContentOrigin.y != 0.0 {
+    let mut request = input.*
+    request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
+    let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
+    if output.frame == NO_NODE { run output.recordFinal(id, &key, &result, start, false) }
+    return result
+  }
+  let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
   if output.frame == NO_NODE { run output.recordFinal(id, &key, &result, start, false) }
   return result
 }

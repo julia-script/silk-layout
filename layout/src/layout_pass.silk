@@ -82,6 +82,10 @@ pub struct LayoutPass<'a, 'source> {
   // which reused subtrees keep: the first write of a box saves its previous
   // layout in `writes` (see touch).
   pub inPlace: bool, pub writes: BoxWrites,
+  // Whether this compute can reuse kept results, which need the writes
+  // tracked below (see restoreBoxes); a compute after the cache was
+  // cleared cannot.
+  pub tracking: bool,
   anchors: List<StaticAnchor>,
   selections: List<ScrollbarSelection>,
   frameSelections: List<List<FrameScrollbarSelection>>,
@@ -95,7 +99,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   pub effect fn make(boxes: &'a mut [Layout], fragments: &'a mut FragmentArena, sources: &'source [Node]) -> LayoutPass<'a, 'source> ! OutOfMemoryError ? &mut Allocator {
     // The paragraph cache may borrow text from these source nodes.
     drop sources
-    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), visits: List<usize>.make(), parents: List<usize>.make(), keyShapes: List<u8>.make(), inPlace: false, writes: BoxWrites.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero(), flexScratch: List<FlexScratch>.make() }
+    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), visits: List<usize>.make(), parents: List<usize>.make(), keyShapes: List<u8>.make(), inPlace: false, writes: BoxWrites.make(), tracking: true, anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero(), flexScratch: List<FlexScratch>.make() }
   }
   pub effect fn beginFrame(self: &mut Self, frame: usize) ! OutOfMemoryError ? &mut Allocator {
     if self.frame == NO_NODE { run self.resumes.prepare(self.boxes.length) }
@@ -321,7 +325,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // its kept range until it records one.
   pub effect fn relayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
     run self.cache.beginLayout(id)
-    if id < self.writes.relaid.length() && self.writes.relaid.get(id) != self.writes.generation {
+    if self.tracking && id < self.writes.relaid.length() && self.writes.relaid.get(id) != self.writes.generation {
       self.writes.relaid.set(id, self.writes.generation)
       self.markAncestors(id)
     }
@@ -330,7 +334,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // A box's layout is written: in an in-place compute its previous layout is
   // saved before its first write.
   pub effect fn touch(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
-    if id < self.writes.written.length() && self.writes.written.get(id) != self.writes.generation {
+    if self.tracking && id < self.writes.written.length() && self.writes.written.get(id) != self.writes.generation {
       self.writes.written.set(id, self.writes.generation)
       self.markAncestors(id)
     }

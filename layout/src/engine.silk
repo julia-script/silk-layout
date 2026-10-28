@@ -244,18 +244,27 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
 }
 
 pub fn flowMarginRect(nodes: &BoxTree, id: usize, child: usize, layout: &Layout, parent: &Layout) -> Rect {
-  let style = nodes.style(child)
-  if !layout.hasBox() || outOfFlow(style) { return Rect.zero() }
-  let mut margin = layout.usedMargin
-  let parentStyle = nodes.style(id)
-  if !isFlex(parentStyle) && !isGrid(parentStyle) {
+  return flowMarginIn(nodes, &FlowMargins.of(nodes.style(id), parent), child, layout)
+}
+// What flowMarginRect reads of the parent, worked out once for its children.
+struct FlowMargins { declared: bool, basis: f64, definite: bool }
+impl FlowMargins {
+  fn of(parentStyle: &Style, parent: &Layout) -> FlowMargins {
     let mut basis = parent.contentSize.width
     let mut definite = parent.widthDefinite
     if parentStyle.writingMode != WritingMode.HorizontalTb { basis = parent.contentSize.height
       definite = parent.heightDefinite }
+    return FlowMargins { declared: !isFlex(parentStyle) && !isGrid(parentStyle), basis: basis, definite: definite }
+  }
+}
+fn flowMarginIn(nodes: &BoxTree, parent: &FlowMargins, child: usize, layout: &Layout) -> Rect with Intrinsic.inlineAlways() {
+  let style = nodes.style(child)
+  if !layout.hasBox() || outOfFlow(style) { return Rect.zero() }
+  let mut margin = layout.usedMargin
+  if parent.declared {
     // Optional block margins use declared lengths, with resolved auto margins.
     // CSS2's overconstraint correction is not an extra scrollable margin area.
-    let declared = edges(style.margin, basis, definite)
+    let declared = edges(style.margin, parent.basis, parent.definite)
     if style.margin.left.kind != DimensionKind.Auto { margin.left = declared.left }
     if style.margin.right.kind != DimensionKind.Auto { margin.right = declared.right }
     if style.margin.top.kind != DimensionKind.Auto { margin.top = declared.top }
@@ -279,9 +288,10 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
   let measured = nodes.node(id).measurement == Measurement.Content || nodes.node(id).kind == BoxKind.InlineFormatting
   let external = result.scrollableOverflow
   if measured && external.width > 0.0 && external.height > 0.0 { flow = flow.unionWith(external) }
+  let margins = FlowMargins.of(nodes.style(id), &result)
   let mut child = nodes.node(id).firstChild
   while child != NO_NODE {
-    let rect = flowMarginRect(nodes, id, child, &output.boxes[child], &result)
+    let rect = flowMarginIn(nodes, &margins, child, &output.boxes[child])
     if rect.width > 0.0 && rect.height > 0.0 { flow = flow.unionWith(rect) }
     child = nodes.node(child).nextSibling
   }
@@ -303,7 +313,7 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
   // Revisit only direct generated children, without layout or measurement.
   child = nodes.node(id).firstChild
   while child != NO_NODE {
-    let rect = flowMarginRect(nodes, id, child, &output.boxes[child], &result)
+    let rect = flowMarginIn(nodes, &margins, child, &output.boxes[child])
     overflow = addFlow(overflow, rect, box.padding, limits)
     child = nodes.node(child).nextSibling
   }

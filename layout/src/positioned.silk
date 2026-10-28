@@ -1813,6 +1813,31 @@ fn positionRelative(nodes: &BoxTree, output: &mut LayoutPass, viewport: Optional
   }
 }
 
+// The boxes positionTree visits, in source preorder: those starting an inline
+// interruption, out-of-flow, relative, sticky or scrollable boxes, and the
+// non-inline boxes at the top of the generated tree. Every other box is left
+// as normal-flow layout placed it. Depends only on the boxes and their styles.
+pub effect fn positionVisits(nodes: &BoxTree, result: &mut List<usize>) ! OutOfMemoryError ? &mut Allocator {
+  result.clear()
+  if nodes.sources.length == 0 { return }
+  let mut source: usize = 0
+  while source != NO_NODE {
+    let mut id = nodes.firstBySource.get(source)
+    while id != NO_NODE {
+      let node = nodes.node(id)
+      let style = nodes.style(id)
+      let mut visit = id == 0 || outOfFlow(style) || style.position == Position.Relative || style.position == Position.Sticky
+        || (node.firstForSource && node.interruptionFirst != NO_NODE)
+      if !visit && node.kind != BoxKind.Inline {
+        visit = scrollable(usedOverflowForAxis(style, true)) || scrollable(usedOverflowForAxis(style, false)) || generatedParent(nodes, id) == NO_NODE
+      }
+      if visit { run result.append(id) }
+      id = node.nextContinuation
+    }
+    source = nextPositionSource(nodes, source)
+  }
+}
+
 pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, viewport: OptionalSize, viewportScroll: Point) -> Rect ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let viewportRect = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
   if nodes.sources.length == 0 { return viewportRect }
@@ -1823,35 +1848,32 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   let mut relative = false
   // Source preorder is not generated arena order after an inline interruption.
   // Layout an absolute ancestor before visiting any of its source descendants.
-  let mut source: usize = 0
-  while source != NO_NODE {
-    let mut id = nodes.firstBySource.get(source)
-    while id != NO_NODE {
-      let style = nodes.style(id)
-      if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
-      if outOfFlow(style) { run absolute(nodes, &mut output, &mut measurer, id, viewport, false) }
-      else if output.boxes[id].hasBox() && generatedParent(nodes, id) == NO_NODE && nodes.node(id).kind != BoxKind.Inline {
-        let layout = output.boxes[id]
-        let box = usedBox(nodes, &output, id, viewport)
-        let mut margin = box.margin
-        if style.margin.left.kind == DimensionKind.Auto { margin.left = layout.usedMargin.left }
-        if style.margin.right.kind == DimensionKind.Auto { margin.right = layout.usedMargin.right }
-        if style.margin.top.kind == DimensionKind.Auto { margin.top = layout.usedMargin.top }
-        if style.margin.bottom.kind == DimensionKind.Auto { margin.bottom = layout.usedMargin.bottom }
-        let left = max(0.0, margin.left)
-        let right = max(0.0, margin.right)
-        let top = max(0.0, margin.top)
-        let bottom = max(0.0, margin.bottom)
-        let position = normalPosition(nodes, &output, id)
-        let rect = Rect { x: position.x - left, y: position.y - top, width: layout.size.width + left + right, height: layout.size.height + top + bottom }
-        normalViewport = addOverflow(normalViewport, rect, viewportLimits)
-      }
-      relative = relative || style.position == Position.Relative
-      let scroll = requestedScrollOffset(nodes, id, viewportScroll)
-      visual = visual || style.position == Position.Sticky || scroll.x != 0.0 || scroll.y != 0.0
-      id = nodes.node(id).nextContinuation
+  let mut at: usize = 0
+  while at < output.visits.length() {
+    let id = output.visits.get(at)
+    let style = nodes.style(id)
+    if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
+    if outOfFlow(style) { run absolute(nodes, &mut output, &mut measurer, id, viewport, false) }
+    else if output.boxes[id].hasBox() && generatedParent(nodes, id) == NO_NODE && nodes.node(id).kind != BoxKind.Inline {
+      let layout = output.boxes[id]
+      let box = usedBox(nodes, &output, id, viewport)
+      let mut margin = box.margin
+      if style.margin.left.kind == DimensionKind.Auto { margin.left = layout.usedMargin.left }
+      if style.margin.right.kind == DimensionKind.Auto { margin.right = layout.usedMargin.right }
+      if style.margin.top.kind == DimensionKind.Auto { margin.top = layout.usedMargin.top }
+      if style.margin.bottom.kind == DimensionKind.Auto { margin.bottom = layout.usedMargin.bottom }
+      let left = max(0.0, margin.left)
+      let right = max(0.0, margin.right)
+      let top = max(0.0, margin.top)
+      let bottom = max(0.0, margin.bottom)
+      let position = normalPosition(nodes, &output, id)
+      let rect = Rect { x: position.x - left, y: position.y - top, width: layout.size.width + left + right, height: layout.size.height + top + bottom }
+      normalViewport = addOverflow(normalViewport, rect, viewportLimits)
     }
-    source = nextPositionSource(nodes, source)
+    relative = relative || style.position == Position.Relative
+    let scroll = requestedScrollOffset(nodes, id, viewportScroll)
+    visual = visual || style.position == Position.Sticky || scroll.x != 0.0 || scroll.y != 0.0
+    at = at + 1
   }
   if relative { positionRelative(nodes, &mut output, viewport) }
   let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport)

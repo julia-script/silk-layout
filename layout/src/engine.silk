@@ -1497,6 +1497,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   boxes.previous = move snapshot
   boxes.flexScratch = move flexScratch
   boxes.inPlace = inPlace
+  boxes.tracking = sameBoxes || kept
   boxes.writes = move writes
   boxes.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
   boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())

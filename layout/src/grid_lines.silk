@@ -1,0 +1,488 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.string { String }
+import silk.i32
+import silk.usize
+import grid_style { GridLine, GridLineKind, GridNamedLine, GridArea, MAX_GRID_TRACKS }
+
+pub struct GridSpan {
+  pub start: i32,
+  pub end: i32,
+  pub definite: bool,
+}
+
+impl Copy for GridSpan {}
+
+const EXACT: usize = 0
+
+const START_ALIAS: usize = 1
+
+const END_ALIAS: usize = 2
+
+struct Occurrence {
+  name: usize,
+  kind: usize,
+  position: i32,
+}
+
+impl Copy for Occurrence {}
+
+// Retained allocation, but no retained strings or borrows into the source tree.
+// Occurrences are unique and sorted by (interned name ID, kind, position).
+pub struct LineNames {
+  occurrences: List<Occurrence>,
+  nameOrder: List<usize>,
+}
+
+impl LineNames {
+  pub fn make() -> LineNames {
+    return LineNames { occurrences: List<Occurrence>.make(), nameOrder: List<usize>.make() }
+  }
+}
+
+fn boundedTracks(count: usize) -> i32 {
+  if count > MAX_GRID_TRACKS {
+    return usize.toI32(MAX_GRID_TRACKS)
+  }
+  return usize.toI32(count)
+}
+
+fn boundedNumber(number: i32) -> i32 {
+  let limit = usize.toI32(MAX_GRID_TRACKS)
+  if number < -limit {
+    return -limit
+  }
+  if number > limit {
+    return limit
+  }
+  return number
+}
+
+fn isNumericLine(line: &GridLine) -> bool {
+  return line.kind == GridLineKind.Line && line.name == 0 && line.number != 0
+}
+
+fn linePosition(line: &GridLine, explicitEnd: i32) -> i32 {
+  let number = boundedNumber(line.number)
+  if number > 0 {
+    return number - 1
+  }
+  return explicitEnd + number + 1
+}
+
+fn spanLength(line: &GridLine) -> i32 {
+  if line.kind == GridLineKind.Span && line.name == 0 && line.number > 0 {
+    return boundedNumber(line.number)
+  }
+  return 1
+}
+
+fn endpoints(first: i32, last: i32) -> GridSpan {
+  if first > last {
+    return GridSpan { start: last, end: first, definite: true }
+  }
+  if first == last {
+    return GridSpan { start: first, end: first + 1, definite: true }
+  }
+  return GridSpan { start: first, end: last, definite: true }
+}
+
+fn unanchored(start: &GridLine, end: &GridLine) -> GridSpan {
+  // Two spans discard the end span, including when the start span is named.
+  // A lone named span contributes the default length of one (§8.3.1).
+  let mut length = spanLength(end)
+  if start.kind == GridLineKind.Span {
+    length = spanLength(start)
+  }
+  return GridSpan { start: 0, end: length, definite: false }
+}
+
+// Grid §8.3 / §8.3.1. Signed coordinates are relative to explicit line 1;
+// negative line numbers resolve against the explicit end, never implicit tracks.
+pub fn numericSpan(start: &GridLine, end: &GridLine, explicitTracks: usize) -> GridSpan {
+  let explicitEnd = boundedTracks(explicitTracks)
+  let hasStart = isNumericLine(start)
+  let hasEnd = isNumericLine(end)
+  if hasStart && hasEnd {
+    return endpoints(linePosition(start, explicitEnd), linePosition(end, explicitEnd))
+  }
+  if hasStart {
+    let first = linePosition(start, explicitEnd)
+    return GridSpan { start: first, end: first + spanLength(end), definite: true }
+  }
+  if hasEnd {
+    let last = linePosition(end, explicitEnd)
+    return GridSpan { start: last - spanLength(start), end: last, definite: true }
+  }
+  return unanchored(start, end)
+}
+
+// Compare a borrowed name with a virtual prefix+suffix: generated names never
+// need temporary String allocations, and prefix lookup can strip a suffix.
+fn compareName(value: string, prefix: &[u8], length: usize, suffix: &[u8]) -> i32 {
+  let bytes = String.utf8Bytes(value)
+  let total = length + suffix.length
+  let mut at: usize = 0
+  while at < bytes.length && at < total {
+    let mut expected: u8 = 0
+    if at < length {
+      expected = prefix[at]
+    } else {
+      expected = suffix[at - length]
+    }
+    if bytes[at] < expected {
+      return -1
+    }
+    if bytes[at] > expected {
+      return 1
+    }
+    at = at + 1
+  }
+  if bytes.length < total {
+    return -1
+  }
+  if bytes.length > total {
+    return 1
+  }
+  return 0
+}
+
+fn nameLess(first: usize, second: usize, names: &[String]) -> bool {
+  let bytes = String.utf8Bytes(String.view(&names[second]))
+  return compareName(String.view(&names[first]), bytes, bytes.length, String.utf8Bytes("")) < 0
+}
+
+fn siftNames(order: &mut [usize], names: &[String], root: usize, end: usize) {
+  let value = order[root]
+  let mut at = root
+  while at * 2 + 1 < end {
+    let mut child = at * 2 + 1
+    if child + 1 < end && nameLess(order[child], order[child + 1], names) {
+      child = child + 1
+    }
+    if !nameLess(value, order[child], names) {
+      break
+    }
+    order[at] = order[child]
+    at = child
+  }
+  order[at] = value
+}
+
+fn sortNames(order: &mut [usize], names: &[String]) {
+  let count = order.length
+  let mut at = count / 2
+  while at > 0 {
+    at = at - 1
+    siftNames(&mut order, names, at, count)
+  }
+  let mut end = count
+  while end > 1 {
+    end = end - 1
+    let value = order[0]
+    order[0] = order[end]
+    order[end] = value
+    siftNames(&mut order, names, 0, end)
+  }
+}
+
+fn findName(
+  order: &[usize],
+  names: &[String],
+  prefix: &[u8],
+  length: usize,
+  suffix: &[u8],
+) -> usize {
+  let mut first: usize = 0
+  let mut last = order.length
+  while first < last {
+    let middle = first + (last - first) / 2
+    let comparison = compareName(String.view(&names[order[middle]]), prefix, length, suffix)
+    if comparison < 0 {
+      first = middle + 1
+    } else {
+      last = middle
+    }
+  }
+  if first < order.length
+    && compareName(String.view(&names[order[first]]), prefix, length, suffix) == 0 {
+    return order[first]
+  }
+  return 0
+}
+
+fn hasSuffix(bytes: &[u8], suffix: &[u8]) -> bool {
+  if bytes.length <= suffix.length {
+    return false
+  }
+  let first = bytes.length - suffix.length
+  let mut at: usize = 0
+  while at < suffix.length {
+    if bytes[first + at] != suffix[at] {
+      return false
+    }
+    at = at + 1
+  }
+  return true
+}
+
+fn occurrenceLess(first: Occurrence, second: Occurrence) -> bool {
+  if first.name != second.name {
+    return first.name < second.name
+  }
+  if first.kind != second.kind {
+    return first.kind < second.kind
+  }
+  return first.position < second.position
+}
+
+fn siftOccurrences(values: &mut [Occurrence], root: usize, end: usize) {
+  let value = values[root]
+  let mut at = root
+  while at * 2 + 1 < end {
+    let mut child = at * 2 + 1
+    if child + 1 < end && occurrenceLess(values[child], values[child + 1]) {
+      child = child + 1
+    }
+    if !occurrenceLess(value, values[child]) {
+      break
+    }
+    values[at] = values[child]
+    at = child
+  }
+  values[at] = value
+}
+
+fn sortOccurrences(values: &mut [Occurrence]) {
+  let count = values.length
+  let mut at = count / 2
+  while at > 0 {
+    at = at - 1
+    siftOccurrences(&mut values, at, count)
+  }
+  let mut end = count
+  while end > 1 {
+    end = end - 1
+    let value = values[0]
+    values[0] = values[end]
+    values[end] = value
+    siftOccurrences(&mut values, 0, end)
+  }
+}
+
+// Preparation is the only string-using phase. Both sorts are bounded-stack
+// heapsorts; queries below use binary search and integer IDs only.
+pub effect fn prepareLineNames(
+  lines: &[GridNamedLine],
+  areas: &[GridArea],
+  names: &[String],
+  columns: bool,
+  result: &mut LineNames,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  result.occurrences.clear()
+  result.nameOrder.clear()
+  if lines.length == 0 && areas.length == 0 {
+    return
+  }
+  run result.nameOrder.reserveExact(names.length)
+  let mut at: usize = 1
+  while at < names.length {
+    run result.nameOrder.append(at)
+    at = at + 1
+  }
+  sortNames(result.nameOrder.asMutSlice(), names)
+  let startSuffix = String.utf8Bytes("-start")
+  let endSuffix = String.utf8Bytes("-end")
+  let emptySuffix = String.utf8Bytes("")
+  at = 0
+  while at < lines.length {
+    let line = lines[at]
+    let position = boundedTracks(line.line)
+    run result.occurrences.append(Occurrence { name: line.name, kind: EXACT, position: position })
+    let bytes = String.utf8Bytes(String.view(&names[line.name]))
+    let mut kind = EXACT
+    let mut length = bytes.length
+    if hasSuffix(bytes, startSuffix) {
+      kind = START_ALIAS
+      length = length - startSuffix.length
+    } else if hasSuffix(bytes, endSuffix) {
+      kind = END_ALIAS
+      length = length - endSuffix.length
+    }
+    if kind != EXACT {
+      let base = findName(result.nameOrder.asSlice(), names, bytes, length, emptySuffix)
+      if base != 0 {
+        run result.occurrences.append(Occurrence { name: base, kind: kind, position: position })
+      }
+    }
+    at = at + 1
+  }
+  at = 0
+  while at < areas.length {
+    let area = areas[at]
+    let mut first = boundedTracks(area.rowStart)
+    let mut last = boundedTracks(area.rowEnd)
+    if columns {
+      first = boundedTracks(area.columnStart)
+      last = boundedTracks(area.columnEnd)
+    }
+    run result.occurrences.append(
+      Occurrence { name: area.name, kind: START_ALIAS, position: first },
+    )
+    run result.occurrences.append(Occurrence { name: area.name, kind: END_ALIAS, position: last })
+    let bytes = String.utf8Bytes(String.view(&names[area.name]))
+    let startName = findName(result.nameOrder.asSlice(), names, bytes, bytes.length, startSuffix)
+    let endName = findName(result.nameOrder.asSlice(), names, bytes, bytes.length, endSuffix)
+    if startName != 0 {
+      run result.occurrences.append(Occurrence { name: startName, kind: EXACT, position: first })
+    }
+    if endName != 0 {
+      run result.occurrences.append(Occurrence { name: endName, kind: EXACT, position: last })
+    }
+    at = at + 1
+  }
+  sortOccurrences(result.occurrences.asMutSlice())
+  let mut kept: usize = 0
+  at = 0
+  while at < result.occurrences.length() {
+    let value = result.occurrences.get(at)
+    if kept == 0 || occurrenceLess(result.occurrences.get(kept - 1), value) {
+      result.occurrences.set(kept, value)
+      kept = kept + 1
+    }
+    at = at + 1
+  }
+  result.occurrences.truncate(kept)
+}
+
+fn lowerBound(values: &[Occurrence], name: usize, kind: usize, position: i32) -> usize {
+  let target = Occurrence { name: name, kind: kind, position: position }
+  let mut first: usize = 0
+  let mut last = values.length
+  while first < last {
+    let middle = first + (last - first) / 2
+    if occurrenceLess(values[middle], target) {
+      first = middle + 1
+    } else {
+      last = middle
+    }
+  }
+  return first
+}
+
+fn namedPosition(line: &GridLine, explicitEnd: i32, names: &LineNames, start: bool) -> i32 {
+  if line.name == 0 {
+    return linePosition(line, explicitEnd)
+  }
+  let values = names.occurrences.asSlice()
+  let mut number = boundedNumber(line.number)
+  if number == 0 {
+    let mut kind = END_ALIAS
+    if start {
+      kind = START_ALIAS
+    }
+    let alias = lowerBound(values, line.name, kind, 0)
+    if alias < values.length && values[alias].name == line.name && values[alias].kind == kind {
+      return values[alias].position
+    }
+    number = 1
+  }
+  let first = lowerBound(values, line.name, EXACT, 0)
+  let last = lowerBound(values, line.name, EXACT, usize.toI32(MAX_GRID_TRACKS) + 1)
+  let count = usize.toI32(last - first)
+  if number > 0 {
+    if number <= count {
+      return values[first + i32.toUsize(number - 1)].position
+    }
+    return explicitEnd + number - count
+  }
+  if -number <= count {
+    return values[last - i32.toUsize(-number)].position
+  }
+  return number + count
+}
+
+fn spanEndpoint(
+  line: &GridLine,
+  anchor: i32,
+  explicitEnd: i32,
+  names: &LineNames,
+  forward: bool,
+) -> i32 {
+  if line.kind != GridLineKind.Span || line.name == 0 {
+    if forward {
+      return anchor + spanLength(line)
+    }
+    return anchor - spanLength(line)
+  }
+  let values = names.occurrences.asSlice()
+  let mut number = boundedNumber(line.number)
+  if number < 1 {
+    number = 1
+  }
+  if forward {
+    let first = lowerBound(values, line.name, EXACT, anchor + 1)
+    let last = lowerBound(values, line.name, EXACT, usize.toI32(MAX_GRID_TRACKS) + 1)
+    let count = usize.toI32(last - first)
+    if number <= count {
+      return values[first + i32.toUsize(number - 1)].position
+    }
+    let mut edge = explicitEnd
+    if anchor > edge {
+      edge = anchor
+    }
+    return edge + number - count
+  }
+  let first = lowerBound(values, line.name, EXACT, 0)
+  let last = lowerBound(values, line.name, EXACT, anchor)
+  let count = usize.toI32(last - first)
+  if number <= count {
+    return values[last - i32.toUsize(number)].position
+  }
+  let mut edge: i32 = 0
+  if anchor < edge {
+    edge = anchor
+  }
+  return edge - number + count
+}
+
+pub fn resolveSpan(
+  start: &GridLine,
+  end: &GridLine,
+  explicitTracks: usize,
+  names: &LineNames,
+) -> GridSpan {
+  // Ordinary grids never touch the name index.
+  if start.name == 0 && end.name == 0 {
+    return numericSpan(start, end, explicitTracks)
+  }
+  let explicitEnd = boundedTracks(explicitTracks)
+  let hasStart = start.kind == GridLineKind.Line && (start.name != 0 || start.number != 0)
+  let hasEnd = end.kind == GridLineKind.Line && (end.name != 0 || end.number != 0)
+  if hasStart && hasEnd {
+    return endpoints(
+      namedPosition(start, explicitEnd, names, true),
+      namedPosition(end, explicitEnd, names, false),
+    )
+  }
+  if hasStart {
+    let first = namedPosition(start, explicitEnd, names, true)
+    return GridSpan {
+      start: first,
+      end: spanEndpoint(end, first, explicitEnd, names, true),
+      definite: true,
+    }
+  }
+  if hasEnd {
+    let last = namedPosition(end, explicitEnd, names, false)
+    return GridSpan {
+      start: spanEndpoint(start, last, explicitEnd, names, false),
+      end: last,
+      definite: true,
+    }
+  }
+  return unanchored(start, end)
+}

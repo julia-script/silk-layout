@@ -10,3 +10,5 @@ import grid_scratch_tests
 import grid_track_tests
 import grid_contribution_tests
 import grid_placement_tests
+import grid_line_tests
+import grid_template_tests

@@ -18,6 +18,7 @@ pub struct TrackState {
   pub minimum: GridBreadthKind,
   pub maximum: GridBreadthKind,
   pub fitContent: bool,
+  pub collapsed: bool,
   planned: f64,
   incurred: f64,
   frozen: bool,
@@ -37,6 +38,7 @@ impl TrackState {
       minimum: GridBreadthKind.Length,
       maximum: GridBreadthKind.Length,
       fitContent: false,
+      collapsed: false,
       planned: 0.0,
       incurred: 0.0,
       frozen: false,
@@ -169,11 +171,33 @@ pub effect fn initializeTracks(
   }
 }
 
+// Placement marks only empty auto-fit tracks. Any in-flow contribution spanning
+// a track keeps it occupied, so item-span gutter counts remain unchanged.
+pub fn collapseTracks(tracks: &mut [TrackState], collapsed: &[usize]) {
+  let mut index: usize = 0
+  while index < collapsed.length {
+    let track = &mut tracks[collapsed[index]]
+    track.* = TrackState.fixed(0.0)
+    track.collapsed = true
+    index = index + 1
+  }
+}
+
 fn gutters(count: usize, gap: f64) -> f64 {
   if count == 0 {
     return 0.0
   }
   return usize.toF64(count - 1) * gap
+}
+
+// §11.1: interior collapsed gutters coincide; leading/trailing ones disappear.
+// Refund these from whole-axis budgets without changing noncollapsed arithmetic
+// order or adding another scan over tracks.
+fn collapsedGutters(collapsed: usize, count: usize, gap: f64) -> f64 {
+  if collapsed == count {
+    return gutters(collapsed, gap)
+  }
+  return usize.toF64(collapsed) * gap
 }
 
 fn intrinsicKind(kind: GridBreadthKind) -> bool {
@@ -656,10 +680,17 @@ pub fn maximizeTracks(
     return
   }
   let mut remaining = target - gutters(tracks.length, gap)
+  let mut collapsed: usize = 0
   let mut index: usize = 0
   while index < tracks.length {
     remaining = remaining - tracks[index].base
+    if tracks[index].collapsed {
+      collapsed = collapsed + 1
+    }
     index = index + 1
+  }
+  if collapsed != 0 {
+    remaining = remaining + collapsedGutters(collapsed, tracks.length, gap)
   }
   while remaining > 0.0 {
     let mut count: usize = 0
@@ -706,12 +737,19 @@ fn findFraction(
   available: f64,
   gap: f64,
 ) -> f64 {
-  let space = available - gutters(end - start, gap)
+  let mut space = available - gutters(end - start, gap)
+  let mut collapsed: usize = 0
   let mut index = start
   while index < end {
     let track = &mut tracks[index]
     track.frozen = track.maximum != GridBreadthKind.Flex || track.factor == 0.0
+    if track.collapsed {
+      collapsed = collapsed + 1
+    }
     index = index + 1
+  }
+  if collapsed != 0 {
+    space = space + collapsedGutters(collapsed, end - start, gap)
   }
   while true {
     let mut remaining = space
@@ -802,6 +840,7 @@ pub fn expandFlexible(
     index = index + 1
   }
   let mut extent = gutters(tracks.length, gap)
+  let mut collapsed: usize = 0
   index = 0
   while index < tracks.length {
     let track = &tracks[index]
@@ -810,7 +849,13 @@ pub fn expandFlexible(
       size = max(size, fraction * track.factor)
     }
     extent = extent + size
+    if track.collapsed {
+      collapsed = collapsed + 1
+    }
     index = index + 1
+  }
+  if collapsed != 0 {
+    extent = extent - collapsedGutters(collapsed, tracks.length, gap)
   }
   let count = tracks.length
   if extent < minimum {
@@ -824,14 +869,21 @@ pub fn expandFlexible(
 // CSS Grid 2 §12.8. The caller decides whether content alignment permits stretch.
 pub fn stretchAuto(tracks: &mut [TrackState], available: f64, gap: f64) {
   let mut remaining = available - gutters(tracks.length, gap)
+  let mut collapsed: usize = 0
   let mut count: usize = 0
   let mut index: usize = 0
   while index < tracks.length {
     remaining = remaining - tracks[index].base
+    if tracks[index].collapsed {
+      collapsed = collapsed + 1
+    }
     if tracks[index].maximum == GridBreadthKind.Auto {
       count = count + 1
     }
     index = index + 1
+  }
+  if collapsed != 0 {
+    remaining = remaining + collapsedGutters(collapsed, tracks.length, gap)
   }
   if remaining <= 0.0 || count == 0 {
     return
@@ -849,13 +901,20 @@ pub fn stretchAuto(tracks: &mut [TrackState], available: f64, gap: f64) {
 
 pub fn positionTracks(tracks: &mut [TrackState], gap: f64) -> f64 {
   let mut extent = 0.0
+  let mut placed = false
   let mut index: usize = 0
   while index < tracks.length {
-    if index > 0 {
-      extent = extent + gap
+    let track = &mut tracks[index]
+    if !track.collapsed {
+      if placed {
+        extent = extent + gap
+      }
+      track.position = extent
+      extent = extent + track.base
+      placed = true
+    } else {
+      track.position = extent
     }
-    tracks[index].position = extent
-    extent = extent + tracks[index].base
     index = index + 1
   }
   return extent

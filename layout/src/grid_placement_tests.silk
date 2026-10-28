@@ -25,6 +25,7 @@ import grid_style {
   GridError
 }
 import grid_placement { GridItem, PlacementScratch, collectItems }
+import grid_lines { LineNames }
 
 // Original fixtures derived from Grid 2 §8.5, not reference-engine tests.
 // All fixtures run in both flows: r/c below denote logical major/minor axes.
@@ -175,10 +176,16 @@ effect fn placementCase(
 
     // Re-collect using the same buffers, including across the transposed grid.
     let mut pass: usize = 0
+    let emptyNames = LineNames.make()
+    let rootTemplate = &boxes.grids[boxes.style(boxes.firstBySource.get(root.index)).grid]
     while pass < 2 {
       let bounds = run collectItems(
         &boxes,
         boxes.firstBySource.get(root.index),
+        rootTemplate.rows.tracks.length(),
+        rootTemplate.columns.tracks.length(),
+        &emptyNames,
+        &emptyNames,
         &mut items,
         &mut work,
       )

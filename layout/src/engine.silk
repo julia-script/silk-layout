@@ -356,7 +356,7 @@ effect fn keyShapes(nodes: &BoxTree) -> List<u8> ! OutOfMemoryError ? &mut Alloc
 fn cacheKey(shape: u8, input: &Input, viewportFree: bool) -> Input {
   let mut key = input.*
   // Only replaced boxes and orthogonal flows read the initial containing
-  // block and the scrollport limits; see Incremental.viewportFreeSubtrees.
+  // block and the scrollport limits; see Incremental.markSubtrees.
   if viewportFree {
     key.initialContainingBlock = OptionalSize.none()
     key.parentMaxSize = Size { width: 0.0, height: 0.0 }
@@ -1053,12 +1053,12 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   // The previous output becomes the snapshot reused subtrees are copied from.
   output.snapshot.takeOutput(&mut output.fragments, &mut output.boxes)
   if restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice())) {
-    output.cache.rotateFinals()
+    run output.cache.rotateFinals()
     Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
     run output.cache.compact()
   } else if kept {
     let matched = run Incremental.matchBoxes(output.boxNodes.asSlice(), output.firstBySource.asSlice(), &nodes)
-    output.cache.rotateFinals()
+    run output.cache.rotateFinals()
     run output.cache.remap(matched.toOld.asSlice(), matched.toNew.asSlice())
     run output.snapshot.remap(matched.toOld.asSlice(), matched.toNew.asSlice())
     Incremental.invalidateUnmatched(&nodes, &mut output.cache, matched.changed.asSlice())
@@ -1076,8 +1076,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
   boxes.cache = move cache
   boxes.previous = move snapshot
-  boxes.reusable = run Incremental.reusableSubtrees(&nodes)
-  boxes.viewportFrees = run Incremental.viewportFreeSubtrees(&nodes)
+  run Incremental.markSubtrees(&nodes, &mut boxes.reusable, &mut boxes.viewportFrees)
   boxes.keyShapes = run keyShapes(&nodes)
   let mut input = Input.make(viewport)
   input.known = viewport

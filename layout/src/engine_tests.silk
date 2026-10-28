@@ -825,3 +825,33 @@ test effect fn deferredContentMinimumsStillStopShrinking() ! OutOfMemoryError | 
   let grown = output.boxes.get(output.firstBySource.get(second.index))
   run Testing.expect(grown.size.width == 60.0 && grown.location.x == 60.0, "a line with room keeps max-content widths")
 }
+
+test effect fn repeatedResizesLayOutAfresh() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut last = root
+  let mut at: usize = 0
+  while at < 8 {
+    let mut style = Style.make()
+    style.padding.left = Dimension.px(2.0)
+    let block = run tree.append(root, move style) |> Effect.provideMut<Allocator>(&mut allocator)
+    let leaf = run tree.append(block, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+    run tree.setMeasurement(leaf, 0)
+    last = leaf
+    at = at + 1
+  }
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 20.0, maximum: 300.0, height: 18.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(250.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.resizeRelaid, "a resize that reaches every box is noted")
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(120.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let bounds = run output.sourceBounds(last)
+  let mut fresh = LayoutTree.make()
+  run compute(&tree, &mut fresh, &mut content, OptionalSize.definite(120.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let expected = run fresh.sourceBounds(last)
+  run Testing.expect(bounds.x == expected.x && bounds.y == expected.y && bounds.width == expected.width && bounds.height == expected.height && bounds.width == 118.0, "a resize laid out afresh matches a fresh compute")
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(120.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.stats.passes == 0, "an unchanged tree after a fresh resize keeps its output")
+}

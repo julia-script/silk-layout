@@ -362,6 +362,8 @@ pub struct LayoutTree {
   // The viewport, viewport scroll offset and Tree scroll revision of the
   // last compute.
   pub keptViewport: OptionalSize, pub keptScroll: Point, pub keptScrolls: usize,
+  // Whether the last compute was a resize that laid out most boxes again.
+  pub resizeRelaid: bool,
   pub boxes: List<Layout>, pub boxNodes: List<BoxNode>,
   pub anonymousStyles: List<Style>,
   pub anonymousOrigins: List<usize>, pub anonymousText: List<bool>,
@@ -379,7 +381,7 @@ impl LayoutTree {
   pub fn make() -> LayoutTree {
     return LayoutTree {
       stats: LayoutStats.zero(),
-      cache: LayoutCache.make(), snapshot: Snapshot.make(), facts: BoxFacts.make(), writes: BoxWrites.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 }, keptScrolls: 0,
+      cache: LayoutCache.make(), snapshot: Snapshot.make(), facts: BoxFacts.make(), writes: BoxWrites.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 }, keptScrolls: 0, resizeRelaid: false,
       boxes: List<Layout>.make(), boxNodes: List<BoxNode>.make(),
       anonymousStyles: List<Style>.make(),
       anonymousOrigins: List<usize>.make(), anonymousText: List<bool>.make(),

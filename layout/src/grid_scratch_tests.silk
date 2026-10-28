@@ -1,0 +1,43 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.testing { Testing, AssertionError }
+import grid_scratch { GridScratchPool }
+
+// Placement belongs to one compute; a box id can identify different source
+// content after box regeneration. Retained capacity must not retain that list.
+test effect fn gridScratchResetInvalidatesPlacementIdentity()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut pool = GridScratchPool.make()
+  let mut first = run pool.take(3, 8) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(first.fresh, "first request needs placement")
+  run first.value.items.append(7) |> Effect.provideMut<Allocator>(&mut allocator)
+  pool.put(move first)
+  let repeated = run pool.take(3, 8) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(!repeated.fresh && repeated.value.items.get(0) == 7, "probes share placement within a compute")
+  pool.put(move repeated)
+  pool.reset()
+  let regenerated = run pool.take(3, 12) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(regenerated.fresh && regenerated.value.items.length() == 0, "regenerated box ids cannot retain old placement")
+  pool.put(move regenerated)
+}
+
+// Recursive child layout checks out another slot while its parent owns a list.
+// Returning the child must not overwrite the parent's placement on its return.
+test effect fn nestedGridScratchKeepsParentAndChildSeparate()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut pool = GridScratchPool.make()
+  let mut parent = run pool.take(0, 8) |> Effect.provideMut<Allocator>(&mut allocator)
+  run parent.value.items.append(1) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut child = run pool.take(1, 8) |> Effect.provideMut<Allocator>(&mut allocator)
+  run child.value.items.append(2) |> Effect.provideMut<Allocator>(&mut allocator)
+  pool.put(move child)
+  pool.put(move parent)
+  let parentAgain = run pool.take(0, 8) |> Effect.provideMut<Allocator>(&mut allocator)
+  let childAgain = run pool.take(1, 8) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(!parentAgain.fresh && !childAgain.fresh, "both nested placements remain cached")
+  run Testing.expect(parentAgain.value.items.get(0) == 1 && childAgain.value.items.get(0) == 2, "nested grid slots remain distinct after return")
+  pool.put(move childAgain)
+  pool.put(move parentAgain)
+}

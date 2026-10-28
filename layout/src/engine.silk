@@ -414,16 +414,20 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     Option<Layout>.Some { value: reused } => { return reused }
     Option<Layout>.None => {}
   }
-  let start = output.fragments.checkpoint()
-  let mut bfc = BfcState.make()
   if input.bfcContentOrigin.x != 0.0 || input.bfcContentOrigin.y != 0.0 {
     let mut request = input.*
     request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
-    let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
-    if output.frame == NO_NODE { run output.recordFinal(id, &key, &result, start, false) }
-    return result
+    return run layoutFinal(nodes, &mut output, &mut measurer, id, &request, &key)
   }
-  let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
+  return run layoutFinal(nodes, &mut output, &mut measurer, id, &input, &key)
+}
+
+// layoutNode's fresh final layout, kept to one returned local so the result
+// is built in the caller's slot.
+effect fn layoutFinal<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, request: &Input, key: &Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let start = output.fragments.checkpoint()
+  let mut bfc = BfcState.make()
+  let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
   if output.frame == NO_NODE { run output.recordFinal(id, &key, &result, start, false) }
   return result
 }
@@ -679,6 +683,16 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   sizing.ratioInsetHeight = ratioInsetHeight
 }
 
+// Whether adjustBoxInput would change the request.
+fn boxInputChanges(nodes: &BoxTree, id: usize, input: &Input) -> bool {
+  let style = nodes.style(id)
+  let node = nodes.node(id)
+  if !input.blockRoot && node.independentRoot { return true }
+  if !input.blockify && node.parent != NO_NODE && nodes.node(node.parent).kind == BoxKind.Flex { return true }
+  let atomicInline = node.kind == BoxKind.Block && !style.replaced && style.display.outsideIs(DisplayOutside.Inline) && style.display.insideIs(DisplayInside.Flow)
+  return input.atomicInline != atomicInline
+}
+
 fn adjustBoxInput(nodes: &BoxTree, id: usize, input: &mut Input) {
   let style = nodes.style(id)
   let node = nodes.node(id)
@@ -702,15 +716,26 @@ pub effect fn resolveFragmentBox<'pass, 'source, M: Measure + TextMeasure>(nodes
 }
 
 effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  // Most requests already carry what adjustBoxInput would set: lay those
+  // out from the caller's input instead of a copy.
+  if !incoming.fragmentation.active && !boxInputChanges(nodes, id, &incoming) {
+    return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &incoming, &mut bfc)
+  }
+  let mut input = incoming.*
+  adjustBoxInput(nodes, id, &mut input)
+  let monolithic = incoming.performLayout && incoming.fragmentation.active && nodes.node(id).fragmentMonolithic
+  if !input.performLayout || monolithic { input.fragmentation.active = false }
+  return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &input, &mut bfc)
+}
+
+// layoutBox with `input` the request after adjustBoxInput.
+effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, input: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if incoming.performLayout { output.stats.fullLayouts = output.stats.fullLayouts + 1 }
   else { output.stats.sizeProbes = output.stats.sizeProbes + 1 }
   let style = nodes.style(id)
   let node = nodes.node(id)
-  let mut input = incoming.*
-  adjustBoxInput(nodes, id, &mut input)
   let fragmented = incoming.performLayout && incoming.fragmentation.active
   let monolithic = fragmented && node.fragmentMonolithic
-  if !input.performLayout || monolithic { input.fragmentation.active = false }
   let mut wasStarted = false
   let mut wasNormalComplete = false
   if fragmented {
@@ -718,7 +743,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     wasStarted = previous.started
     wasNormalComplete = previous.normalComplete
   }
-  let mut sizing = BoxSizing { box: resolveBox(nodes.style(id), &input), request: input, natural: NaturalDimensions.none(), ratio: 0.0, ratioBorder: false, ratioInsetWidth: 0.0, ratioInsetHeight: 0.0 }
+  let mut sizing = BoxSizing { box: resolveBox(nodes.style(id), &input), request: input.*, natural: NaturalDimensions.none(), ratio: 0.0, ratioBorder: false, ratioInsetWidth: 0.0, ratioInsetHeight: 0.0 }
   run prepareSizing(nodes, &mut output, &mut measurer, id, &input, fragmented, monolithic, &mut sizing)
   let natural = sizing.natural
   let ratio = sizing.ratio

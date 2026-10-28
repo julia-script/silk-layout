@@ -6,8 +6,8 @@ import silk.list { List }
 import silk.ownership { Copy }
 import silk.usize
 import silk.string { String }
-import style { Style }
-import geometry { Layout, Point, Rect }
+import style { Style, DisplayOutside, DisplayInside }
+import geometry { Layout, Point, Rect, OptionalSize }
 import silk.option { Option }
 import box_tree { BoxTree, BoxNode }
 import fragments { FragmentArena, FragmentKind, TextFragmentKind }
@@ -54,12 +54,32 @@ impl Node {
     }
   }
 }
+// The style properties box construction reads (see box_tree.silk); other
+// properties reach generated boxes only through their styles.
+fn sameGeneration(a: &Style, b: &Style) -> bool {
+  if a.display.isNone() != b.display.isNone() || a.display.isContents() != b.display.isContents() { return false }
+  if a.display.outsideIs(DisplayOutside.Block) != b.display.outsideIs(DisplayOutside.Block) || a.display.outsideIs(DisplayOutside.Inline) != b.display.outsideIs(DisplayOutside.Inline) { return false }
+  if a.display.insideIs(DisplayInside.Flow) != b.display.insideIs(DisplayInside.Flow) || a.display.insideIs(DisplayInside.FlowRoot) != b.display.insideIs(DisplayInside.FlowRoot) || a.display.insideIs(DisplayInside.Flex) != b.display.insideIs(DisplayInside.Flex) { return false }
+  return a.replaced == b.replaced && a.position == b.position && a.float == b.float && a.writingMode == b.writingMode && a.alignContent == b.alignContent && a.overflowX == b.overflowX && a.overflowY == b.overflowY
+}
+// Box construction drops whitespace-only text between flex items.
+fn whitespace(value: string) -> bool {
+  let bytes = String.utf8Bytes(value)
+  let mut index: usize = 0
+  while index < bytes.length {
+    let byte = bytes[index]
+    if byte != 9 && byte != 10 && byte != 13 && byte != 32 { return false }
+    index = index + 1
+  }
+  return true
+}
+
 // Every change made through Tree's methods advances `revision` and records it
 // on the node, so a LayoutTree can find what changed since it last computed.
 // Code that edits `nodes` or `styles` directly must call `markDirty`.
 pub struct Tree {
   pub nodes: List<Node>, pub styles: List<Style>, pub viewportScrollOffset: Point,
-  current: usize, structure: usize, changed: List<usize>,
+  current: usize, structure: usize, generated: usize, changed: List<usize>,
 }
 impl Tree {
   pub effect fn make(style: Style) -> Tree ! OutOfMemoryError ? &mut Allocator {
@@ -72,12 +92,16 @@ impl Tree {
     run changed.reserve(1)
     run nodes.append(Node { styleIndex: 0, content: SourceContent.Element, parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE, measureKey: 0, measurement: Measurement.None, scrollOffset: Point { x: 0.0, y: 0.0 } })
     run changed.append(1)
-    return Tree { nodes: move nodes, styles: move styles, viewportScrollOffset: Point { x: 0.0, y: 0.0 }, current: 1, structure: 1, changed: move changed }
+    return Tree { nodes: move nodes, styles: move styles, viewportScrollOffset: Point { x: 0.0, y: 0.0 }, current: 1, structure: 1, generated: 1, changed: move changed }
   }
   // The current revision; it advances on every change.
   pub fn revision(self: &Self) -> usize { return self.current }
   // The revision of the last node insertion.
   pub fn structureRevision(self: &Self) -> usize { return self.structure }
+  // The revision of the last change that can change generated boxes: an
+  // insertion, a measurement, a style change to how boxes are generated, or
+  // a flex text node becoming or ceasing to be whitespace.
+  pub fn boxRevision(self: &Self) -> usize { return self.generated }
   // The revision of the last change to this node's style, text or measurement.
   pub fn changedAt(self: &Self, id: usize) -> usize { return self.changed.get(id) }
   fn touch(self: &mut Self, id: usize) {
@@ -90,6 +114,7 @@ impl Tree {
   pub effect fn markDirty(self: &mut Self, id: NodeId) ! InvalidNode {
     if id.index >= self.nodes.length() { fail InvalidNode { index: id.index } }
     self.touch(id.index)
+    self.generated = self.current
   }
   pub fn root(self: &Self) -> NodeId { return NodeId { index: 0 } }
   pub effect fn append(self: &mut Self, parent: NodeId, style: Style) -> NodeId ! OutOfMemoryError | InvalidNode ? &mut Allocator {
@@ -106,6 +131,7 @@ impl Tree {
     run self.nodes.append(Node { styleIndex: styleIndex, content: SourceContent.Element, parent: parent.index, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE, measureKey: 0, measurement: Measurement.None, scrollOffset: Point { x: 0.0, y: 0.0 } })
     self.current = self.current + 1
     self.structure = self.current
+    self.generated = self.current
     run self.changed.append(self.current)
     let nodes = self.nodes.asMutSlice()
     if last == NO_NODE { nodes[parent.index].firstChild = index } else { nodes[last].nextSibling = index }
@@ -123,6 +149,7 @@ impl Tree {
     run self.nodes.append(Node { styleIndex: styleIndex, content: SourceContent.Text { value: move value }, parent: parent.index, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE, measureKey: 0, measurement: Measurement.None, scrollOffset: Point { x: 0.0, y: 0.0 } })
     self.current = self.current + 1
     self.structure = self.current
+    self.generated = self.current
     run self.changed.append(self.current)
     let nodes = self.nodes.asMutSlice()
     if last == NO_NODE { nodes[parent.index].firstChild = index } else { nodes[last].nextSibling = index }
@@ -136,15 +163,24 @@ impl Tree {
     let mut value = move style
     // Natural measurement implies a replaced element regardless of the new style.
     if self.nodes.asSlice()[id.index].measurement == Measurement.Natural { value.replaced = true }
+    let generates = !sameGeneration(&self.styles.asSlice()[styleIndex], &value)
     let styles = self.styles.asMutSlice()
     styles[styleIndex] = move value
     self.touch(id.index)
+    if generates { self.generated = self.current }
   }
   pub effect fn setText(self: &mut Self, id: NodeId, value: String) ! InvalidNode {
     if id.index >= self.nodes.length() || !self.nodes.asSlice()[id.index].isText() { fail InvalidNode { index: id.index } }
+    let blank = whitespace(String.view(&value))
+    let mut wasBlank = false
+    match self.nodes.asSlice()[id.index].text() {
+      Option<string>.Some { value: previous } => { wasBlank = whitespace(previous) }
+      Option<string>.None => {}
+    }
     let nodes = self.nodes.asMutSlice()
     nodes[id.index].content = SourceContent.Text { value: move value }
     self.touch(id.index)
+    if blank != wasBlank { self.generated = self.current }
   }
   pub effect fn setScrollOffset(self: &mut Self, id: NodeId, offset: Point) ! InvalidNode {
     if id.index >= self.nodes.length() { fail InvalidNode { index: id.index } }
@@ -159,6 +195,7 @@ impl Tree {
     nodes[id.index].measureKey = key
     nodes[id.index].measurement = Measurement.Content
     self.touch(id.index)
+    self.generated = self.current
   }
   pub effect fn setNaturalMeasurement(self: &mut Self, id: NodeId, key: usize) ! InvalidNode {
     if id.index >= self.nodes.length() { fail InvalidNode { index: id.index } }
@@ -170,6 +207,7 @@ impl Tree {
     let styles = self.styles.asMutSlice()
     styles[styleIndex].replaced = true
     self.touch(id.index)
+    self.generated = self.current
   }
 }
 // Work counters for the most recent compute, summed over its passes.
@@ -188,8 +226,11 @@ pub struct LayoutTree {
   // is the Tree revision they reflect; reuse is off until a compute
   // completes without auto scrollbars or fragmentation.
   pub cache: LayoutCache, pub snapshot: Snapshot, keptRevision: usize, keptReusable: bool,
+  // The viewport and viewport scroll offset of the last compute.
+  pub keptViewport: OptionalSize, pub keptScroll: Point,
   pub boxes: List<Layout>, pub boxNodes: List<BoxNode>,
   pub anonymousStyles: List<Style>,
+  pub anonymousOrigins: List<usize>, pub anonymousText: List<bool>,
   pub firstBySource: List<usize>, pub lastBySource: List<usize>,
   pub fragments: FragmentArena,
   pub viewportOverflow: Rect,
@@ -198,9 +239,10 @@ impl LayoutTree {
   pub fn make() -> LayoutTree {
     return LayoutTree {
       stats: LayoutStats.zero(),
-      cache: LayoutCache.make(), snapshot: Snapshot.make(), keptRevision: 0, keptReusable: false,
+      cache: LayoutCache.make(), snapshot: Snapshot.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 },
       boxes: List<Layout>.make(), boxNodes: List<BoxNode>.make(),
       anonymousStyles: List<Style>.make(),
+      anonymousOrigins: List<usize>.make(), anonymousText: List<bool>.make(),
       firstBySource: List<usize>.make(), lastBySource: List<usize>.make(),
       fragments: FragmentArena.make(), viewportOverflow: Rect.zero(),
     }
@@ -209,6 +251,8 @@ impl LayoutTree {
     self.viewportOverflow = Rect.zero()
     self.boxNodes.clear()
     self.anonymousStyles.clear()
+    self.anonymousOrigins.clear()
+    self.anonymousText.clear()
     self.firstBySource.clear()
     self.lastBySource.clear()
     run self.fragments.prepare(count)
@@ -240,6 +284,8 @@ impl LayoutTree {
   pub fn adopt<'a>(self: &mut Self, constructed: BoxTree<'a>) {
     self.boxNodes = move constructed.boxes
     self.anonymousStyles = move constructed.anonymousStyles
+    self.anonymousOrigins = move constructed.anonymousOrigins
+    self.anonymousText = move constructed.anonymousText
     self.firstBySource = move constructed.firstBySource
     self.lastBySource = move constructed.lastBySource
   }

@@ -2,7 +2,7 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
 import style { Style, DimensionKind, DisplayOutside, DisplayInside, Float, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
-import tree { Tree, LayoutTree, Measurement, NO_NODE }
+import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
 import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
 import block { layoutBlock }
 import flex { layoutFlex }
@@ -14,7 +14,8 @@ import layout_cache { LayoutCache, Snapshot }
 import incremental as Incremental
 import replaced { layoutReplaced, preferredRatio, borderRatio }
 import box_tree as Boxes
-import box_tree { BoxTree, BoxKind }
+import box_tree { BoxTree, BoxKind, BoxNode }
+import silk.list { List }
 import fragments { FragmentKind }
 import inline_layout { layoutInline }
 import text { TextMeasure, TextError }
@@ -312,7 +313,7 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     }
   }
   if input.performLayout {
-    match run output.reuseFinal(nodes, id, input.*, REUSE_INDEPENDENT) {
+    match run output.reuseFinal(nodes, id, input, REUSE_INDEPENDENT) {
       Option<Layout>.Some { value: reused } => { return reused }
       Option<Layout>.None => {}
     }
@@ -323,7 +324,7 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
   if !input.performLayout { run output.remember(id, input.*, CacheKind.IndependentBox, result) }
-  else if output.frame == NO_NODE { run output.recordFinal(id, input.*, result, start) }
+  else if output.frame == NO_NODE { run output.recordFinal(id, input, &result, start) }
   return result
 }
 
@@ -334,14 +335,14 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
 pub effect fn layoutInFlow<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let reusable = input.performLayout && !input.fragmentation.active && output.frame == NO_NODE && bfc.clearBelow(input.bfcContentOrigin.y)
   if reusable {
-    match run output.reuseFinal(nodes, id, input.*, REUSE_IN_FLOW) {
+    match run output.reuseFinal(nodes, id, input, REUSE_IN_FLOW) {
       Option<Layout>.Some { value: reused } => { return reused }
       Option<Layout>.None => {}
     }
   }
   let start = output.fragments.checkpoint()
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
-  if reusable && bfc.clearBelow(input.bfcContentOrigin.y) { run output.recordFinal(id, input.*, result, start) }
+  if reusable && bfc.clearBelow(input.bfcContentOrigin.y) { run output.recordFinal(id, input, &result, start) }
   return result
 }
 
@@ -897,13 +898,54 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   return result
 }
 
+fn sameViewport(a: &OptionalSize, b: &OptionalSize) -> bool {
+  return a.widthDefinite == b.widthDefinite && a.heightDefinite == b.heightDefinite && a.width == b.width && a.height == b.height
+}
+// Scroll offsets move fragments without a revision; boxes copy them.
+fn sameScrollOffsets(tree: &Tree, boxes: &[BoxNode]) -> bool {
+  let sources = tree.nodes.asSlice()
+  let mut index: usize = 0
+  while index < boxes.length {
+    let source = boxes[index].source
+    if source != NO_NODE && (sources[source].scrollOffset.x != boxes[index].scrollOffset.x || sources[source].scrollOffset.y != boxes[index].scrollOffset.y) { return false }
+    index = index + 1
+  }
+  return true
+}
+
+effect fn boxesFor<'source>(tree: &'source Tree, output: &mut LayoutTree, since: usize, restoring: bool) -> BoxTree<'source> ! OutOfMemoryError ? &mut Allocator {
+  if !restoring { return run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) }
+  let boxes = Intrinsic.replace(output.boxNodes, List<BoxNode>.make())
+  let styles = Intrinsic.replace(output.anonymousStyles, List<Style>.make())
+  let origins = Intrinsic.replace(output.anonymousOrigins, List<usize>.make())
+  let texts = Intrinsic.replace(output.anonymousText, List<bool>.make())
+  let first = Intrinsic.replace(output.firstBySource, List<usize>.make())
+  let last = Intrinsic.replace(output.lastBySource, List<usize>.make())
+  let mut nodes = BoxTree.restore(tree.nodes.asSlice(), tree.styles.asSlice(), move boxes, move styles, move origins, move texts, move first, move last)
+  let mut slot: usize = 0
+  while slot < nodes.anonymousOrigins.length() {
+    let origin = nodes.anonymousOrigins.get(slot)
+    if origin != NO_NODE && tree.changedAt(origin) > since { nodes.refreshAnonymous(slot) }
+    slot = slot + 1
+  }
+  return move nodes
+}
+
 pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, output: &mut LayoutTree, measurer: &mut M, viewport: OptionalSize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   TextMeasure.beginTextLayout(&mut measurer)
-  let nodes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
-  // Keep size results from the previous compute of this tree when its boxes
-  // are unchanged, minus those that changed sources can affect.
+  // Nothing changed since the last compute: its output stands.
   let since = output.treeRevision()
-  if output.reusable() && tree.structureRevision() <= since && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice()) {
+  if output.reusable() && tree.revision() == since && sameViewport(&output.keptViewport, &viewport) && output.keptScroll.x == tree.viewportScrollOffset.x && output.keptScroll.y == tree.viewportScrollOffset.y && sameScrollOffsets(tree, output.boxNodes.asSlice()) {
+    output.stats = LayoutStats.zero()
+    return
+  }
+  // Keep size results from the previous compute of this tree when its boxes
+  // are unchanged, minus those that changed sources can affect. Reuse the
+  // boxes themselves when no change since could alter them.
+  let kept = output.reusable() && tree.structureRevision() <= since
+  let restoring = kept && tree.boxRevision() <= since && output.boxNodes.length() != 0
+  let nodes = run boxesFor(tree, &mut output, since, restoring)
+  if restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice())) {
     output.cache.rotateFinals()
     Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
     run output.cache.compact()
@@ -939,6 +981,8 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       output.cache = move kept
       output.snapshot = move captured
       output.keep(tree.revision(), settled)
+      output.keptViewport = viewport
+      output.keptScroll = tree.viewportScrollOffset
       output.fragments.resolveLocations()
       output.viewportOverflow = overflow
       output.adopt(move nodes)

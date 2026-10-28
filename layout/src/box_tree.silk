@@ -32,12 +32,38 @@ impl Copy for BoxNode {}
 pub struct BoxTree<'a> {
   pub boxes: List<BoxNode>,
   pub anonymousStyles: List<Style>,
+  // The source element each anonymous style inherits from, and whether it
+  // styles text; see refreshAnonymous.
+  pub anonymousOrigins: List<usize>, pub anonymousText: List<bool>,
   pub firstBySource: List<usize>, pub lastBySource: List<usize>,
   pub sources: &'a [Node],
   pub styles: &'a [Style],
   textStyles: List<usize>,
 }
 impl BoxTree {
+  // A box tree built from these sources at an earlier revision, when no
+  // change since could alter which boxes are generated.
+  pub fn restore<'a>(sources: &'a [Node], styles: &'a [Style], boxes: List<BoxNode>, anonymousStyles: List<Style>, anonymousOrigins: List<usize>, anonymousText: List<bool>, firstBySource: List<usize>, lastBySource: List<usize>) -> BoxTree<'a> {
+    let mut result = BoxTree { boxes: move boxes, anonymousStyles: move anonymousStyles, anonymousOrigins: move anonymousOrigins, anonymousText: move anonymousText, firstBySource: move firstBySource, lastBySource: move lastBySource, sources: sources, styles: styles, textStyles: List<usize>.make() }
+    let values = result.boxes.asMutSlice()
+    let mut index: usize = 0
+    while index < values.length {
+      let source = values[index].source
+      if source != NO_NODE { values[index].scrollOffset = sources[source].scrollOffset }
+      index = index + 1
+    }
+    return move result
+  }
+  // Recomputes an anonymous style after its origin's style changed.
+  pub fn refreshAnonymous(self: &mut Self, slot: usize) {
+    let origin = self.anonymousOrigins.get(slot)
+    if origin == NO_NODE { return }
+    let parent = &self.styles[self.sources[origin].styleIndex]
+    let mut style = inherited(parent)
+    if self.anonymousText.get(slot) { style = textStyle(parent) }
+    let styles = self.anonymousStyles.asMutSlice()
+    styles[slot] = move style
+  }
   pub fn node(self: &Self, id: usize) -> &BoxNode { return &self.boxes.asSlice()[id] }
   pub fn style(self: &Self, id: usize) -> &Style {
     let node = self.node(id)
@@ -146,8 +172,11 @@ impl BoxTree {
   effect fn ensureAnonymousStyle(self: &mut Self, flow: &mut Flow) -> usize ! OutOfMemoryError ? &mut Allocator {
     if flow.anonymousStyle == NO_NODE {
       let style = inherited(self.style(flow.container))
+      let origin = self.node(flow.container).styleOwner
       let slot = self.anonymousStyles.length()
       run self.anonymousStyles.append(move style)
+      run self.anonymousOrigins.append(origin)
+      run self.anonymousText.append(false)
       flow.anonymousStyle = slot
     }
     return flow.anonymousStyle
@@ -175,6 +204,8 @@ impl BoxTree {
       style.display = Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Flow }
       slot = self.anonymousStyles.length()
       run self.anonymousStyles.append(move style)
+      run self.anonymousOrigins.append(self.sources[source].parent)
+      run self.anonymousText.append(true)
       self.textStyles.set(styleIndex, slot)
     }
     let mut node = anonymous(BoxKind.Text, source, slot)
@@ -376,6 +407,12 @@ impl Flow {
   }
 }
 
+fn textStyle(parent: &Style) -> Style {
+  let mut style = inherited(parent)
+  style.display = Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Flow }
+  return move style
+}
+
 fn inherited(parent: &Style) -> Style {
   let mut style = Style.make()
   style.direction = parent.direction
@@ -428,6 +465,7 @@ fn anonymous(kind: BoxKind, owner: usize, slot: usize) -> BoxNode {
 pub effect fn build<'a>(sources: &'a [Node], styles: &'a [Style], writingMode: WritingMode, direction: Direction) -> BoxTree<'a> ! OutOfMemoryError ? &mut Allocator {
   let mut result = BoxTree {
     boxes: List<BoxNode>.make(), anonymousStyles: List<Style>.make(),
+    anonymousOrigins: List<usize>.make(), anonymousText: List<bool>.make(),
     firstBySource: List<usize>.make(), lastBySource: List<usize>.make(), sources: sources,
     styles: styles, textStyles: List<usize>.make(),
   }
@@ -453,6 +491,8 @@ pub effect fn build<'a>(sources: &'a [Node], styles: &'a [Style], writingMode: W
   viewportStyle.writingMode = writingMode
   viewportStyle.direction = direction
   run result.anonymousStyles.append(move viewportStyle)
+  run result.anonymousOrigins.append(NO_NODE)
+  run result.anonymousText.append(false)
   let mut viewport = anonymous(BoxKind.Block, NO_NODE, 0)
   viewport.independentRoot = true
   let viewportId = run result.append(viewport, NO_NODE)

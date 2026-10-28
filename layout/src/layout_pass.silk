@@ -15,7 +15,7 @@ import breaks { ForcedBreaks, PageSide, BreakKinds }
 import inline_prepared { PreparedInline }
 
 pub import layout_cache { REUSE_INDEPENDENT, REUSE_IN_FLOW, CacheKind }
-import layout_cache { LayoutCache, Snapshot, FinalLayout }
+import layout_cache { LayoutCache, Snapshot, FinalRange }
 
 struct ScrollbarSelection { horizontal: bool, vertical: bool }
 impl Copy for ScrollbarSelection {}
@@ -491,68 +491,53 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       index = index + 1
     }
   }
-  // Records the full layout of an independent formatting context that just
-  // emitted fragments [start, current end), if its own fragment opens the range.
-  pub effect fn recordFinal(self: &mut Self, id: usize, input: Input, layout: Layout, start: usize) ! OutOfMemoryError ? &mut Allocator {
+  // Records the full layout of a reusable box that just emitted fragments
+  // [start, current end), if its own fragment opens the range.
+  pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize) ! OutOfMemoryError ? &mut Allocator {
     let end = self.fragments.checkpoint()
     if start >= end || self.fragments.first(id) != start { return }
-    let fragment = self.fragments.values.get(start)
+    let fragment = &self.fragments.values.asSlice()[start]
     if fragment.box != id || fragment.kind != FragmentKind.Box { return }
-    run self.cache.recordFinal(id, FinalLayout { valid: true, input: input, layout: layout, start: start, end: end })
+    run self.cache.recordFinal(id, input, layout, start, end)
   }
   // Restores the box records of a copied subtree's descendants and carries
-  // their final layouts forward, moved to where the copy put their fragments.
-  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalLayout, base: usize) ! OutOfMemoryError ? &mut Allocator {
-    self.boxes[id] = self.previous.boxes.get(id)
+  // their kept ranges forward, moved to where the copy put their fragments.
+  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize) ! OutOfMemoryError ? &mut Allocator {
+    self.boxes[id] = self.previous.boxes.asSlice()[id]
     let mut child = nodes.node(id).firstChild
     while child != NO_NODE {
-      let mut kept = self.cache.keptFinal(child)
+      let kept = self.cache.keptRange(child)
       if kept.valid && kept.start > from.start && kept.end <= from.end {
-        kept.start = kept.start - from.start + base
-        kept.end = kept.end - from.start + base
-        run self.cache.recordFinal(child, kept)
+        run self.cache.carryFinal(child, kept.start - from.start + base, kept.end - from.start + base)
       }
       run self.restoreBoxes(nodes, child, from, base)
       child = nodes.node(child).nextSibling
     }
   }
-  // Blink LayoutNG / Servo style result reuse: a clean independent formatting
-  // context laid out with the same request as in the previous compute gets a
-  // copy of that compute's fragments and box records instead of a layout.
-  // Subtrees with out-of-flow boxes or inline interruptions are excluded:
-  // positioning, not normal-flow layout, finishes those.
-  pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: Input, level: u8) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
+  // Blink LayoutNG / Servo style result reuse: a clean box laid out with the
+  // same request as in the previous compute gets a copy of that compute's
+  // fragments and box records instead of a layout. `level` says which kind
+  // of subtree the caller can take (see Incremental.reusableSubtrees).
+  pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
     if self.frame != NO_NODE || id >= self.reusable.length() || self.reusable.get(id) < level { return Option<Layout>.None }
-    let slot = self.cache.keptFinal(id)
-    if !slot.valid || !LayoutCache.sameRequest(&slot.input, &input) { return Option<Layout>.None }
+    let slot = self.cache.keptRange(id)
+    if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return Option<Layout>.None }
     if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || self.previous.boxes.length() != self.boxes.length { return Option<Layout>.None }
+    let previous = self.previous.fragments.values.asSlice()
     let mut index = slot.start + 1
     while index < slot.end {
-      let parent = self.previous.fragments.values.get(index).parent
+      let parent = previous[index].parent
       if parent < slot.start || parent >= index { return Option<Layout>.None }
       index = index + 1
     }
     let base = self.fragments.checkpoint()
-    index = slot.start
-    while index < slot.end {
-      let mut fragment = self.previous.fragments.values.get(index)
-      if index == slot.start { fragment.parent = self.fragmentParent }
-      else { fragment.parent = base + (fragment.parent - slot.start) }
-      fragment.visualOffset = Point { x: 0.0, y: 0.0 }
-      fragment.worldLocation = Point { x: 0.0, y: 0.0 }
-      if fragment.textData != NO_NODE {
-        let text = self.previous.fragments.texts.get(fragment.textData)
-        drop run self.fragments.appendText(fragment, text)
-      } else {
-        drop run self.fragments.append(fragment)
-      }
-      index = index + 1
-    }
+    run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent)
     run self.restoreBoxes(nodes, id, slot, base)
-    run self.store(id, slot.layout, true)
-    run self.recordFinal(id, input, slot.layout, base)
+    let layout = self.cache.result(id).layout
+    run self.store(id, layout, true)
+    run self.cache.carryFinal(id, base, self.fragments.checkpoint())
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
-    return Option<Layout>.Some { value: slot.layout }
+    return Option<Layout>.Some { value: layout }
   }
   pub fn lookup(self: &mut Self, id: usize, input: Input, kind: CacheKind) -> Option<Layout> {
     return self.cache.lookup(id, input, kind)

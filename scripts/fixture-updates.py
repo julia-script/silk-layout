@@ -3,9 +3,9 @@
 
 For each unfragmented fixture, the native adapter lays out the input, applies
 a cycle of updates (viewport resizes, restyling an element with its own style,
-hiding and showing it), and the final geometry must equal a fresh layout of the
-final document. Fixtures only check single computes; this covers what the
-LayoutTree keeps between them.
+hiding and showing it, editing a text node), and the final geometry must equal
+a fresh layout of the final document. Fixtures only check single computes;
+this covers what the LayoutTree keeps between them.
 """
 import argparse
 import json
@@ -34,6 +34,12 @@ def scenarios(document):
         yield "restyle", [{"set": [{"node": node, "style": style}]}]
         hidden = dict(style, display="none")
         yield "hide", [{"set": [{"node": node, "style": hidden}]}, {"set": [{"node": node, "style": style}]}]
+    texts = [index for index, node in enumerate(document["nodes"]) if isinstance(node.get("text"), str)]
+    if texts:
+        node = texts[len(texts) // 2]
+        text = document["nodes"][node]["text"]
+        yield "retext", [{"set": [{"node": node, "text": text + " more words"}]}]
+        yield "retext-word", [{"viewport": {"width": width - 37, "height": height}}, {"set": [{"node": node, "text": "x" + text}]}]
 
 
 def final(document, cycle):
@@ -42,7 +48,9 @@ def final(document, cycle):
         if "viewport" in step:
             result["viewport"] = step["viewport"]
         for change in step.get("set", []):
-            result["nodes"][change["node"]]["style"] = change["style"]
+            for key in ("style", "text"):
+                if key in change:
+                    result["nodes"][change["node"]][key] = change[key]
     return result
 
 

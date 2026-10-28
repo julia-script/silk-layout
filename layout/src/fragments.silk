@@ -195,8 +195,9 @@ impl FragmentArena {
 
   // Appends a copy of the source's fragments [start, end), whose parents all
   // lie inside the range except the first's, which becomes `parent`. Links
-  // are rebuilt as append would; visual offsets and world locations reset.
-  pub effect fn appendRange(self: &mut Self, source: &FragmentArena, start: usize, end: usize, parent: usize) ! OutOfMemoryError ? &mut Allocator {
+  // are rebuilt as append would; visual offsets and world locations reset,
+  // and scrollable overflow is taken from `overflow`, indexed like the source.
+  pub effect fn appendRange(self: &mut Self, source: &FragmentArena, start: usize, end: usize, parent: usize, overflow: &[Rect]) ! OutOfMemoryError ? &mut Allocator {
     let base = self.values.length()
     let sourceValues = source.values.asSlice()
     // Text records of a laid-out range are usually contiguous: copy them in
@@ -229,6 +230,7 @@ impl FragmentArena {
       let values = self.values.asMutSlice()
       values[at].visualOffset = Point { x: 0.0, y: 0.0 }
       values[at].worldLocation = Point { x: 0.0, y: 0.0 }
+      values[at].scrollableOverflow = overflow[start + (at - base)]
       if values[at].textData != NO_NODE {
         if bulk { values[at].textData = textBase + (values[at].textData - firstText) }
         else {

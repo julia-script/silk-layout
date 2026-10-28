@@ -1,6 +1,8 @@
 //! Lays out a silk-layout CLI workload document with taffy.
-//! Usage: taffy-harness WORKLOAD.json ITERATIONS [--dump]
+//! Usage: taffy-harness WORKLOAD.json ITERATIONS [--dump] [--updates CYCLE.json]
 //! Prints {"layoutNs": [...]} and, with --dump, every node's border box in absolute coordinates.
+//! With --updates, one tree is kept: each iteration applies the next step of the cycle (a new
+//! viewport and/or node styles, as in the silk-layout CLI's "updates" field) and times one layout.
 use serde_json::Value;
 use std::time::Instant;
 use taffy::prelude::*;
@@ -181,15 +183,39 @@ fn layout(workload: &mut Workload) {
         .unwrap();
 }
 
+fn apply(workload: &mut Workload, step: &Value) {
+    if let Some(viewport) = step.get("viewport") {
+        let (width, height) = (viewport["width"].as_f64().unwrap() as f32, viewport["height"].as_f64().unwrap() as f32);
+        let icb = Style { display: Display::Block, size: Size { width: length(width), height: length(height) }, ..Default::default() };
+        workload.tree.set_style(workload.icb, icb).unwrap();
+        workload.viewport = Size { width: AvailableSpace::Definite(width), height: AvailableSpace::Definite(height) };
+    }
+    for change in step.get("set").and_then(Value::as_array).into_iter().flatten() {
+        let node = workload.nodes[change["node"].as_u64().unwrap() as usize];
+        workload.tree.set_style(node, style(&change["style"])).unwrap();
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let document: Value = serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap();
     let iterations: usize = args[2].parse().unwrap();
     let dump = args.iter().any(|a| a == "--dump");
+    let updates = args.iter().position(|a| a == "--updates").map(|i| {
+        let cycle: Value = serde_json::from_slice(&std::fs::read(&args[i + 1]).unwrap()).unwrap();
+        cycle.as_array().unwrap().clone()
+    });
     let mut samples = Vec::with_capacity(iterations);
     let mut last = build(&document);
     layout(&mut last);
-    for _ in 0..iterations {
+    for iteration in 0..iterations {
+        if let Some(cycle) = &updates {
+            apply(&mut last, &cycle[iteration % cycle.len()]);
+            let start = Instant::now();
+            layout(&mut last);
+            samples.push(start.elapsed().as_nanos() as u64);
+            continue;
+        }
         // A fresh tree per iteration: taffy caches layouts inside the tree, while silk-layout
         // recomputes everything on every call.
         let mut workload = build(&document);

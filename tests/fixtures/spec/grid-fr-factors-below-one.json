@@ -1,0 +1,74 @@
+{
+  "name": "grid-fr-factors-below-one",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-find-fr-size"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 400,
+          "gridTemplateColumns": [
+            {
+              "fr": 0.25
+            },
+            {
+              "fr": 0.25
+            }
+          ],
+          "gridTemplateRows": [
+            40
+          ],
+          "columnGap": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 400,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 95,
+        "height": 40
+      },
+      {
+        "x": 115,
+        "y": 0,
+        "width": 95,
+        "height": 40
+      }
+    ]
+  }
+}

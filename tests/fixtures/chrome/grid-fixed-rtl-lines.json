@@ -1,0 +1,50 @@
+{
+  "name": "grid-fixed-rtl-lines-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-model",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 200,
+          "direction": "rtl",
+          "gridTemplateColumns": [
+            60,
+            100
+          ],
+          "gridTemplateRows": [
+            30
+          ],
+          "columnGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  }
+}

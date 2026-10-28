@@ -1,0 +1,48 @@
+{
+  "name": "grid-empty-explicit-tracks",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#explicit-grids",
+    "https://drafts.csswg.org/css-grid-2/#track-sizing",
+    "https://drafts.csswg.org/css-grid-2/#gutters"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 105,
+          "gridTemplateColumns": [
+            40,
+            60
+          ],
+          "gridTemplateRows": [
+            20,
+            30
+          ],
+          "columnGap": 5,
+          "rowGap": 7
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 105,
+        "height": 57
+      }
+    ]
+  }
+}

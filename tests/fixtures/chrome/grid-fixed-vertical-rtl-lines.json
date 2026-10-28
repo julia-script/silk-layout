@@ -1,0 +1,59 @@
+{
+  "name": "grid-fixed-vertical-rtl-lines-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-model",
+    "https://drafts.csswg.org/css-grid-2/#line-placement",
+    "https://drafts.csswg.org/css-grid-2/#gutters"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "height": 200,
+          "writingMode": "vertical-rl",
+          "direction": "rtl",
+          "gridTemplateColumns": [
+            60,
+            100
+          ],
+          "gridTemplateRows": [
+            40,
+            50
+          ],
+          "columnGap": 10,
+          "rowGap": 5
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "writingMode": "vertical-rl",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 2,
+          "writingMode": "vertical-rl",
+          "direction": "rtl"
+        }
+      }
+    ]
+  }
+}

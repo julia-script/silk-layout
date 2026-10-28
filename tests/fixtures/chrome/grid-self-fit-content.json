@@ -1,0 +1,50 @@
+{
+  "name": "grid-self-fit-content-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-item-sizing",
+    "https://drafts.csswg.org/css-grid-2/#row-align",
+    "https://drafts.csswg.org/css-grid-2/#column-align"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "gridTemplateColumns": [
+            100
+          ],
+          "gridTemplateRows": [
+            80
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "justifySelf": "center",
+          "alignSelf": "center"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 40,
+          "height": 10
+        }
+      }
+    ]
+  }
+}

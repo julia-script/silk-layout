@@ -1,0 +1,72 @@
+{
+  "name": "grid-fixed-rtl-lines",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-model",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 200,
+          "direction": "rtl",
+          "gridTemplateColumns": [
+            60,
+            100
+          ],
+          "gridTemplateRows": [
+            30
+          ],
+          "columnGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 30
+      },
+      {
+        "x": 140,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 30,
+        "y": 0,
+        "width": 100,
+        "height": 30
+      }
+    ]
+  }
+}

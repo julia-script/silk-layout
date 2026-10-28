@@ -1,0 +1,78 @@
+{
+  "name": "grid-fr-definite-rows",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-find-fr-size",
+    "https://drafts.csswg.org/css-grid-2/#gutters"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 110,
+          "height": 100,
+          "gridTemplateColumns": [
+            50,
+            50
+          ],
+          "gridTemplateRows": [
+            {
+              "fr": 1
+            },
+            {
+              "fr": 3
+            }
+          ],
+          "columnGap": 10,
+          "rowGap": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 110,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 20
+      },
+      {
+        "x": 60,
+        "y": 40,
+        "width": 50,
+        "height": 60
+      }
+    ]
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "name": "grid-negative-lines-and-spans",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#line-placement",
+    "https://drafts.csswg.org/css-grid-2/#grid-placement-errors",
+    "https://drafts.csswg.org/css-grid-2/#gutters"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 240,
+          "gridTemplateColumns": [
+            40,
+            50,
+            60,
+            70
+          ],
+          "gridTemplateRows": [
+            20,
+            30
+          ],
+          "columnGap": 5,
+          "rowGap": 7
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": -3,
+          "gridRowStart": 1,
+          "gridColumnEnd": -1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "span": 2
+          },
+          "gridRowStart": 2,
+          "gridColumnEnd": 3
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 3,
+          "gridRowStart": 1,
+          "gridColumnEnd": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 2,
+          "gridColumnEnd": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 57
+      },
+      {
+        "x": 100,
+        "y": 0,
+        "width": 135,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 27,
+        "width": 95,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 95,
+        "height": 20
+      },
+      {
+        "x": 45,
+        "y": 27,
+        "width": 50,
+        "height": 30
+      }
+    ]
+  }
+}

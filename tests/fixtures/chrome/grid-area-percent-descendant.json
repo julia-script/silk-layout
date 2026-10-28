@@ -1,0 +1,55 @@
+{
+  "name": "grid-area-percent-descendant-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-item-sizing",
+    "https://drafts.csswg.org/css-grid-2/#track-sizing"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 300,
+          "gridTemplateColumns": [
+            100,
+            180
+          ],
+          "gridTemplateRows": [
+            60
+          ],
+          "columnGap": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1,
+          "padding": 10,
+          "border": 2
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": {
+            "percent": 0.5
+          },
+          "height": {
+            "percent": 0.5
+          }
+        }
+      }
+    ]
+  }
+}

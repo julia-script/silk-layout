@@ -1,0 +1,62 @@
+{
+  "name": "grid-fr-definite-fraction-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-flex-tracks",
+    "https://drafts.csswg.org/css-grid-2/#algo-find-fr-size",
+    "https://drafts.csswg.org/css-grid-2/#gutters"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 300,
+          "gridTemplateColumns": [
+            60,
+            {
+              "fr": 1
+            },
+            {
+              "fr": 2
+            }
+          ],
+          "gridTemplateRows": [
+            80
+          ],
+          "columnGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 3,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  }
+}

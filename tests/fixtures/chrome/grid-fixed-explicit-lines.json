@@ -1,0 +1,62 @@
+{
+  "name": "grid-fixed-explicit-lines-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#track-sizing",
+    "https://drafts.csswg.org/css-grid-2/#line-placement",
+    "https://drafts.csswg.org/css-grid-2/#gutters",
+    "https://drafts.csswg.org/css-grid-2/#grid-item-sizing"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 200,
+          "gridTemplateColumns": [
+            80,
+            100
+          ],
+          "gridTemplateRows": [
+            30,
+            50
+          ],
+          "columnGap": 10,
+          "rowGap": 5
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowEnd": 3
+        }
+      }
+    ]
+  }
+}

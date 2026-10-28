@@ -1,0 +1,60 @@
+{
+  "name": "grid-percent-definite-tracks-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#track-sizing",
+    "https://drafts.csswg.org/css-grid-2/#gutters"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 200,
+          "height": 100,
+          "gridTemplateColumns": [
+            {
+              "percent": 0.25
+            },
+            {
+              "percent": 0.5
+            }
+          ],
+          "gridTemplateRows": [
+            {
+              "percent": 0.2
+            },
+            {
+              "percent": 0.4
+            }
+          ],
+          "columnGap": 10,
+          "rowGap": 5
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 2
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "name": "grid-fr-definite-fraction",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "explicit-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-flex-tracks",
+    "https://drafts.csswg.org/css-grid-2/#algo-find-fr-size",
+    "https://drafts.csswg.org/css-grid-2/#gutters"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 300,
+          "gridTemplateColumns": [
+            60,
+            {
+              "fr": 1
+            },
+            {
+              "fr": 2
+            }
+          ],
+          "gridTemplateRows": [
+            80
+          ],
+          "columnGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 3,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 80
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 80
+      },
+      {
+        "x": 70,
+        "y": 0,
+        "width": 73.33333333333333,
+        "height": 80
+      },
+      {
+        "x": 153.33333333333331,
+        "y": 0,
+        "width": 146.66666666666666,
+        "height": 80
+      }
+    ]
+  }
+}

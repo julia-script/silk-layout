@@ -11,7 +11,7 @@ import geometry { Layout, Point, Rect, OptionalSize }
 import silk.option { Option }
 import box_tree { BoxTree, BoxNode }
 import fragments { FragmentArena, FragmentKind, TextFragmentKind }
-import layout_cache { LayoutCache, Snapshot }
+import layout_cache { LayoutCache, Snapshot, BoxFacts }
 
 pub const NO_NODE: usize = usize.MAX
 pub struct NodeId { pub index: usize }
@@ -226,6 +226,7 @@ pub struct LayoutTree {
   // is the Tree revision they reflect; reuse is off until a compute
   // completes without auto scrollbars or fragmentation.
   pub cache: LayoutCache, pub snapshot: Snapshot, keptRevision: usize, keptReusable: bool,
+  pub facts: BoxFacts,
   // The viewport and viewport scroll offset of the last compute.
   pub keptViewport: OptionalSize, pub keptScroll: Point,
   pub boxes: List<Layout>, pub boxNodes: List<BoxNode>,
@@ -239,7 +240,7 @@ impl LayoutTree {
   pub fn make() -> LayoutTree {
     return LayoutTree {
       stats: LayoutStats.zero(),
-      cache: LayoutCache.make(), snapshot: Snapshot.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 },
+      cache: LayoutCache.make(), snapshot: Snapshot.make(), facts: BoxFacts.make(), keptRevision: 0, keptReusable: false, keptViewport: OptionalSize.none(), keptScroll: Point { x: 0.0, y: 0.0 },
       boxes: List<Layout>.make(), boxNodes: List<BoxNode>.make(),
       anonymousStyles: List<Style>.make(),
       anonymousOrigins: List<usize>.make(), anonymousText: List<bool>.make(),

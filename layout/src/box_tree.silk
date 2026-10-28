@@ -64,8 +64,8 @@ impl BoxTree {
     let styles = self.anonymousStyles.asMutSlice()
     styles[slot] = move style
   }
-  pub fn node(self: &Self, id: usize) -> &BoxNode { return &self.boxes.asSlice()[id] }
-  pub fn style(self: &Self, id: usize) -> &Style {
+  pub fn node(self: &Self, id: usize) -> &BoxNode with Intrinsic.inlineAlways() { return &self.boxes.asSlice()[id] }
+  pub fn style(self: &Self, id: usize) -> &Style with Intrinsic.inlineAlways() {
     let node = self.node(id)
     if node.anonymousStyle != NO_NODE { return &self.anonymousStyles.asSlice()[node.anonymousStyle] }
     return &self.styles[self.sources[node.styleOwner].styleIndex]

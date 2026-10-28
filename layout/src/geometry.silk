@@ -5,14 +5,14 @@ import bfc { BfcState }
 pub struct Size { pub width: f64, pub height: f64 }
 impl Copy for Size {}
 impl Size {
-  pub fn zero() -> Size { return Size { width: 0.0, height: 0.0 } }
+  pub fn zero() -> Size with Intrinsic.inlineAlways() { return Size { width: 0.0, height: 0.0 } }
 }
 pub struct Point { pub x: f64, pub y: f64 }
 impl Copy for Point {}
 pub struct Rect { pub x: f64, pub y: f64, pub width: f64, pub height: f64 }
 impl Copy for Rect {}
 impl Rect {
-  pub fn zero() -> Rect { return Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 } }
+  pub fn zero() -> Rect with Intrinsic.inlineAlways() { return Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 } }
   pub fn translated(self: &Self, point: Point) -> Rect {
     return Rect { x: self.x + point.x, y: self.y + point.y, width: self.width, height: self.height }
   }
@@ -25,7 +25,7 @@ impl Rect {
 pub struct ResolvedEdges { pub top: f64, pub right: f64, pub bottom: f64, pub left: f64 }
 impl Copy for ResolvedEdges {}
 impl ResolvedEdges {
-  pub fn zero() -> ResolvedEdges { return ResolvedEdges { top: 0.0, right: 0.0, bottom: 0.0, left: 0.0 } }
+  pub fn zero() -> ResolvedEdges with Intrinsic.inlineAlways() { return ResolvedEdges { top: 0.0, right: 0.0, bottom: 0.0, left: 0.0 } }
   pub fn horizontal(self: &Self) -> f64 { return self.left + self.right }
   pub fn vertical(self: &Self) -> f64 { return self.top + self.bottom }
 }
@@ -48,7 +48,7 @@ pub struct ScrollbarMetrics {
 }
 impl Copy for ScrollbarMetrics {}
 impl ScrollbarMetrics {
-  pub fn zero() -> ScrollbarMetrics {
+  pub fn zero() -> ScrollbarMetrics with Intrinsic.inlineAlways() {
     return ScrollbarMetrics { horizontal: 0.0, vertical: 0.0, overlay: true, horizontalOnTop: false, verticalOnLeft: false }
   }
 }
@@ -62,8 +62,8 @@ pub struct BaselineSet {
 }
 impl Copy for BaselineSet {}
 impl BaselineSet {
-  pub fn zero() -> BaselineSet { return BaselineSet.uniform(0.0) }
-  pub fn uniform(value: f64) -> BaselineSet {
+  pub fn zero() -> BaselineSet with Intrinsic.inlineAlways() { return BaselineSet.uniform(0.0) }
+  pub fn uniform(value: f64) -> BaselineSet with Intrinsic.inlineAlways() {
     return BaselineSet { alphabetic: value, ideographic: value, central: value, mathematical: value, xMiddle: value, textOver: value, textUnder: value }
   }
   pub fn synthesized(over: f64, under: f64) -> BaselineSet {
@@ -245,7 +245,7 @@ pub struct Layout {
 }
 impl Copy for Layout {}
 impl Layout {
-  pub fn zero() -> Layout {
+  pub fn zero() -> Layout with Intrinsic.inlineAlways() {
     return Layout { location: Point { x: 0.0, y: 0.0 }, size: Size.zero(), contentSize: Size.zero(), scrollbarGutter: ResolvedEdges.zero(), horizontalScrollbar: false, verticalScrollbar: false, scrollbarMetrics: ScrollbarMetrics.zero(), scrollbarsApplicable: false, widthDefinite: false, heightDefinite: false, firstBaselines: BaselineSet.zero(), lastBaselines: BaselineSet.zero(), hasFirstBaseline: false, hasLastBaseline: false, measurementOffset: Point { x: 0.0, y: 0.0 }, scrollableOverflow: Rect.zero(), flowOverflow: Rect.zero(), paddingBox: Rect.zero(), contentBox: Rect.zero(), generated: false, preferredRatio: 0.0, ratioBorderBox: false, usedMargin: ResolvedEdges.zero(), marginTopPositive: 0.0, marginTopNegative: 0.0, marginBottomPositive: 0.0, marginBottomNegative: 0.0, collapsesThrough: false, hasClearance: false }
   }
   pub fn setOverflowGeometry(self: &mut Self, content: Rect, padding: Rect, flow: Rect) {

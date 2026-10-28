@@ -750,7 +750,31 @@ fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer
   }
 }
 
+// A flex container without children: no lines, no item contributions and no
+// baselines, so layoutFlexPass reduces to clamping its content-free size.
+fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
+  let axis = axes(style)
+  let mainInset = edgeTotal(box.inset, axis.horizontal)
+  let crossInset = edgeTotal(box.inset, !axis.horizontal)
+  let mut main = max(0.0, optionalSize(box.size, axis.horizontal) - mainInset)
+  let mut cross = max(0.0, optionalSize(box.size, !axis.horizontal) - crossInset)
+  if !definite(box.size, axis.horizontal) { main = max(0.0, clamp(mainInset, axisSize(box.min, axis.horizontal), axisSize(box.max, axis.horizontal)) - mainInset) }
+  if !definite(box.size, !axis.horizontal) { cross = max(0.0, clamp(crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
+  let mut result = Layout.zero()
+  if axis.horizontal { result.size = Size { width: main + mainInset, height: cross + crossInset } }
+  else { result.size = Size { width: cross + crossInset, height: main + mainInset } }
+  if box.gutter.horizontal() > 0.0 {
+    result.size.width = clamp(result.size.width, box.min.width, box.max.width)
+    if box.size.widthDefinite { result.size.width = box.size.width }
+  }
+  if box.gutter.vertical() > 0.0 {
+    result.size.height = clamp(result.size.height, box.min.height, box.max.height)
+    if box.size.heightDefinite { result.size.height = box.size.height }
+  }
+  return result
+}
 pub effect fn layoutFlex<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if nodes.node(id).firstChild == NO_NODE && !input.fragmentation.active && input.fragmentation.boundaryProbe == BoundaryProbe.None { return emptyFlex(nodes.style(id), &box) }
   let mut items = List<Item>.make()
   let mut lines = List<Line>.make()
   return run layoutFlexPass(nodes, &mut output, &mut measurer, id, &input, &box, false, &mut items, &mut lines)

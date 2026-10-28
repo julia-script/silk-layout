@@ -1,0 +1,102 @@
+{
+  "name": "flex-baseline-column-mirror",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "flexDirection": "column",
+          "width": "max-content",
+          "height": 20,
+          "alignItems": "baseline",
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "sideways-lr",
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-lr",
+          "width": 10,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 24,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 14,
+            "y": 10,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  },
+  "kind": "spec",
+  "features": [
+    "flex",
+    "baseline",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#align-items-property",
+    "https://drafts.csswg.org/css-flexbox-1/#algo-cross-line",
+    "https://drafts.csswg.org/css-align-3/#baseline-export",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline"
+  ]
+}

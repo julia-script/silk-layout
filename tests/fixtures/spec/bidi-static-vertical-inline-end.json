@@ -1,0 +1,19 @@
+{
+  "name": "bidi-static-vertical-inline-end",
+  "kind": "spec",
+  "features": ["static-position", "writing-mode", "direction", "self-alignment"],
+  "spec": ["https://drafts.csswg.org/css-position-3/#staticpos-rect", "https://drafts.csswg.org/css-align-3/#justify-abspos", "https://drafts.csswg.org/css-writing-modes-4/#abstract-axes"],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"width": 40, "height": 100, "writingMode": "vertical-rl", "direction": "rtl"}},
+      {"parent": 0, "style": {"display": "inline-block", "width": 10, "height": 20, "writingMode": "vertical-rl"}},
+      {"parent": 0, "style": {"display": "inline", "position": "absolute", "justifySelf": "end", "width": 6, "height": 12, "writingMode": "vertical-rl"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"width": 40, "height": 100},
+    {"rects": [{"x": 30, "y": 80, "width": 10, "height": 20}]},
+    {"rects": [{"x": 34, "y": 80, "width": 6, "height": 12}]}
+  ]}
+}

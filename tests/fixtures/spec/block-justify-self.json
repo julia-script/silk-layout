@@ -1,0 +1,183 @@
+{
+  "name": "block-justify-self",
+  "kind": "spec",
+  "features": [
+    "block",
+    "justify-self",
+    "justify-items",
+    "fit-content",
+    "auto-margins",
+    "overflow-alignment",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#justify-block",
+    "https://drafts.csswg.org/css-align-3/#auto-safety-default"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 200,
+          "justifyItems": "center"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 50,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 2,
+        "style": {
+          "width": 60,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 10,
+          "justifySelf": "end"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 240,
+          "height": 10,
+          "justifySelf": "center",
+          "justifySelfSafety": "safe"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 240,
+          "height": 10,
+          "justifySelf": "center",
+          "justifySelfSafety": "unsafe"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 10,
+          "justifySelf": "self-start",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 10,
+          "marginLeft": "auto"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flow-root",
+          "width": 100,
+          "height": 100,
+          "writingMode": "vertical-lr",
+          "direction": "rtl",
+          "justifyItems": "end"
+        }
+      },
+      {
+        "parent": 9,
+        "style": {
+          "width": 20,
+          "height": 30,
+          "writingMode": "vertical-lr",
+          "direction": "rtl"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 170
+      },
+      {
+        "x": 75,
+        "y": 0,
+        "width": 50,
+        "height": 10
+      },
+      {
+        "x": 70,
+        "y": 10,
+        "width": 60,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 10
+      },
+      {
+        "x": 160,
+        "y": 20,
+        "width": 40,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 30,
+        "width": 240,
+        "height": 10
+      },
+      {
+        "x": -20,
+        "y": 40,
+        "width": 240,
+        "height": 10
+      },
+      {
+        "x": 160,
+        "y": 50,
+        "width": 40,
+        "height": 10
+      },
+      {
+        "x": 160,
+        "y": 60,
+        "width": 40,
+        "height": 10
+      },
+      {
+        "x": 50,
+        "y": 70,
+        "width": 100,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 30
+      }
+    ]
+  }
+}

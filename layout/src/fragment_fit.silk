@@ -1,0 +1,61 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import box_tree { BoxTree }
+import layout_pass { LayoutPass }
+import fragments { FragmentKind }
+import breaks { BreakRelaxation }
+import tree { NO_NODE }
+
+pub struct WidowCheck { pub box: usize, pub before: usize, pub minimum: usize, pub done: bool }
+impl Copy for WidowCheck {}
+pub struct WidowDecision { pub failed: usize, pub limit: usize, pub pending: bool }
+impl Copy for WidowDecision {}
+
+// Capture cuts from the accepted candidate before running a speculative future
+// frame. The caller supplies REAL future ancestor/float/containing geometry.
+pub effect fn collectWidows(nodes: &BoxTree, output: &LayoutPass, start: usize, relaxation: BreakRelaxation, checks: &mut List<WidowCheck>) ! OutOfMemoryError ? &mut Allocator {
+  checks.clear()
+  if relaxation != BreakRelaxation.Strict { return }
+  let fragments = output.fragments.values.asSlice()
+  let mut index = start
+  while index < fragments.length {
+    let fragment = &fragments[index]
+    if fragment.fragmentainer == output.frame && fragment.kind == FragmentKind.Line && fragment.box != NO_NODE {
+      let previous = fragment.previousForBox
+      let first = previous == NO_NODE || fragments[previous].fragmentainer != output.frame || fragments[previous].kind != FragmentKind.Line
+      if first {
+        let state = output.resumes.get(fragment.box)
+        if state.lineBreak && state.frameLines > 0 {
+          run checks.append(WidowCheck { box: fragment.box, before: state.frameLines, minimum: nodes.style(fragment.box).widows, done: false })
+        }
+      }
+    }
+    index = index + 1
+  }
+}
+
+// Call after each actual speculative future frame. Waiting parallel flows may
+// require several frames before this paragraph next produces a real line.
+// A failure strictly reduces the earlier frame's cap, ensuring finite search.
+pub fn validateWidows(output: &LayoutPass, checks: &mut [WidowCheck]) -> WidowDecision {
+  let mut result = WidowDecision { failed: NO_NODE, limit: NO_NODE, pending: false }
+  let mut index: usize = 0
+  while index < checks.length {
+    if !checks[index].done {
+      let state = output.resumes.get(checks[index].box)
+      let mut after: usize = 0
+      if state.fragmentainer == output.frame { after = state.frameLines }
+      if after == 0 && !state.contentComplete { result.pending = true }
+      else if after < checks[index].minimum {
+        let mut missing = checks[index].minimum - after
+        if missing > checks[index].before { missing = checks[index].before }
+        result.failed = checks[index].box
+        result.limit = checks[index].before - missing
+        return result
+      } else { checks[index].done = true }
+    }
+    index = index + 1
+  }
+  return result
+}

@@ -1,0 +1,68 @@
+{
+  "name": "none-subtree",
+  "kind": "spec",
+  "features": [
+    "display-none"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "none",
+          "width": 100,
+          "height": 20
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 50,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-display-3/#box-generation"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 0,
+        "contentWidth": 200,
+        "contentHeight": 0
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0
+      }
+    ]
+  }
+}

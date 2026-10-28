@@ -1,0 +1,35 @@
+{
+  "name": "margin-collapse-parent",
+  "kind": "chrome",
+  "features": [
+    "block",
+    "margin-collapse"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 20,
+          "marginTop": 15,
+          "marginBottom": 10
+        }
+      }
+    ]
+  }
+}

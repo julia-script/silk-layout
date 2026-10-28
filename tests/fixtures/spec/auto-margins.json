@@ -1,0 +1,55 @@
+{
+  "name": "auto-margins",
+  "kind": "spec",
+  "features": [
+    "block",
+    "auto-margins"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 80,
+          "height": 20,
+          "marginLeft": "auto",
+          "marginRight": "auto"
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visudet.html#blockwidth"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 20,
+        "contentWidth": 200,
+        "contentHeight": 20
+      },
+      {
+        "x": 60,
+        "y": 0,
+        "width": 80,
+        "height": 20,
+        "contentWidth": 80,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

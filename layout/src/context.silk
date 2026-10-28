@@ -1,0 +1,285 @@
+import silk.ownership { Copy }
+import geometry { OptionalSize, AvailableSpace, AvailableKind, Size, Point, ResolvedEdges, ScrollbarMetrics, max, clamp }
+import style { Dimension, DimensionKind, Edges, Style, BoxSizing, Position, Display, DisplayInside, DisplayOutside, Overflow, ScrollbarWidth, ScrollbarGutter, Float, WritingMode, TextOrientation, Direction, Align, OverflowAlignment }
+import fragmentation { FragmentInput }
+
+pub const UNBOUNDED: f64 = 1.0e100
+pub struct Input {
+  pub parent: OptionalSize,
+  pub initialContainingBlock: OptionalSize,
+  // Available-space constraints, never percentage-resolution bases.
+  pub parentMaxSize: Size, pub scrollportSize: Size,
+  pub known: OptionalSize,
+  pub availableWidth: AvailableSpace, pub availableHeight: AvailableSpace,
+  pub blockRoot: bool, pub blockify: bool, pub atomicInline: bool,
+  pub intrinsicWidth: bool, pub intrinsicHeight: bool, pub shrinkToFit: bool,
+  pub indefiniteWidth: bool, pub indefiniteHeight: bool,
+  pub parentWritingMode: WritingMode,
+  pub parentTextOrientation: TextOrientation,
+  pub parentJustifyItems: Align, pub parentJustifyItemsSafety: OverflowAlignment,
+  pub bfcContentOrigin: Point,
+  pub performLayout: bool,
+  pub fragmentation: FragmentInput,
+}
+impl Copy for Input {}
+impl Input {
+  pub fn make(parent: OptionalSize) -> Input {
+    let mut width = AvailableSpace.maxContent()
+    let mut height = AvailableSpace.maxContent()
+    if parent.widthDefinite { width = AvailableSpace.definite(parent.width) }
+    if parent.heightDefinite { height = AvailableSpace.definite(parent.height) }
+    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, fragmentation: FragmentInput.continuous() }
+  }
+}
+pub struct ResolvedBox {
+  pub padding: ResolvedEdges, pub border: ResolvedEdges, pub margin: ResolvedEdges,
+  pub inset: ResolvedEdges,
+  pub gutter: ResolvedEdges, pub scrollbarMetrics: ScrollbarMetrics,
+  pub min: Size, pub max: Size,
+  pub size: OptionalSize,
+}
+impl Copy for ResolvedBox {}
+// Gutters participate in content geometry, never CSS padding or the
+// border/padding floor of a specified outer size.
+pub fn withGutter(box: ResolvedBox, gutter: ResolvedEdges) -> ResolvedBox {
+  let mut result = box
+  result.inset = ResolvedEdges {
+    top: box.border.top + box.padding.top + gutter.top,
+    right: box.border.right + box.padding.right + gutter.right,
+    bottom: box.border.bottom + box.padding.bottom + gutter.bottom,
+    left: box.border.left + box.padding.left + gutter.left,
+  }
+  result.gutter = gutter
+  return result
+}
+pub fn scrollbarGutter(style: &Style, metrics: ScrollbarMetrics, horizontal: bool, vertical: bool) -> ResolvedEdges {
+  let mut result = ResolvedEdges.zero()
+  if metrics.overlay || style.scrollbarWidth == ScrollbarWidth.None { return result }
+  let inlineHorizontal = style.writingMode == WritingMode.HorizontalTb
+  let stable = style.scrollbarGutter != ScrollbarGutter.Auto
+  let both = style.scrollbarGutter == ScrollbarGutter.StableBothEdges
+  if vertical || (stable && inlineHorizontal && scrollable(overflowForAxis(style, false))) {
+    if metrics.verticalOnLeft { result.left = metrics.vertical }
+    else { result.right = metrics.vertical }
+    if both && inlineHorizontal { result.left = metrics.vertical
+      result.right = metrics.vertical }
+  }
+  if horizontal || (stable && !inlineHorizontal && scrollable(overflowForAxis(style, true))) {
+    if metrics.horizontalOnTop { result.top = metrics.horizontal }
+    else { result.bottom = metrics.horizontal }
+    if both && !inlineHorizontal { result.top = metrics.horizontal
+      result.bottom = metrics.horizontal }
+  }
+  return result
+}
+pub fn resolves(value: Dimension, definite: bool) -> bool {
+  return value.kind == DimensionKind.Length || ((value.kind == DimensionKind.Percent || value.kind == DimensionKind.Calc) && definite)
+}
+pub fn resolve(value: Dimension, basis: f64, definite: bool, fallback: f64) -> f64 {
+  if value.kind == DimensionKind.Length { return value.value }
+  if definite && (value.kind == DimensionKind.Percent || value.kind == DimensionKind.Calc) { return value.value + value.percent * basis }
+  return fallback
+}
+pub fn edges(value: Edges, basis: f64, definite: bool) -> ResolvedEdges {
+  // Cyclic percentage edges resolve against zero; calc() keeps its length.
+  return ResolvedEdges {
+    top: resolve(value.top, basis, definite, value.top.value), right: resolve(value.right, basis, definite, value.right.value),
+    bottom: resolve(value.bottom, basis, definite, value.bottom.value), left: resolve(value.left, basis, definite, value.left.value),
+  }
+}
+pub fn resolveBox(style: &Style, input: Input) -> ResolvedBox {
+  let mut basis = input.parent.width
+  let mut basisDefinite = input.parent.widthDefinite
+  if input.parentWritingMode != WritingMode.HorizontalTb {
+    basis = input.parent.height
+    basisDefinite = input.parent.heightDefinite
+  }
+  let padding = edges(style.padding, basis, basisDefinite)
+  let border = edges(style.border, 0.0, false)
+  let margin = edges(style.margin, basis, basisDefinite)
+  let inset = ResolvedEdges { top: padding.top + border.top, right: padding.right + border.right, bottom: padding.bottom + border.bottom, left: padding.left + border.left }
+  let mut addWidth = inset.horizontal()
+  let mut addHeight = inset.vertical()
+  if style.boxSizing == BoxSizing.BorderBox { addWidth = 0.0
+    addHeight = 0.0 }
+  let mut size = OptionalSize.none()
+  if !input.intrinsicWidth && resolves(style.width, input.parent.widthDefinite) { size.width = max(inset.horizontal(), resolve(style.width, input.parent.width, input.parent.widthDefinite, 0.0) + addWidth)
+    size.widthDefinite = true }
+  if !input.intrinsicHeight && resolves(style.height, input.parent.heightDefinite) { size.height = max(inset.vertical(), resolve(style.height, input.parent.height, input.parent.heightDefinite, 0.0) + addHeight)
+    size.heightDefinite = true }
+  if input.known.widthDefinite { size.width = input.known.width
+    size.widthDefinite = true }
+  if input.known.heightDefinite { size.height = input.known.height
+    size.heightDefinite = true }
+  let mut result = ResolvedBox {
+    padding: padding, border: border, margin: margin, inset: inset, size: size,
+    gutter: ResolvedEdges.zero(), scrollbarMetrics: ScrollbarMetrics.zero(),
+    min: Size { width: max(inset.horizontal(), resolve(style.minWidth, input.parent.width, input.parent.widthDefinite, style.minWidth.value) + addWidth), height: max(inset.vertical(), resolve(style.minHeight, input.parent.height, input.parent.heightDefinite, style.minHeight.value) + addHeight) },
+    max: Size { width: max(inset.horizontal(), resolve(style.maxWidth, input.parent.width, input.parent.widthDefinite, UNBOUNDED) + addWidth), height: max(inset.vertical(), resolve(style.maxHeight, input.parent.height, input.parent.heightDefinite, UNBOUNDED) + addHeight) },
+  }
+  if input.intrinsicWidth {
+    result.min.width = inset.horizontal()
+    result.max.width = UNBOUNDED
+  }
+  if input.intrinsicHeight {
+    result.min.height = inset.vertical()
+    result.max.height = UNBOUNDED
+  }
+  return result
+}
+
+pub fn childrenInput(input: Input, style: &Style, box: ResolvedBox, parent: OptionalSize) -> Input {
+  let mut result = Input.make(parent)
+  result.initialContainingBlock = input.initialContainingBlock
+  result.performLayout = input.performLayout
+  result.fragmentation = input.fragmentation
+  result.fragmentation.active = input.fragmentation.active && input.performLayout
+  result.fragmentation.flexAutoExtent = false
+  result.fragmentation.avoidInside = input.fragmentation.avoidInside || input.fragmentation.avoidsInside(style.breakInside)
+  result.parentWritingMode = style.writingMode
+  result.parentTextOrientation = style.textOrientation
+  result.parentJustifyItems = style.justifyItems
+  result.parentJustifyItemsSafety = style.justifyItemsSafety
+  // Writing Modes §7.3.1 uses fixed inner constraints even during an
+  // intrinsic probe, where resolveBox deliberately ignores the box's limits.
+  let mut subtractWidth = box.gutter.horizontal()
+  let mut subtractHeight = box.gutter.vertical()
+  if style.boxSizing == BoxSizing.BorderBox {
+    subtractWidth = box.inset.horizontal()
+    subtractHeight = box.inset.vertical()
+  }
+  let minimum = Size {
+    width: max(0.0, resolve(style.minWidth, input.parent.width, input.parent.widthDefinite, 0.0) - subtractWidth),
+    height: max(0.0, resolve(style.minHeight, input.parent.height, input.parent.heightDefinite, 0.0) - subtractHeight),
+  }
+  result.parentMaxSize = Size {
+    width: max(minimum.width, resolve(style.maxWidth, input.parent.width, input.parent.widthDefinite, UNBOUNDED) - subtractWidth),
+    height: max(minimum.height, resolve(style.maxHeight, input.parent.height, input.parent.heightDefinite, UNBOUNDED) - subtractHeight),
+  }
+  result.scrollportSize = input.scrollportSize
+  if scrollable(usedOverflowForAxis(style, true)) || scrollable(usedOverflowForAxis(style, false)) {
+    // The nearest scrollport replaces the inherited candidate; an outer
+    // scrollport must not constrain an unconstrained inner scrollport.
+    let mut width = UNBOUNDED
+    let mut height = UNBOUNDED
+    if box.size.widthDefinite && !input.indefiniteWidth && (style.width.kind == DimensionKind.Auto || resolves(style.width, input.parent.widthDefinite)) {
+      width = max(0.0, box.size.width - box.inset.horizontal())
+    }
+    if box.size.heightDefinite && !input.indefiniteHeight && (style.height.kind == DimensionKind.Auto || resolves(style.height, input.parent.heightDefinite)) {
+      height = max(0.0, box.size.height - box.inset.vertical())
+    }
+    result.scrollportSize = Size {
+      width: clamp(width, minimum.width, result.parentMaxSize.width),
+      height: clamp(height, minimum.height, result.parentMaxSize.height),
+    }
+  }
+  return result
+}
+pub fn outOfFlow(style: &Style) -> bool { return style.position == Position.Absolute || style.position == Position.Fixed }
+pub fn effectiveDisplay(style: &Style, input: Input) -> Display {
+  if input.blockify || style.float != Float.None || outOfFlow(style) { return style.display.blockified() }
+  if input.atomicInline { return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.FlowRoot } }
+  return style.display
+}
+pub fn isFlex(style: &Style) -> bool { return style.display.insideIs(DisplayInside.Flex) }
+pub fn scrollable(value: Overflow) -> bool { return value == Overflow.Auto || value == Overflow.Scroll || value == Overflow.Hidden }
+// Pinned Overflow 3 §3.1: visible becomes auto beside a scrollable axis.
+// Clip remains non-scrollable; the draft permits single-axis scroll containers.
+pub fn overflowForAxis(style: &Style, horizontal: bool) -> Overflow {
+  let mut value = style.overflowY
+  let mut other = style.overflowX
+  if horizontal { value = style.overflowX
+    other = style.overflowY }
+  if value == Overflow.Visible && scrollable(other) { return Overflow.Auto }
+  return value
+}
+// Overflow 4 §3.1 keeps computed scrollability for sizing, while replaced
+// elements use clip rather than creating a scroll container.
+pub fn usedOverflowForAxis(style: &Style, horizontal: bool) -> Overflow {
+  let value = overflowForAxis(style, horizontal)
+  if style.replaced && value != Overflow.Visible { return Overflow.Clip }
+  return value
+}
+pub fn establishesContext(style: &Style, input: Input) -> bool {
+  let display = effectiveDisplay(style, input)
+  return display.insideIs(DisplayInside.Flex) || style.alignContent != Align.Normal || (style.float != Float.None && !input.blockify) || display.insideIs(DisplayInside.FlowRoot) || outOfFlow(style) || scrollable(style.overflowX) || scrollable(style.overflowY)
+}
+
+// CSS 2.1 §10.3.3: auto margins absorb positive free space; the containing
+// block's end-side margin absorbs over-constraint after min/max sizing.
+pub fn blockInlineOffset(marginLow: f64, marginHigh: f64, autoLow: bool, autoHigh: bool, rtl: bool, width: f64, available: f64) -> f64 {
+  let remainder = available - width - marginLow - marginHigh
+  if remainder >= 0.0 {
+    if autoLow && autoHigh { return remainder / 2.0 }
+    if autoLow { return remainder }
+    if autoHigh { return marginLow }
+  }
+  if rtl { return available - width - marginHigh }
+  return marginLow
+}
+
+// Align 3 §6.1.1: justify-self applies to in-flow block-level boxes, not
+// floats or flex items. Auto takes the containing block's justify-items.
+pub fn blockJustification(style: &Style, input: Input) -> Align {
+  if input.blockify || style.float != Float.None || outOfFlow(style) || !effectiveDisplay(style, input).outsideIs(DisplayOutside.Block) { return Align.Normal }
+  if style.justifySelf == Align.Auto { return input.parentJustifyItems }
+  return style.justifySelf
+}
+pub fn blockJustificationSafety(style: &Style, input: Input) -> OverflowAlignment {
+  if style.justifySelf == Align.Auto { return input.parentJustifyItemsSafety }
+  return style.justifySelfSafety
+}
+pub fn selfStartReversed(style: &Style, horizontal: bool) -> bool {
+  if horizontal {
+    if style.writingMode == WritingMode.HorizontalTb { return style.usedDirection() == Direction.Rtl }
+    return style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
+  }
+  if style.writingMode == WritingMode.HorizontalTb { return false }
+  return (style.usedDirection() == Direction.Rtl) != (style.writingMode == WritingMode.SidewaysLr)
+}
+pub fn alignmentOffset(value: Align, safety: OverflowAlignment, reverse: bool, selfReverse: bool, lineReverse: bool, free: f64) -> f64 {
+  let mut high = reverse
+  if value == Align.End || value == Align.FlexEnd { high = !reverse }
+  if value == Align.SelfStart || value == Align.Baseline { high = selfReverse }
+  if value == Align.SelfEnd || value == Align.LastBaseline { high = !selfReverse }
+  if value == Align.Left { high = lineReverse }
+  if value == Align.Right { high = !lineReverse }
+  let safe = safety == OverflowAlignment.Safe || value == Align.Baseline || value == Align.LastBaseline
+  if free < 0.0 && safe {
+    if reverse { return free }
+    return 0.0
+  }
+  if value == Align.Center { return free / 2.0 }
+  if high { return free }
+  return 0.0
+}
+
+// Align 3 §5.1.1 aligns block content as one subject. Distribution keywords
+// use their fallback rather than distributing or stretching that content.
+pub fn blockContentOffset(style: &Style, freeSpace: f64) -> f64 {
+  let align = style.alignContent
+  let centered = align == Align.Center || align == Align.SpaceAround || align == Align.SpaceEvenly
+  let atEnd = align == Align.End || align == Align.FlexEnd || align == Align.LastBaseline
+  if !centered && !atEnd { return 0.0 }
+  let blockScrolls = scrollable(overflowForAxis(style, style.writingMode != WritingMode.HorizontalTb))
+  let safeFallback = align == Align.SpaceAround || align == Align.SpaceEvenly || align == Align.LastBaseline
+  let safe = style.alignContentSafety == OverflowAlignment.Safe || (style.alignContentSafety == OverflowAlignment.Default && !blockScrolls)
+  if freeSpace < 0.0 && (safe || safeFallback) { return 0.0 }
+  if centered { return freeSpace / 2.0 }
+  return freeSpace
+}
+
+pub fn selfCollapsingSize(style: &Style, parent: OptionalSize, inlineDefinite: bool) -> bool {
+  let mut preferredBlock = style.height
+  let mut parentBlock = parent.height
+  let mut parentBlockDefinite = parent.heightDefinite
+  if style.writingMode != WritingMode.HorizontalTb {
+    preferredBlock = style.width
+    parentBlock = parent.width
+    parentBlockDefinite = parent.widthDefinite
+  }
+  let automaticBlock = preferredBlock.kind == DimensionKind.Auto || ((preferredBlock.kind == DimensionKind.Percent || preferredBlock.kind == DimensionKind.Calc) && !parentBlockDefinite)
+  // CSS 2.1 §8.3.1 uses the computed height, not a max-size-clamped zero.
+  // Sizing 4 §4.2.1 excludes a ratio-dependent automatic block size.
+  return resolve(preferredBlock, parentBlock, parentBlockDefinite, -1.0) == 0.0 || (automaticBlock && !(style.aspectRatio > 0.0 && inlineDefinite))
+}

@@ -1,0 +1,46 @@
+{
+  "name": "bidi-stable-fragments-after-wrap",
+  "kind": "spec",
+  "features": ["source-text", "bidi-ordering", "inline-fragments", "line-breaking"],
+  "spec": [
+    "https://www.unicode.org/reports/tr9/#L1",
+    "https://www.unicode.org/reports/tr9/#L2",
+    "https://drafts.csswg.org/css-writing-modes-4/#bidi-fragmentation",
+    "https://drafts.csswg.org/css-text-3/#white-space-phase-2"
+  ],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "fonts": [{
+      "fontSize": 10, "ascent": 8, "descent": 2, "lineGap": 0,
+      "xHeight": 5, "capHeight": 7, "subscriptOffset": 2, "superscriptOffset": 3,
+      "baselines": {"alphabetic": 8, "ideographic": 10, "central": 5, "mathematical": 5}
+    }],
+    "nodes": [
+      {"parent": null, "style": {"width": 20, "fontKey": 1, "direction": "rtl", "unicodeBidi": "bidi-override"}},
+      {"parent": 0, "style": {"display": "inline", "fontKey": 1, "direction": "rtl"}},
+      {"parent": 1, "style": {"display": "inline", "fontKey": 1, "direction": "rtl"}},
+      {"parent": 2, "text": "AB"},
+      {"parent": 1, "style": {"display": "inline", "fontKey": 1, "direction": "ltr", "unicodeBidi": "embed"}},
+      {"parent": 4, "text": "cd"},
+      {"parent": 4, "text": " "},
+      {"parent": 0, "style": {"display": "inline", "fontKey": 1, "direction": "ltr", "unicodeBidi": "embed"}},
+      {"parent": 7, "text": "ef"}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"width": 20, "height": 20},
+      {"rects": [
+        {"x": 10, "y": 0, "width": 10, "height": 10},
+        {"x": 0, "y": 0, "width": 10, "height": 10}
+      ]},
+      {"rects": [{"x": 10, "y": 0, "width": 10, "height": 10}]},
+      {"rects": [{"x": 10, "y": 0, "width": 10, "height": 10}]},
+      {"rects": [{"x": 0, "y": 0, "width": 10, "height": 10}]},
+      {"rects": [{"x": 0, "y": 0, "width": 10, "height": 10}]},
+      {"width": 0},
+      {"x": 10, "y": 10, "width": 10, "height": 10, "rects": [{"x": 10, "y": 10, "width": 10, "height": 10}]},
+      {"x": 0, "y": 0, "width": 10, "height": 10, "rects": [{"x": 10, "y": 10, "width": 10, "height": 10}]}
+    ]
+  }
+}

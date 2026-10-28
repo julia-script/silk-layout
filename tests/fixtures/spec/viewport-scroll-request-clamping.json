@@ -1,0 +1,20 @@
+{
+  "name": "viewport-scroll-request-clamping",
+  "kind": "spec",
+  "features": ["scrolling", "positioned"],
+  "spec": ["https://drafts.csswg.org/cssom-view/#dom-window-scroll"],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "viewportScrollOffset": {"x": 1000, "y": 1000},
+    "nodes": [
+      {"parent": null, "style": {"width": 150, "height": 200}},
+      {"parent": 0, "style": {"width": 10, "height": 10}},
+      {"parent": 0, "style": {"position": "fixed", "width": 10, "height": 10, "inset": {"left": 5, "top": 7}}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": -50, "y": -100, "width": 150, "height": 200}]},
+    {"rects": [{"x": -50, "y": -100, "width": 10, "height": 10}]},
+    {"rects": [{"x": 5, "y": 7, "width": 10, "height": 10}]}
+  ]}
+}

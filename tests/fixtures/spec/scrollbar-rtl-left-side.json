@@ -1,0 +1,78 @@
+{
+  "name": "scrollbar-rtl-left-side",
+  "kind": "spec",
+  "features": [
+    "scrollbars",
+    "scrollbar-gutter"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollbar-sizing",
+    "https://drafts.csswg.org/css-overflow-3/#scrollbar-gutter-property",
+    "https://drafts.csswg.org/css-scrollbars-1/#scrollbar-width"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "scrollbars": {
+      "auto": {
+        "horizontal": 12,
+        "vertical": 15,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": true
+      },
+      "thin": {
+        "horizontal": 6,
+        "vertical": 8,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "direction": "rtl",
+          "overflowX": "scroll",
+          "overflowY": "scroll"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 50,
+          "height": 20
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 100,
+        "contentWidth": 85,
+        "contentHeight": 88,
+        "scrollbarGutterTop": 0,
+        "scrollbarGutterRight": 0,
+        "scrollbarGutterBottom": 12,
+        "scrollbarGutterLeft": 15,
+        "horizontalScrollbar": true,
+        "verticalScrollbar": true
+      },
+      {
+        "x": 50,
+        "y": 0,
+        "width": 50,
+        "height": 20
+      }
+    ]
+  }
+}

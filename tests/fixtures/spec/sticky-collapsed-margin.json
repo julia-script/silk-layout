@@ -1,0 +1,75 @@
+{
+  "name": "sticky-collapsed-margin",
+  "kind": "spec",
+  "features": [
+    "scroll-state",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrolling",
+    "https://drafts.csswg.org/css-position-3/#stickypos-insets",
+    "https://drafts.csswg.org/css-position-3/#static-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        },
+        "scrollOffset": {
+          "x": 0,
+          "y": 50
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "height": 300,
+          "marginTop": 20
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 100,
+          "height": 20,
+          "marginTop": 30,
+          "marginBottom": 40,
+          "position": "sticky",
+          "insetTop": 0
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": -20,
+        "width": 100,
+        "height": 300
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 100,
+        "height": 20
+      }
+    ]
+  }
+}

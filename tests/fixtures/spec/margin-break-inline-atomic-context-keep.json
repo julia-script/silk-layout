@@ -1,0 +1,75 @@
+{
+  "name": "margin-break-inline-atomic-context-keep",
+  "kind": "spec",
+  "spec": [
+    "https://drafts.csswg.org/css-break-4/#break-margins"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "lineHeight": {
+            "length": 0
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10,
+          "marginTop": 12,
+          "marginBottom": 7,
+          "marginBreak": "keep"
+        }
+      }
+    ],
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 40
+        }
+      ],
+      "repeatStep": {
+        "x": 100,
+        "y": 0
+      }
+    }
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 29
+          }
+        ],
+        "firstBaseline": 29
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 12,
+            "width": 20,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

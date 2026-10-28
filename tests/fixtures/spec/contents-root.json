@@ -1,0 +1,87 @@
+{
+  "name": "contents-root",
+  "kind": "spec",
+  "features": [
+    "display-contents",
+    "box-generation",
+    "root",
+    "absolute"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-display-3/#box-generation"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "contents",
+          "width": 1,
+          "height": 1,
+          "padding": 50,
+          "margin": 30,
+          "justifyItems": "end"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "height": 20,
+          "marginLeft": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "width": 30,
+          "height": 10,
+          "insetLeft": 20,
+          "insetTop": 25
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0
+      },
+      {
+        "x": 10,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 40,
+        "height": 10
+      },
+      {
+        "x": 20,
+        "y": 25,
+        "width": 30,
+        "height": 10
+      }
+    ]
+  }
+}

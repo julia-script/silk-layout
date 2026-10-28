@@ -1,0 +1,66 @@
+{
+  "name": "margin-collapse-parent",
+  "kind": "spec",
+  "features": [
+    "block",
+    "margin-collapse"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 20,
+          "marginTop": 15,
+          "marginBottom": 10
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/CSS22/box.html#collapsing-margins"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 45,
+        "contentWidth": 200,
+        "contentHeight": 45
+      },
+      {
+        "x": 0,
+        "y": 15,
+        "width": 200,
+        "height": 20,
+        "contentWidth": 200,
+        "contentHeight": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 20,
+        "contentWidth": 200,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

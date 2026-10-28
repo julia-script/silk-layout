@@ -1,0 +1,16 @@
+{
+  "name": "resource-dimensionless",
+  "kind": "chrome",
+  "features": ["replaced", "absent-natural-dimensions", "default-object-size"],
+  "description": "An empty natural object and legacy replaced:true both load an SVG without absolute dimensions or a viewBox. They are genuine dimensionless replaced resources, not empty divs or broken images. A CSS ratio case separately exercises fallback sizing.",
+  "spec": ["https://www.w3.org/TR/css-images-3/#natural-dimensions", "https://www.w3.org/TR/CSS22/visudet.html#inline-replaced-width"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flow-root", "width": 400}},
+      {"parent": 0, "style": {}, "natural": {}},
+      {"parent": 0, "style": {"replaced": true}},
+      {"parent": 0, "style": {"width": 120, "aspectRatio": 3, "aspectRatioAuto": true}, "natural": {}}
+    ]
+  }
+}

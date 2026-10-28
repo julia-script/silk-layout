@@ -1,0 +1,31 @@
+{
+  "name": "bidi-static-phantom-inline-block",
+  "kind": "spec",
+  "features": ["static-position", "text-align", "phantom-line", "fixed"],
+  "spec": ["https://drafts.csswg.org/css-position-3/#staticpos-rect", "https://drafts.csswg.org/css-inline-3/#invisible-line-boxes"],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"width": 100}},
+      {"parent": 0, "style": {"width": 100, "textAlign": "center"}},
+      {"parent": 1, "style": {"display": "inline", "position": "absolute", "width": 12, "height": 6}},
+      {"parent": 1, "style": {"display": "block", "position": "absolute", "width": 12, "height": 6}},
+      {"parent": 1, "style": {"display": "inline", "position": "fixed", "width": 12, "height": 6}},
+      {"parent": 0, "style": {"width": 100, "direction": "rtl", "textAlign": "center"}},
+      {"parent": 5, "style": {"display": "inline", "position": "absolute", "width": 12, "height": 6}},
+      {"parent": 5, "style": {"display": "block", "position": "absolute", "width": 12, "height": 6}},
+      {"parent": 5, "style": {"display": "inline", "position": "fixed", "width": 12, "height": 6}}
+    ]
+  },
+  "expected": {"sources": [
+    {"width": 100, "height": 0},
+    {"rects": [{"x": 0, "y": 0, "width": 100, "height": 0}]},
+    {"rects": [{"x": 50, "y": 0, "width": 12, "height": 6}]},
+    {"rects": [{"x": 0, "y": 0, "width": 12, "height": 6}]},
+    {"rects": [{"x": 50, "y": 0, "width": 12, "height": 6}]},
+    {"rects": [{"x": 0, "y": 0, "width": 100, "height": 0}]},
+    {"rects": [{"x": 38, "y": 0, "width": 12, "height": 6}]},
+    {"rects": [{"x": 88, "y": 0, "width": 12, "height": 6}]},
+    {"rects": [{"x": 38, "y": 0, "width": 12, "height": 6}]}
+  ]}
+}

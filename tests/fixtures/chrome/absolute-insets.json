@@ -1,0 +1,35 @@
+{
+  "name": "absolute-insets",
+  "kind": "chrome",
+  "features": [
+    "absolute",
+    "positioning"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "position": "relative",
+          "width": 200,
+          "height": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "insetLeft": 10,
+          "insetRight": 20,
+          "insetTop": 5,
+          "height": 20
+        }
+      }
+    ]
+  }
+}

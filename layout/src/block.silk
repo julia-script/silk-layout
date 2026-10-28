@@ -1,0 +1,844 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.option { Option }
+import geometry { Layout, Measure, OptionalSize, AvailableSpace, AvailableKind, Size, Point, ResolvedEdges, max, min, clamp }
+import style { Style, Direction, Float, Align }
+import tree { NO_NODE }
+import box_tree { BoxTree, BoxKind }
+import axes { Axes }
+import context { Input, ResolvedBox, resolveBox, childrenInput, outOfFlow, establishesContext, selfCollapsingSize, blockContentOffset, blockInlineOffset, blockJustification, blockJustificationSafety, selfStartReversed, alignmentOffset }
+import engine { layoutNode, layoutInBfc }
+import bfc { BfcState, FloatBox, Checkpoint }
+import layout_pass { LayoutPass, PassCheckpoint }
+import text { TextMeasure, TextError }
+import fragmentation { FlowCursor, FragmentationError, BoundaryProbe }
+import breaks { BreakBoundary, ForcedBreaks, BreakRelaxation, allowsBoundary }
+import fragment_box as FragmentBox
+
+// CSS 2.2 §§8.3.1, 9.5 and 10.3.3. Keep positive and negative extrema
+// separately: reducing an adjoining set to a scalar loses associativity.
+struct Margins { positive: f64, negative: f64 }
+impl Copy for Margins {}
+impl Margins {
+  fn zero() -> Margins { return Margins { positive: 0.0, negative: 0.0 } }
+  fn single(value: f64) -> Margins { return Margins { positive: max(0.0, value), negative: min(0.0, value) } }
+  fn join(self: &Self, other: Margins) -> Margins {
+    return Margins { positive: max(self.positive, other.positive), negative: min(self.negative, other.negative) }
+  }
+  fn value(self: &Self) -> f64 { return self.positive + self.negative }
+}
+struct Child { id: usize, margin: ResolvedEdges, inset: ResolvedEdges, input: Input, width: f64, parallel: bool }
+impl Copy for Child {}
+struct Candidate {
+  pass: PassCheckpoint, bfc: Checkpoint, next: usize, cursor: f64,
+  top: Margins, bottom: Margins, leading: bool, allThrough: bool,
+  clearanceChain: bool, result: Layout,
+}
+impl Copy for Candidate {}
+
+fn boxChild(nodes: &BoxTree, candidate: usize) -> usize {
+  let mut item = candidate
+  while item != NO_NODE {
+    if !outOfFlow(nodes.style(item)) { return item }
+    item = nodes.node(item).nextSibling
+  }
+  return NO_NODE
+}
+fn normalChild(nodes: &BoxTree, candidate: usize) -> usize {
+  let mut item = boxChild(nodes, candidate)
+  while item != NO_NODE {
+    if nodes.style(item).float == Float.None { return item }
+    item = boxChild(nodes, nodes.node(item).nextSibling)
+  }
+  return NO_NODE
+}
+fn topMargins(layout: Layout) -> Margins {
+  return Margins { positive: layout.marginTopPositive, negative: layout.marginTopNegative }
+}
+fn bottomMargins(layout: Layout) -> Margins {
+  return Margins { positive: layout.marginBottomPositive, negative: layout.marginBottomNegative }
+}
+pub fn inlineOffset(style: &Style, input: Input, axes: Axes, direction: Direction, margin: ResolvedEdges, width: f64, available: f64) -> f64 {
+  let alignment = blockJustification(style, input)
+  if alignment == Align.Normal || axes.lowAuto(style) || axes.highAuto(style) {
+    return blockInlineOffset(margin.left, margin.right, axes.lowAuto(style), axes.highAuto(style), direction == Direction.Rtl, width, available)
+  }
+  let reverseSelf = selfStartReversed(style, !axes.vertical) != axes.reverseLine
+  return margin.left + alignmentOffset(alignment, blockJustificationSafety(style, input), direction == Direction.Rtl, reverseSelf, axes.reverseLine, available - width - margin.horizontal())
+}
+
+
+fn settleCandidate(output: &mut LayoutPass, previous: Option<Candidate>, trial: Option<Candidate>, allowed: bool) -> Option<Candidate> {
+  match move trial {
+    Option<Candidate>.None => { return move previous }
+    Option<Candidate>.Some { value } => {
+      if !allowed {
+        output.closeCheckpoint(value.pass)
+        return move previous
+      }
+      let mut chosen = value
+      match move previous {
+        Option<Candidate>.Some { value: older } => { chosen.pass = output.replaceCheckpoint(older.pass, chosen.pass) }
+        Option<Candidate>.None => {}
+      }
+      return Option<Candidate>.Some { value: chosen }
+    }
+  }
+}
+
+fn prepareChild(nodes: &BoxTree, id: usize, base: Input, axes: Axes, box: &ResolvedBox, availableInline: AvailableSpace, parallel: bool) -> Child {
+  let style = nodes.style(id)
+  let mut input = base
+  input.blockRoot = nodes.node(id).independentRoot || style.writingMode != base.parentWritingMode
+  if axes.vertical {
+    input.availableWidth = AvailableSpace.maxContent()
+    input.availableHeight = availableInline
+    if box.size.widthDefinite { input.availableHeight = AvailableSpace.definite(input.parent.height) }
+  } else {
+    input.availableWidth = availableInline
+    input.availableHeight = AvailableSpace.maxContent()
+    if box.size.widthDefinite { input.availableWidth = AvailableSpace.definite(input.parent.width) }
+  }
+  if style.float != Float.None {
+    input.shrinkToFit = true
+    input.blockRoot = true
+  }
+  let child = axes.box(resolveBox(style, input))
+  let mut width = max(child.inset.horizontal(), box.size.width - box.inset.horizontal() - child.margin.horizontal())
+  if child.size.widthDefinite { width = child.size.width }
+  width = clamp(width, child.min.width, child.max.width)
+  return Child { id: id, margin: child.margin, inset: child.inset, input: input, width: width, parallel: parallel }
+}
+
+pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: Input, physicalBox: ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if !input.performLayout || !input.fragmentation.active {
+    return run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, input, physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
+  }
+  let pass = output.checkpoint()
+  let floats = bfc.checkpoint()
+  let mut result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, input, physicalBox, &mut bfc, NO_NODE, ForcedBreaks.none())
+  let state = output.resumes.get(id)
+  let mut cut = NO_NODE
+  match state.cursor {
+    FlowCursor.Block { nextChild } => { cut = nextChild }
+    _ => {}
+  }
+  let mut previous = NO_NODE
+  if !state.blocked && !state.skipped && cut != NO_NODE && output.publication(cut) == NO_NODE {
+    let mut child = boxChild(nodes, nodes.node(id).firstChild)
+    while child != NO_NODE && child != cut {
+      if output.publication(child) != NO_NODE { previous = child }
+      child = boxChild(nodes, nodes.node(child).nextSibling)
+    }
+  }
+  if !state.blocked && !state.skipped && cut != NO_NODE && previous != NO_NODE
+    && nodes.style(previous).float == Float.None && output.resumes.get(previous).normalComplete {
+    // A parent can choose a Class A break only after its previous child has
+    // completed. Replay that chosen boundary into the child, rather than
+    // editing its rectangles or allowing smaller margins to pull content back.
+    let forced = output.resumes.get(cut).requested
+    output.restoreCheckpoint(pass)
+    bfc.restore(floats)
+    result = run layoutBlockPass(nodes, &mut output, &mut measurer, id, style, input, physicalBox, &mut bfc, cut, forced)
+  }
+  output.closeCheckpoint(pass)
+  return result
+}
+
+effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: Input, physicalBox: ResolvedBox, bfc: &mut BfcState, endBefore: usize, endBreak: ForcedBreaks) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let axes = Axes.make(style.writingMode)
+  let box = axes.box(physicalBox)
+  let fragmented = input.performLayout && input.fragmentation.active
+  let afterProbe = input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After && nodes.node(id).dynamicAfter
+  let origin = input.bfcContentOrigin
+  let formattingRoot = input.blockRoot || establishesContext(style, input) || style.writingMode != input.parentWritingMode
+  let collapseTop = !formattingRoot && box.inset.top == 0.0
+  let collapseBottom = !formattingRoot && box.inset.bottom == 0.0 && !box.size.heightDefinite
+  let mut parent = OptionalSize.none()
+  // Used inline sizes resolve descendant percentages even when a flex
+  // parent's post-flex main size remains semantically indefinite.
+  if physicalBox.size.widthDefinite {
+    parent.width = max(0.0, physicalBox.size.width - physicalBox.inset.horizontal())
+    parent.widthDefinite = !axes.vertical || !input.indefiniteWidth
+  }
+  if physicalBox.size.heightDefinite {
+    parent.height = max(0.0, physicalBox.size.height - physicalBox.inset.vertical())
+    parent.heightDefinite = axes.vertical || !input.indefiniteHeight
+  }
+  let mut availableInline = input.availableWidth
+  if axes.vertical { availableInline = input.availableHeight }
+  let mut children = List<Child>.make()
+  let mut intrinsicWidth = 0.0
+  let mut floatRun = 0.0
+  let mut nextChild = boxChild(nodes, nodes.node(id).firstChild)
+  let mut pendingTail = NO_NODE
+  if fragmented {
+    let state = output.resumes.get(id)
+    match state.cursor {
+      FlowCursor.Block { nextChild: next } => { nextChild = next }
+      _ => {}
+    }
+    pendingTail = state.pendingLast
+  }
+  let mut parallel = pendingTail != NO_NODE
+  let mut childId = nextChild
+  if parallel { childId = run output.popPending(id) }
+  let childBase = childrenInput(input, style, physicalBox, parent)
+  let lazy = fragmented && box.size.widthDefinite
+  while childId != NO_NODE && !lazy {
+    let mut child = prepareChild(nodes, childId, childBase, axes, &box, availableInline, parallel)
+    // A definite inline size needs no whole-subtree measurement pass. Only
+    // intrinsic sizing probes children before their source-order placement.
+    if !box.size.widthDefinite {
+      let mut probeInput = child.input
+      probeInput.performLayout = false
+      let measured = run layoutNode(nodes, &mut output, &mut measurer, childId, probeInput)
+      child.width = axes.size(measured.size).width
+      let contribution = child.width + child.margin.horizontal()
+      if nodes.style(childId).float != Float.None && availableInline.kind != AvailableKind.MinContent {
+        floatRun = floatRun + contribution
+        intrinsicWidth = max(intrinsicWidth, floatRun)
+      } else {
+        floatRun = 0.0
+        intrinsicWidth = max(intrinsicWidth, contribution)
+      }
+    }
+    run children.append(child)
+    if parallel {
+      if childId == pendingTail { parallel = false
+        childId = nextChild }
+      else { childId = run output.popPending(id) }
+    } else { childId = boxChild(nodes, nodes.node(childId).nextSibling) }
+  }
+  let mut width = clamp(intrinsicWidth + box.inset.horizontal(), box.min.width, box.max.width)
+  if box.size.widthDefinite { width = box.size.width }
+  let contentWidth = max(0.0, width - box.inset.horizontal())
+  let mut intrinsicInline = input.intrinsicWidth
+  if axes.vertical { intrinsicInline = input.intrinsicHeight }
+  let resolveInlineContents = !box.size.widthDefinite && !intrinsicInline
+  if resolveInlineContents {
+    // Sizing §5.2.1: intrinsic contributions use a zero cyclic percentage
+    // basis, then contents resolve against this size without enlarging it.
+    if axes.vertical {
+      parent.height = contentWidth
+      parent.heightDefinite = true
+    } else {
+      parent.width = contentWidth
+      parent.widthDefinite = true
+    }
+  }
+  let mut cursor = 0.0
+  let mut pending = Margins.zero()
+  let externalAxes = Axes.make(input.parentWritingMode)
+  let externalMargin = externalAxes.edges(physicalBox.margin)
+  let mut top = Margins.single(externalMargin.top)
+  let mut bottom = Margins.single(externalMargin.bottom)
+  let mut leading = true
+  let mut allThrough = true
+  let mut clearanceChain = false
+  let mut result = Layout.zero()
+  let mut index: usize = 0
+  let mut stopped = false
+  let mut progressed = false
+  let mut normalSeen = false
+  let mut floatSeen = false
+  let mut boundary = BreakBoundary.none()
+  let mut normalAfter = BreakBoundary.none()
+  let mut leadingBoundary = BreakBoundary.none()
+  let mut candidate = Option<Candidate>.None
+  while index < children.length() || (lazy && childId != NO_NODE) {
+    if index == children.length() {
+      if stopped && !parallel { break }
+      // Only visited children need preparation or final-axis conversion.
+      // The old pending tail prevents consuming continuations queued here.
+      run children.append(prepareChild(nodes, childId, childBase, axes, &box, availableInline, parallel))
+      if parallel {
+        if childId == pendingTail { parallel = false
+          childId = nextChild }
+        else { childId = run output.popPending(id) }
+      } else { childId = boxChild(nodes, nodes.node(childId).nextSibling) }
+    }
+    let mut item = children.get(index)
+    if fragmented && stopped && !item.parallel { index = index + 1
+      continue }
+    if fragmented && !item.parallel && item.id == endBefore {
+      run output.defer(item.id, endBreak)
+      stopped = true
+      nextChild = item.id
+      index = index + 1
+      continue
+    }
+    let mut startedBeforeTrial = true
+    let mut handledBeforeTrial = true
+    if fragmented {
+      let mut state = output.resumes.get(item.id)
+      let own = output.resumes.get(id)
+      startedBeforeTrial = state.started
+      handledBeforeTrial = state.beforeHandled || !normalSeen && own.beforeHandled && !own.started && nodes.style(item.id).float == Float.None
+      if !item.parallel && !normalSeen && !floatSeen && nodes.style(item.id).float != Float.None {
+        // No preceding sibling means no Class A point. This acknowledges the
+        // outer before value without inventing a forced margin boundary.
+        handledBeforeTrial = true
+      }
+      if handledBeforeTrial && !state.beforeHandled {
+        state.beforeHandled = true
+        run output.resumes.set(item.id, state)
+      }
+      if state.contentComplete { index = index + 1
+        continue }
+      if state.notBeforeFrame > output.frame {
+        if item.parallel {
+          run output.enqueuePending(id, item.id)
+          if nodes.style(item.id).float != Float.None {
+            bfc.defer(nodes.style(item.id).float)
+            bfc.pendingFloat = bfc.pendingFloat || !state.normalComplete
+          }
+        } else { stopped = true
+          nextChild = item.id }
+        index = index + 1
+        continue
+      }
+      item.input.fragmentation.marginStart = input.fragmentation.marginStart && leading && box.inset.top == 0.0 && !item.parallel
+      let next = boxChild(nodes, nodes.node(item.id).nextSibling)
+      item.input.fragmentation.marginEnd = (input.fragmentation.marginEnd && box.inset.bottom == 0.0 && next == NO_NODE || endBefore != NO_NODE && next == endBefore) && !item.parallel
+      item.input.fragmentation.marginEndChosen = item.input.fragmentation.marginEnd && (input.fragmentation.marginEndChosen || endBefore != NO_NODE && next == endBefore)
+      item.input.fragmentation.sourceAdjacent = !item.parallel && (normalSeen || floatSeen)
+      item.input.fragmentation.sourceBoundary = boundary
+      if state.normalComplete { item.margin = ResolvedEdges.zero() }
+    }
+    let childStyle = nodes.style(item.id)
+    if resolveInlineContents {
+      item.input.parent = parent
+      if axes.vertical { item.input.availableHeight = AvailableSpace.definite(contentWidth) }
+      else { item.input.availableWidth = AvailableSpace.definite(contentWidth) }
+      let childBox = axes.box(resolveBox(childStyle, item.input))
+      item.margin = childBox.margin
+      item.inset = childBox.inset
+      item.width = max(childBox.inset.horizontal(), contentWidth - childBox.margin.horizontal())
+      if childBox.size.widthDefinite { item.width = childBox.size.width }
+      item.width = clamp(item.width, childBox.min.width, childBox.max.width)
+    }
+    let independent = item.input.blockRoot || establishesContext(childStyle, item.input) || childStyle.replaced
+    let mut testFloatEnd = fragmented && item.input.fragmentation.marginEnd && !item.input.fragmentation.marginEndChosen
+      && formattingRoot && childStyle.float == Float.None && bfc.count != 0
+    if testFloatEnd { item.input.fragmentation.marginEnd = false }
+    let mut trialCandidate = Option<Candidate>.None
+    let mut candidateAllowed = true
+    if fragmented && !item.parallel && (normalSeen || floatSeen || childStyle.float == Float.None && cursor > 0.0) {
+      let mut values = boundary
+      if !handledBeforeTrial { values.merge(FragmentBox.boundary(nodes, item.id, true, input.fragmentation.kind, input.fragmentation.rectoOnRight)) }
+      let avoided = values.avoided.intersects(input.fragmentation.boundaryKinds) || childBase.fragmentation.avoidInside
+      if allowsBoundary(values.forced, input.fragmentation.activeKinds(), input.fragmentation.kind, avoided, input.fragmentation.relaxation) {
+        trialCandidate = Option<Candidate>.Some { value: Candidate {
+          pass: output.checkpoint(), bfc: bfc.checkpoint(), next: item.id, cursor: cursor,
+          top: top, bottom: bottom, leading: leading, allThrough: allThrough,
+          clearanceChain: clearanceChain, result: result,
+        } }
+      }
+      let forced = values.forced.active(input.fragmentation.activeKinds())
+      if nodes.node(item.id).kind != BoxKind.InlineFormatting && !startedBeforeTrial && (!handledBeforeTrial || boundary.forced.active(input.fragmentation.activeKinds()).kinds.any()) && forced.kinds.any() && (handledBeforeTrial || !nodes.node(item.id).dynamicBefore) {
+        run output.defer(item.id, forced)
+        stopped = true
+        nextChild = item.id
+        if childStyle.float != Float.None { bfc.pendingFloat = true }
+        let previous = move candidate
+        candidate = settleCandidate(&mut output, move previous, move trialCandidate, true)
+        index = index + 1
+        continue
+      }
+    }
+    let mut childLayout = Layout.zero()
+    let mut x = inlineOffset(childStyle, item.input, axes, style.usedDirection(), item.margin, item.width, contentWidth)
+    let mut y = cursor
+    let mut inlineStart = 0.0
+    let mut inlineSpace = contentWidth
+    if item.parallel { y = 0.0 }
+    if fragmented {
+      let own = output.resumes.get(id)
+      let state = output.resumes.get(item.id)
+      item.input.fragmentation.offset = input.fragmentation.offset + box.inset.top + y
+      item.input.fragmentation.limit = input.fragmentation.limit - box.inset.bottom
+      item.input.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || normalSeen || floatSeen || cursor > 0.0
+      item.input.fragmentation.forcedStart = state.beforeHandled && state.requested.kinds.any()
+      if !normalSeen && own.beforeHandled && own.requested.kinds.any() && !own.started && childStyle.float == Float.None { item.input.fragmentation.forcedStart = true }
+      if !normalSeen && input.fragmentation.forcedStart { item.input.fragmentation.forcedStart = true }
+      item.margin.top = FragmentBox.startMargin(childStyle, item.margin.top, state, item.input.fragmentation, style.writingMode)
+    }
+    if childStyle.float != Float.None {
+      let trial = output.checkpoint()
+      let mut deferred = fragmented && bfc.deferred(childStyle.float)
+      let mut floatAfter = BreakBoundary.none()
+      if fragmented { floatAfter = FragmentBox.boundary(nodes, item.id, false, input.fragmentation.kind, input.fragmentation.rectoOnRight) }
+      if deferred && !startedBeforeTrial && nodes.node(item.id).dynamicAfter {
+        let mut probe = item.input
+        probe.fragmentation.active = false
+        probe.fragmentation.boundaryProbe = BoundaryProbe.After
+        drop run layoutNode(nodes, &mut output, &mut measurer, item.id, probe)
+        floatAfter.merge(output.resumes.get(item.id).after)
+        output.restoreCheckpoint(trial)
+      }
+      y = max(bfc.sourceFloor - origin.y, max(0.0, y + pending.value()))
+      y = bfc.clearFloor(childStyle.clear, origin.y + y) - origin.y
+      while !deferred {
+        let previousY = y
+        let mut request = item.input
+        request.fragmentation.boundaryProbe = BoundaryProbe.None
+        if fragmented {
+          request.fragmentation.offset = input.fragmentation.offset + box.inset.top + y + item.margin.top
+          request.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || y > 0.0
+        }
+        childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+        childLayout.size = axes.size(childLayout.size)
+        if fragmented {
+          let state = output.resumes.get(item.id)
+          floatAfter.merge(state.after)
+          let mut discovered = boundary
+          if !handledBeforeTrial { discovered.merge(state.before) }
+          let forced = discovered.forced.active(input.fragmentation.activeKinds())
+          let avoided = discovered.avoided.intersects(input.fragmentation.boundaryKinds) || childBase.fragmentation.avoidInside
+          candidateAllowed = allowsBoundary(discovered.forced, input.fragmentation.activeKinds(), input.fragmentation.kind, avoided, input.fragmentation.relaxation)
+          if !item.parallel && !startedBeforeTrial && (normalSeen || floatSeen) && forced.kinds.any() {
+            output.restoreCheckpoint(trial)
+            run output.defer(item.id, forced)
+            stopped = true
+            nextChild = item.id
+            bfc.pendingFloat = true
+            deferred = true
+            break
+          }
+          if state.blocked || state.skipped || (!state.normalComplete && childLayout.size.height == 0.0 && request.fragmentation.offset >= request.fragmentation.limit) {
+            output.restoreCheckpoint(trial)
+            run output.defer(item.id, state.requested)
+            deferred = true
+            break
+          }
+          let used = axes.edges(childLayout.usedMargin)
+          item.margin.top = used.top
+          item.margin.bottom = used.bottom
+        }
+        let outerWidth = childLayout.size.width + item.margin.horizontal()
+        let outerHeight = childLayout.size.height + item.margin.vertical()
+        let mut band = bfc.band(origin, contentWidth, y, max(0.0, outerHeight))
+        while band.occupied && outerWidth > band.right - band.left {
+          y = band.nextBottom
+          band = bfc.band(origin, contentWidth, y, max(0.0, outerHeight))
+        }
+        if fragmented && y != previousY {
+          output.restoreCheckpoint(trial)
+          continue
+        }
+        x = band.left
+        if childStyle.float == Float.Right { x = band.right - outerWidth }
+        run bfc.append(FloatBox { side: childStyle.float, left: origin.x + x, right: origin.x + x + outerWidth, top: origin.y + y, bottom: origin.y + y + outerHeight })
+        bfc.sourceFloor = max(bfc.sourceFloor, origin.y + y)
+        x = x + item.margin.left
+        y = y + item.margin.top
+        break
+      }
+      output.closeCheckpoint(trial)
+      if fragmented {
+        let previous = move candidate
+        candidate = settleCandidate(&mut output, move previous, move trialCandidate, candidateAllowed)
+        if !item.parallel && !stopped {
+          boundary = floatAfter
+          floatSeen = true
+        }
+      }
+      if deferred {
+        if !stopped {
+          run output.enqueuePending(id, item.id)
+          bfc.defer(childStyle.float)
+          bfc.pendingFloat = bfc.pendingFloat || !output.resumes.get(item.id).normalComplete
+          if !item.parallel { nextChild = boxChild(nodes, nodes.node(item.id).nextSibling) }
+        }
+        index = index + 1
+        continue
+      }
+    } else {
+      let checkpoint = bfc.checkpoint()
+      let fragmentCheckpoint = output.checkpoint()
+      // Only preceding exclusions can clear this box, never floats emitted by
+      // its own descendants during the speculative layout below.
+      let clearMinimum = bfc.clearFloor(childStyle.clear, -1.0e100) - origin.y
+      let mut childTop = Margins.single(item.margin.top)
+      let mut joined = pending.join(childTop)
+      if !item.parallel && !(leading && collapseTop) { y = cursor + joined.value() }
+      y = max(y, clearMinimum)
+      let mut placed = false
+      while !placed {
+        let mut childInput = item.input
+        if fragmented {
+          childInput.fragmentation.offset = input.fragmentation.offset + box.inset.top + y
+          childInput.fragmentation.limit = input.fragmentation.limit - box.inset.bottom
+        }
+        childInput.bfcContentOrigin = Point { x: origin.x + x + item.inset.left, y: origin.y + y + item.inset.top }
+        bfc.sourceFloor = max(bfc.sourceFloor, origin.y + y - item.margin.top)
+        if independent {
+          childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, childInput)
+        } else {
+          childLayout = run layoutInBfc(nodes, &mut output, &mut measurer, item.id, childInput, &mut bfc)
+        }
+        childLayout.size = axes.size(childLayout.size)
+        if fragmented {
+          let state = output.resumes.get(item.id)
+          if state.blocked || state.skipped { placed = true
+            break }
+        }
+        if testFloatEnd {
+          testFloatEnd = false
+          // A contained float may establish the BFC's end below normal flow.
+          // Compare the retained margin envelope, not the already-trimmed
+          // border rectangle. Actual chosen sibling breaks remain adjoining.
+          if bfc.bottom(origin) <= y + childLayout.size.height + bottomMargins(childLayout).value() {
+            item.input.fragmentation.marginEnd = true
+            bfc.restore(checkpoint)
+            output.restoreCheckpoint(fragmentCheckpoint)
+            continue
+          }
+        }
+        childTop = topMargins(childLayout)
+        joined = pending.join(childTop)
+        let mut nextY = cursor
+        if item.parallel { nextY = 0.0 }
+        else if !(leading && collapseTop) { nextY = cursor + joined.value() }
+        nextY = max(nextY, clearMinimum)
+        let nextX = inlineOffset(childStyle, item.input, axes, style.usedDirection(), item.margin, childLayout.size.width, contentWidth)
+        let moved = nextX != x || nextY != y
+        if moved && ((fragmented && nextY != y) || (!independent && checkpoint.count != 0)) {
+          // Fragment capacity changes with the collapsed block position even
+          // when no float exclusions are present.
+          bfc.restore(checkpoint)
+          output.restoreCheckpoint(fragmentCheckpoint)
+        } else {
+          if !independent && moved { bfc.translate(checkpoint, Point { x: nextX - x, y: nextY - y }) }
+          placed = true
+        }
+        x = nextX
+        y = nextY
+      }
+      let mut hypotheticalY = cursor
+      if !(leading && collapseTop) { hypotheticalY = cursor + joined.value() }
+      let cleared = clearMinimum > hypotheticalY
+      // CSS 2.2 §9.5 includes block-level replaced elements as well as new
+      // formatting contexts. Ordinary blocks themselves may overlap floats.
+      let accepted = !fragmented || (!output.resumes.get(item.id).blocked && !output.resumes.get(item.id).skipped)
+      if independent && bfc.count != 0 && accepted {
+        let mut band = bfc.band(origin, contentWidth, y, childLayout.size.height)
+        let justification = blockJustification(childStyle, item.input)
+        let autoWidth = axes.autoInline(childStyle) && (!childStyle.replaced || justification == Align.Stretch)
+        let stretch = justification == Align.Normal || (justification == Align.Stretch && !axes.lowAuto(childStyle) && !axes.highAuto(childStyle))
+        let mut fits = false
+        let mut layoutY = y
+        while !fits {
+          if autoWidth || (fragmented && layoutY != y) {
+            let mut bfcInput = item.input
+            if autoWidth {
+              let available = band.right - band.left
+              if axes.vertical {
+                bfcInput.availableHeight = AvailableSpace.definite(available)
+                if stretch {
+                  bfcInput.known.height = max(0.0, available - item.margin.horizontal())
+                  bfcInput.known.heightDefinite = true
+                }
+              } else {
+                bfcInput.availableWidth = AvailableSpace.definite(available)
+                if stretch {
+                  bfcInput.known.width = max(0.0, available - item.margin.horizontal())
+                  bfcInput.known.widthDefinite = true
+                }
+              }
+            }
+            bfcInput.blockRoot = true
+            if fragmented {
+              bfcInput.fragmentation.offset = input.fragmentation.offset + box.inset.top + y
+              bfcInput.fragmentation.limit = input.fragmentation.limit - box.inset.bottom
+            }
+            output.restoreCheckpoint(fragmentCheckpoint)
+            childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, bfcInput)
+            childLayout.size = axes.size(childLayout.size)
+            layoutY = y
+            if fragmented {
+              let state = output.resumes.get(item.id)
+              if state.blocked || state.skipped { break }
+            }
+          }
+          let occupiedWidth = childLayout.size.width + item.margin.horizontal()
+          let updated = bfc.band(origin, contentWidth, y, childLayout.size.height)
+          if autoWidth && updated.right - updated.left < band.right - band.left && occupiedWidth <= band.right - band.left {
+            band = updated
+          } else {
+            band = updated
+            if band.occupied && occupiedWidth > band.right - band.left {
+              y = band.nextBottom
+              band = bfc.band(origin, contentWidth, y, childLayout.size.height)
+            } else {
+              fits = true
+            }
+          }
+        }
+        x = band.left + inlineOffset(childStyle, item.input, axes, style.usedDirection(), item.margin, childLayout.size.width, band.right - band.left)
+        inlineStart = band.left
+        inlineSpace = band.right - band.left
+      }
+      if fragmented {
+        let state = output.resumes.get(item.id)
+        if !normalSeen && !item.parallel && !output.resumes.get(id).started { leadingBoundary.merge(state.before) }
+        if input.fragmentation.boundaryProbe == BoundaryProbe.Before && !item.parallel {
+          output.closeCheckpoint(fragmentCheckpoint)
+          let previous = move candidate
+          let remaining = settleCandidate(&mut output, move previous, move trialCandidate, false)
+          match move remaining {
+            Option<Candidate>.Some { value } => { output.closeCheckpoint(value.pass) }
+            Option<Candidate>.None => {}
+          }
+          let mut own = output.resumes.get(id)
+          own.before.merge(leadingBoundary)
+          own.normalContentComplete = true
+          own.descendantsComplete = true
+          run output.resumes.set(id, own)
+          return Layout.zero()
+        }
+        let mut discovered = boundary
+        if !handledBeforeTrial {
+          discovered.merge(BreakBoundary.make(childStyle.breakBefore, input.fragmentation.kind, input.fragmentation.rectoOnRight))
+          discovered.merge(state.before)
+        }
+        let avoided = discovered.avoided.intersects(input.fragmentation.boundaryKinds) || childBase.fragmentation.avoidInside
+        candidateAllowed = allowsBoundary(discovered.forced, input.fragmentation.activeKinds(), input.fragmentation.kind, avoided, input.fragmentation.relaxation)
+        let mut forced = discovered.forced.active(input.fragmentation.activeKinds())
+        if nodes.node(item.id).kind == BoxKind.InlineFormatting && state.blocked && state.requested.kinds.any() { forced = state.requested }
+        let mustBreak = !item.parallel && !startedBeforeTrial && (!handledBeforeTrial || boundary.forced.active(input.fragmentation.activeKinds()).kinds.any() || nodes.node(item.id).kind == BoxKind.InlineFormatting && state.blocked) && forced.kinds.any()
+        if state.blocked || state.skipped || mustBreak {
+          bfc.restore(checkpoint)
+          output.restoreCheckpoint(fragmentCheckpoint)
+          output.closeCheckpoint(fragmentCheckpoint)
+          let previous = move candidate
+          candidate = settleCandidate(&mut output, move previous, move trialCandidate, candidateAllowed)
+          if mustBreak {
+            if !normalSeen && !handledBeforeTrial && state.before.forced.active(input.fragmentation.activeKinds()).kinds.any() {
+              let mut own = output.resumes.get(id)
+              own.before.merge(state.before)
+              own.requested = forced
+              own.blocked = true
+              run output.resumes.set(id, own)
+              stopped = true
+              nextChild = item.id
+              break
+            }
+            run output.defer(item.id, forced)
+            stopped = true
+            nextChild = item.id
+          } else if item.parallel {
+            run output.enqueuePending(id, item.id)
+          } else {
+            match &candidate {
+              Option<Candidate>.Some { value } => {
+                output.restoreCheckpoint(value.pass)
+                bfc.restore(value.bfc)
+                nextChild = value.next
+                cursor = value.cursor
+                top = value.top
+                bottom = value.bottom
+                leading = value.leading
+                allThrough = value.allThrough
+                clearanceChain = value.clearanceChain
+                result = value.result
+                let restoredMargins = output.resumes.get(id).pendingMargin
+                pending = Margins { positive: restoredMargins.positive(), negative: restoredMargins.negative() }
+                run output.defer(nextChild, ForcedBreaks.none())
+              }
+              Option<Candidate>.None => {
+                let mut own = output.resumes.get(id)
+                own.blocked = !state.skipped
+                own.skipped = state.skipped && !progressed
+                run output.resumes.set(id, own)
+                nextChild = item.id
+              }
+            }
+            stopped = true
+          }
+          index = index + 1
+          continue
+        }
+      }
+      let childBottom = bottomMargins(childLayout)
+      if fragmented && !item.parallel {
+        let child = output.resumes.get(item.id)
+        let mut own = output.resumes.get(id)
+        if leading && collapseTop && !cleared {
+          own.marginTop = own.marginTop.join(child.marginTop)
+          if childLayout.collapsesThrough { own.marginTop = own.marginTop.join(child.marginBottom) }
+        }
+        if childLayout.collapsesThrough {
+          if cleared { own.pendingMargin = child.marginTop.join(child.marginBottom) }
+          else { own.pendingMargin = own.pendingMargin.join(child.marginTop).join(child.marginBottom) }
+        } else { own.pendingMargin = child.marginBottom }
+        run output.resumes.set(id, own)
+      }
+      if cleared && !item.parallel {
+        childLayout.hasClearance = true
+        leading = false
+        clearanceChain = true
+      }
+      if leading && collapseTop && !item.parallel {
+        top = top.join(childTop)
+        if childLayout.collapsesThrough { top = top.join(childBottom) }
+      }
+      if item.parallel {
+        // Descendant overflow has no remaining normal-flow footprint.
+      } else if childLayout.collapsesThrough {
+        if cleared {
+          cursor = y - childTop.value()
+          pending = childTop.join(childBottom)
+        } else {
+          pending = joined.join(childBottom)
+        }
+      } else {
+        cursor = y + childLayout.size.height
+        pending = childBottom
+        leading = false
+        allThrough = false
+        clearanceChain = false
+      }
+      bfc.sourceFloor = max(bfc.sourceFloor, origin.y + y - item.margin.top)
+      let childAxes = Axes.make(childStyle.writingMode)
+      if !item.parallel && axes.vertical == childAxes.vertical {
+        if childLayout.hasFirstBaseline && !result.hasFirstBaseline {
+          let mut first = childLayout.firstBaselines
+          if axes.reverseBlock != childAxes.reverseBlock { first = first.reversed(childLayout.size.height) }
+          result.firstBaselines = first.translated(box.inset.top + y)
+          result.hasFirstBaseline = true
+        }
+        if childLayout.hasLastBaseline {
+          let mut last = childLayout.lastBaselines
+          if axes.reverseBlock != childAxes.reverseBlock { last = last.reversed(childLayout.size.height) }
+          result.lastBaselines = last.translated(box.inset.top + y)
+          result.hasLastBaseline = true
+        }
+      }
+      output.closeCheckpoint(fragmentCheckpoint)
+      if fragmented {
+        let previous = move candidate
+        candidate = settleCandidate(&mut output, move previous, move trialCandidate, candidateAllowed)
+      }
+    }
+    let mut usedMargin = item.margin
+    if fragmented {
+      let used = axes.edges(childLayout.usedMargin)
+      usedMargin.top = used.top
+      usedMargin.bottom = used.bottom
+    }
+    if childStyle.float == Float.None {
+      let alignment = blockJustification(childStyle, item.input)
+      if alignment == Align.Normal || axes.lowAuto(childStyle) || axes.highAuto(childStyle) {
+        usedMargin.left = x - inlineStart
+        usedMargin.right = inlineSpace - childLayout.size.width - usedMargin.left
+      }
+    }
+    childLayout.usedMargin = axes.physicalEdges(usedMargin)
+    childLayout.location = Point { x: box.inset.left + x, y: box.inset.top + y }
+    childLayout.size = axes.size(childLayout.size)
+    run output.store(item.id, childLayout, input.performLayout)
+    if fragmented {
+      progressed = true
+      let state = output.resumes.get(item.id)
+      if !state.contentComplete && (item.parallel || childStyle.float != Float.None || state.normalComplete) {
+        run output.enqueuePending(id, item.id)
+      }
+      if childStyle.float != Float.None {
+        floatSeen = true
+        bfc.pendingFloat = bfc.pendingFloat || !state.normalComplete
+      }
+      if !item.parallel {
+        if childStyle.float != Float.None || state.normalComplete {
+          nextChild = boxChild(nodes, nodes.node(item.id).nextSibling)
+        } else { nextChild = item.id
+          stopped = true }
+        if childStyle.float == Float.None {
+          normalSeen = true
+          boundary = state.after
+          if state.sourceAfterValid { boundary = state.sourceAfter }
+          normalAfter = state.after
+        }
+      }
+    }
+    if afterProbe && childStyle.float == Float.None {
+      boundary = FragmentBox.boundary(nodes, item.id, false, input.fragmentation.kind, input.fragmentation.rectoOnRight)
+      if nodes.node(item.id).dynamicAfter { boundary.merge(output.resumes.get(item.id).after) }
+    }
+    index = index + 1
+  }
+  match &candidate {
+    Option<Candidate>.Some { value } => { output.closeCheckpoint(value.pass) }
+    Option<Candidate>.None => {}
+  }
+  if fragmented {
+    let mut state = output.resumes.get(id)
+    state.cursor = FlowCursor.Block { nextChild: nextChild }
+    state.before.merge(leadingBoundary)
+    let normalComplete = normalChild(nodes, nextChild) == NO_NODE
+    if normalComplete { state.after.merge(normalAfter) }
+    state.normalContentComplete = normalComplete && !(formattingRoot && bfc.pendingFloat)
+    state.descendantsComplete = nextChild == NO_NODE && state.pendingFirst == NO_NODE && !stopped
+    if stopped {
+      // Fixed host frames do not grow or replay kept trailing margins. Keep
+      // retains the originating frame's signed footprint, including overflow.
+      let forced = nextChild != NO_NODE && output.resumes.get(nextChild).requested.kinds.any()
+      let remaining = input.fragmentation.limit - input.fragmentation.offset - box.inset.vertical() - cursor
+      state.pendingMargin = state.pendingMargin.beforeBreak(forced, remaining)
+      pending = Margins { positive: state.pendingMargin.positive(), negative: state.pendingMargin.negative() }
+    } else if input.fragmentation.marginEnd && box.inset.bottom == 0.0 && (input.fragmentation.marginEndChosen || !formattingRoot || bfc.bottom(origin) <= cursor + pending.value()) {
+      state.pendingMargin = state.pendingMargin.boundary(true)
+      pending = Margins { positive: state.pendingMargin.positive(), negative: state.pendingMargin.negative() }
+    }
+    run output.resumes.set(id, state)
+  }
+  if afterProbe {
+    let mut state = output.resumes.get(id)
+    state.after = FragmentBox.boundary(nodes, id, false, input.fragmentation.kind, input.fragmentation.rectoOnRight)
+    state.after.merge(boundary)
+    run output.resumes.set(id, state)
+  }
+  let bottomAdjoins = collapseBottom && !clearanceChain && !(allThrough && collapseTop && box.min.height > box.inset.vertical())
+  if bottomAdjoins { bottom = bottom.join(pending) }
+  if fragmented && bottomAdjoins {
+    let mut state = output.resumes.get(id)
+    state.marginBottom = state.marginBottom.join(state.pendingMargin)
+    run output.resumes.set(id, state)
+  }
+  if !bottomAdjoins && !(leading && collapseTop) { cursor = cursor + pending.value() }
+  if formattingRoot { cursor = max(cursor, bfc.bottom(origin)) }
+  let mut height = max(0.0, cursor) + box.inset.vertical()
+  if !fragmented {
+    height = clamp(height, box.min.height, box.max.height)
+    if box.size.heightDefinite { height = box.size.height }
+  }
+  let contentHeight = max(0.0, height - box.inset.vertical())
+  let mut alignmentOffset = 0.0
+  if !fragmented { alignmentOffset = blockContentOffset(style, contentHeight - max(0.0, cursor)) }
+  result.size = axes.size(Size { width: width, height: height })
+  if result.hasFirstBaseline { result.firstBaselines = result.firstBaselines.translated(alignmentOffset) }
+  if result.hasLastBaseline { result.lastBaselines = result.lastBaselines.translated(alignmentOffset) }
+  if axes.vertical || alignmentOffset != 0.0 {
+    index = 0
+    while index < children.length() {
+      let childIndex = children.get(index).id
+      if fragmented && output.publication(childIndex) == NO_NODE { index = index + 1
+        continue }
+      let mut child = output.boxes[childIndex]
+      let point = Point { x: child.location.x, y: child.location.y + alignmentOffset }
+      child.location = axes.physicalPoint(point, child.size, result.size)
+      run output.store(childIndex, child, input.performLayout)
+      index = index + 1
+    }
+  }
+  result.marginTopPositive = top.positive
+  result.marginTopNegative = top.negative
+  result.marginBottomPositive = bottom.positive
+  result.marginBottomNegative = bottom.negative
+  result.collapsesThrough = !formattingRoot && allThrough && !clearanceChain && box.inset.vertical() == 0.0 && box.min.height == 0.0 && height == 0.0
+  if result.collapsesThrough { result.collapsesThrough = selfCollapsingSize(style, input.parent, box.size.widthDefinite) }
+  return result
+}

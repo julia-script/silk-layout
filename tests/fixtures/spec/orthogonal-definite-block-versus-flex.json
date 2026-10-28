@@ -1,0 +1,149 @@
+{
+  "name": "orthogonal-definite-block-versus-flex",
+  "kind": "spec",
+  "features": [
+    "writing-mode",
+    "orthogonal-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-writing-modes-4/#orthogonal-auto",
+    "https://drafts.csswg.org/css-writing-modes-4/#auto-multicol",
+    "https://drafts.csswg.org/css-writing-modes-4/#orthogonal-layout"
+  ],
+  "input": {
+    "viewport": {
+      "width": 250,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 200,
+          "height": 80
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "width": 20
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 30
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 30
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex",
+          "writingMode": "vertical-rl",
+          "width": 20
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "width": 10,
+          "height": 30,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "width": 10,
+          "height": 30,
+          "flexShrink": 0
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 200,
+            "height": 80
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 20,
+            "height": 60
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 10,
+            "height": 30
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 30,
+            "width": 10,
+            "height": 30
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 60,
+            "width": 20,
+            "height": 80
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 60,
+            "width": 10,
+            "height": 30
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 90,
+            "width": 10,
+            "height": 30
+          }
+        ]
+      }
+    ]
+  }
+}

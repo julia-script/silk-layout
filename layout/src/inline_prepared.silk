@@ -1,0 +1,25 @@
+import silk.list { List }
+import inline_text { NormalizedText }
+import inline_visual { Plan }
+import text { TextToken, TextAnalysis, TextBreak }
+
+// An entire normalized paragraph belongs to one compute pass. Fragment cursors
+// address these tokens, never a suffix whose bidi or source coordinates differ.
+pub struct PreparedInline<'source> {
+  pub ready: bool,
+  pub normalized: NormalizedText<'source>,
+  pub analysis: TextAnalysis,
+  pub offered: List<TextBreak>,
+  pub visual: Plan,
+  pub barriers: List<bool>,
+}
+impl PreparedInline {
+  pub fn make<'source>() -> PreparedInline<'source> {
+    return PreparedInline {
+      ready: false,
+      normalized: NormalizedText { tokens: List<TextToken<'source>>.make(), origins: List<usize>.make() },
+      analysis: TextAnalysis.uniform(0, 0, 0, false),
+      offered: List<TextBreak>.make(), visual: Plan.make(), barriers: List<bool>.make(),
+    }
+  }
+}

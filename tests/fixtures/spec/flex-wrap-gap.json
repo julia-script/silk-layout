@@ -1,0 +1,89 @@
+{
+  "name": "flex-wrap-gap",
+  "kind": "spec",
+  "features": [
+    "flex",
+    "wrap",
+    "gap"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 120,
+          "flexWrap": "wrap",
+          "rowGap": 5,
+          "columnGap": 10,
+          "alignItems": "flex-start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 50,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 50,
+          "height": 30
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 50,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-flexbox-1/#cross-sizing",
+    "https://www.w3.org/TR/css-gaps-1/#gap-flex"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 120,
+        "height": 45,
+        "contentWidth": 120,
+        "contentHeight": 45
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 20,
+        "contentWidth": 50,
+        "contentHeight": 20
+      },
+      {
+        "x": 60,
+        "y": 0,
+        "width": 50,
+        "height": 30,
+        "contentWidth": 50,
+        "contentHeight": 30
+      },
+      {
+        "x": 0,
+        "y": 35,
+        "width": 50,
+        "height": 10,
+        "contentWidth": 50,
+        "contentHeight": 10
+      }
+    ]
+  }
+}

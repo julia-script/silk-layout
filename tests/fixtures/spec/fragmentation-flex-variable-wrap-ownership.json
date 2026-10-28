@@ -1,0 +1,21 @@
+{
+  "name": "fragmentation-flex-variable-wrap-ownership",
+  "kind": "spec",
+  "spec": ["https://drafts.csswg.org/css-flexbox-1/#pagination", "https://drafts.csswg.org/css-flexbox-1/#pagination-algo"],
+  "input": {
+    "viewport": {"width": 300, "height": 100},
+    "fragmentation": {"kind": "region", "frames": [{"x": 0, "y": 0, "width": 100, "height": 50}, {"x": 200, "y": 0, "width": 60, "height": 50}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "flex", "flexWrap": "wrap", "alignItems": "flex-start"}},
+      {"parent": 0, "style": {"width": 50, "height": 80, "minWidth": 0}},
+      {"parent": 0, "style": {"width": 50, "height": 80, "minWidth": 0}},
+      {"parent": 0, "style": {"width": 50, "height": 20, "minWidth": 0}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 100, "height": 50}, {"x": 200, "y": 0, "width": 60, "height": 50}]},
+    {"rects": [{"x": 0, "y": 0, "width": 50, "height": 50}, {"x": 200, "y": 0, "width": 30, "height": 30}]},
+    {"rects": [{"x": 50, "y": 0, "width": 50, "height": 50}, {"x": 230, "y": 0, "width": 30, "height": 30}]},
+    {"rects": [{"x": 200, "y": 30, "width": 50, "height": 20}]}
+  ]}
+}

@@ -1,0 +1,24 @@
+{
+  "name": "flex-intrinsic-calc-gap-column",
+  "kind": "spec",
+  "features": ["flex", "column", "intrinsic", "gap", "cyclic-percentage", "calc"],
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#intrinsic-main-sizes-compat",
+    "https://drafts.csswg.org/css-gaps-1/#gap-percent"
+  ],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flex", "flexDirection": "column", "width": 20, "rowGap": {"length": 7, "percent": 0.1}}},
+      {"parent": 0, "style": {"height": 30, "flexShrink": 0}},
+      {"parent": 0, "style": {"height": 40, "flexShrink": 0}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 20, "height": 77, "contentWidth": 20, "contentHeight": 77},
+      {"x": 0, "y": 0, "width": 20, "height": 30, "contentWidth": 20, "contentHeight": 30},
+      {"x": 0, "y": 37, "width": 20, "height": 40, "contentWidth": 20, "contentHeight": 40}
+    ]
+  }
+}

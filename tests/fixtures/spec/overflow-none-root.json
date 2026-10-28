@@ -1,0 +1,60 @@
+{
+  "name": "overflow-none-root",
+  "kind": "spec",
+  "features": [
+    "scrollable-overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollable-overflow-calculation",
+    "https://drafts.csswg.org/css-overflow-3/#scroll-origin",
+    "https://drafts.csswg.org/css-position-3/#relative-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "none",
+          "width": 500,
+          "padding": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 200,
+          "height": 150,
+          "padding": 30,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 0,
+        "scrollableOverflowHeight": 0
+      },
+      {
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 0,
+        "scrollableOverflowHeight": 0
+      }
+    ],
+    "viewportOverflow": {
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 100
+    }
+  }
+}

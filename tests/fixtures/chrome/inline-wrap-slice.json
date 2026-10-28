@@ -1,0 +1,66 @@
+{
+  "name": "inline-wrap-slice",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 90
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "padding": {
+            "left": 5,
+            "right": 7,
+            "top": 2,
+            "bottom": 3
+          },
+          "border": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      }
+    ]
+  }
+}

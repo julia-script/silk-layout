@@ -1,0 +1,168 @@
+{
+  "name": "fragment-inline-float-source-avoid-after",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "floats",
+    "inline-fragments",
+    "break-controls"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-break-3/#possible-breaks",
+    "https://drafts.csswg.org/css-break-3/#unforced-breaks"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 30,
+          "height": 50
+        },
+        {
+          "x": 40,
+          "y": 0,
+          "width": 30,
+          "height": 50
+        },
+        {
+          "x": 80,
+          "y": 0,
+          "width": 30,
+          "height": 50
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "orphans": 1,
+          "widows": 1,
+          "lineHeight": {
+            "length": 0
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 30
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "float": "left",
+          "width": 10,
+          "height": 10,
+          "breakAfter": "avoid-column"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 20
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 30,
+            "height": 50
+          },
+          {
+            "x": 40,
+            "y": 0,
+            "width": 30,
+            "height": 30
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 30,
+            "height": 30
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 50,
+            "y": 10,
+            "width": 20,
+            "height": 0
+          },
+          {
+            "x": 40,
+            "y": 30,
+            "width": 20,
+            "height": 0
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 50,
+            "y": 0,
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 40,
+            "y": 0,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 40,
+            "y": 10,
+            "width": 20,
+            "height": 20
+          }
+        ]
+      }
+    ]
+  }
+}

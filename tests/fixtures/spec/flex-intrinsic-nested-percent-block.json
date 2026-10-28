@@ -1,0 +1,62 @@
+{
+  "name": "flex-intrinsic-nested-percent-block",
+  "kind": "spec",
+  "features": [
+    "flex",
+    "intrinsic-sizing",
+    "cyclic-percentages"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": "max-content"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 80,
+          "height": 10,
+          "margin": {
+            "left": {
+              "percent": 0.1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-sizing-3/#cyclic-percentage-contribution",
+    "https://drafts.csswg.org/css-flexbox-1/#definite-sizes"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "width": 80,
+        "height": 10
+      },
+      {
+        "width": 80,
+        "height": 10
+      },
+      {
+        "x": 8,
+        "y": 0,
+        "width": 80,
+        "height": 10
+      }
+    ]
+  }
+}

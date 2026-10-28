@@ -1,0 +1,63 @@
+{
+  "name": "overflow-padding-clip",
+  "kind": "spec",
+  "features": [
+    "scrollable-overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollable-overflow-calculation",
+    "https://drafts.csswg.org/css-overflow-3/#scroll-origin",
+    "https://drafts.csswg.org/css-position-3/#relative-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "boxSizing": "border-box",
+          "border": 10,
+          "padding": 20,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 200,
+          "height": 150
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "scrollableOverflowX": 10,
+        "scrollableOverflowY": 10,
+        "scrollableOverflowWidth": 240,
+        "scrollableOverflowHeight": 190
+      },
+      {
+        "x": 30,
+        "y": 30,
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 200,
+        "scrollableOverflowHeight": 150
+      }
+    ],
+    "viewportOverflow": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 100
+    }
+  }
+}

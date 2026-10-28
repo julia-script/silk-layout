@@ -1,0 +1,24 @@
+{
+  "name": "bidi-static-inline-self-start",
+  "kind": "spec",
+  "features": ["source-text", "bidi-ordering", "static-position", "self-alignment"],
+  "spec": ["https://drafts.csswg.org/css-position-3/#staticpos-rect", "https://drafts.csswg.org/css-align-3/#justify-abspos", "https://drafts.csswg.org/css-align-3/#valdef-self-position-self-start", "https://drafts.csswg.org/css-align-3/#auto-safety-position"],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "fonts": [{"fontSize": 10, "ascent": 8, "descent": 2, "lineGap": 0, "xHeight": 5, "capHeight": 7, "subscriptOffset": 2, "superscriptOffset": 3, "baselines": {"alphabetic": 8, "ideographic": 10, "central": 5, "mathematical": 5}}],
+    "nodes": [
+      {"parent": null, "style": {"width": 100, "fontKey": 1}},
+      {"parent": 0, "text": "ab"},
+      {"parent": 0, "style": {"display": "inline", "position": "absolute", "direction": "rtl", "justifySelf": "self-start", "width": 12, "height": 6}},
+      {"parent": 0, "style": {"display": "inline", "position": "fixed", "direction": "rtl", "justifySelf": "self-end", "width": 12, "height": 6}},
+      {"parent": 0, "style": {"display": "inline", "position": "absolute", "direction": "rtl", "justifySelf": "self-start", "justifySelfSafety": "unsafe", "width": 12, "height": 6}}
+    ]
+  },
+  "expected": {"sources": [
+    {"width": 100, "height": 10},
+    {"rects": [{"x": 0, "y": 0, "width": 10, "height": 10}]},
+    {"rects": [{"x": 0, "y": 0, "width": 12, "height": 6}]},
+    {"rects": [{"x": 10, "y": 0, "width": 12, "height": 6}]},
+    {"rects": [{"x": -2, "y": 0, "width": 12, "height": 6}]}
+  ]}
+}

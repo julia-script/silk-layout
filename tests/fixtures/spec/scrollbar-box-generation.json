@@ -1,0 +1,146 @@
+{
+  "name": "scrollbar-box-generation",
+  "kind": "spec",
+  "features": [
+    "scrollbars",
+    "scrollbar-gutter"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollbar-sizing",
+    "https://drafts.csswg.org/css-overflow-3/#scrollbar-gutter-property",
+    "https://drafts.csswg.org/css-scrollbars-1/#scrollbar-width"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "scrollbars": {
+      "auto": {
+        "horizontal": 12,
+        "vertical": 15,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      },
+      "thin": {
+        "horizontal": 6,
+        "vertical": 8,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "contents",
+          "width": 100,
+          "height": 100,
+          "scrollbarGutter": "stable both-edges",
+          "overflowX": "scroll",
+          "overflowY": "scroll"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "none",
+          "overflowX": "scroll",
+          "overflowY": "scroll"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 50,
+          "height": 50,
+          "overflowX": "scroll",
+          "overflowY": "scroll"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "overflowX": "scroll",
+          "overflowY": "scroll"
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollbarGutterTop": 0,
+        "scrollbarGutterRight": 0,
+        "scrollbarGutterBottom": 0,
+        "scrollbarGutterLeft": 0,
+        "horizontalScrollbar": false,
+        "verticalScrollbar": false
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollbarGutterTop": 0,
+        "scrollbarGutterRight": 0,
+        "scrollbarGutterBottom": 0,
+        "scrollbarGutterLeft": 0,
+        "horizontalScrollbar": false,
+        "verticalScrollbar": false
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollbarGutterTop": 0,
+        "scrollbarGutterRight": 0,
+        "scrollbarGutterBottom": 0,
+        "scrollbarGutterLeft": 0,
+        "horizontalScrollbar": false,
+        "verticalScrollbar": false
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 100,
+        "contentWidth": 85,
+        "contentHeight": 88,
+        "scrollbarGutterTop": 0,
+        "scrollbarGutterRight": 15,
+        "scrollbarGutterBottom": 12,
+        "scrollbarGutterLeft": 0,
+        "horizontalScrollbar": true,
+        "verticalScrollbar": true
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 85,
+        "height": 10
+      }
+    ]
+  }
+}

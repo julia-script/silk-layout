@@ -1,0 +1,99 @@
+{
+  "name": "sticky-flex-auto-margin",
+  "kind": "spec",
+  "features": [
+    "scroll-state",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrolling",
+    "https://drafts.csswg.org/css-position-3/#stickypos-insets",
+    "https://drafts.csswg.org/css-position-3/#static-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex",
+          "width": 400,
+          "height": 100
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 100,
+          "height": 20,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 50,
+          "height": 20,
+          "flexShrink": 0,
+          "marginLeft": "auto",
+          "position": "sticky",
+          "insetRight": 0
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 50,
+          "height": 20,
+          "flexShrink": 0
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 400,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 100,
+        "y": 0,
+        "width": 50,
+        "height": 20
+      },
+      {
+        "x": 350,
+        "y": 0,
+        "width": 50,
+        "height": 20
+      }
+    ]
+  }
+}

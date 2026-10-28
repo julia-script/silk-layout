@@ -1,0 +1,15 @@
+{
+  "name": "resource-natural-size",
+  "kind": "chrome",
+  "features": ["replaced", "natural-size", "parent-border-relative"],
+  "description": "Loaded SVG resources use their natural content size. Nested padding, borders and margins exercise parent-border-relative geometry without treating resource dimensions as text measurements.",
+  "spec": ["https://www.w3.org/TR/css-images-3/#natural-dimensions", "https://www.w3.org/TR/SVG2/coords.html#IntrinsicSizing"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flow-root", "width": 400, "padding": 11, "border": 3}},
+      {"parent": 0, "style": {"padding": 7, "border": 2, "margin": 5}, "natural": {"width": 120, "height": 60, "aspectRatio": 2}},
+      {"parent": 0, "style": {"width": 90}, "natural": {"width": 120, "height": 60, "aspectRatio": 2}}
+    ]
+  }
+}

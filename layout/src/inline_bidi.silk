@@ -1,0 +1,49 @@
+import text { TextAnalysis, TextContext, TextTokenKind, TextCursor, TextError }
+import inline_text as TextFlow
+import tree { NO_NODE }
+
+pub effect fn normalizeAnalysis(context: TextContext, analysis: &mut TextAnalysis) ! TextError {
+  let terminal = TextCursor { unit: context.tokens.length, offset: 0 }
+  analysis.paragraph.end = run TextFlow.checked(context.tokens, analysis.paragraph.end)
+  if analysis.level > 126 || analysis.paragraph.level > 1 || !analysis.paragraph.end.equal(terminal) {
+    fail TextError { source: NO_NODE, message: "Text service returned invalid paragraph analysis" }
+  }
+  let mut previous = TextCursor { unit: 0, offset: 0 }
+  let mut index: usize = 0
+  while index < analysis.levels.length() {
+    let mut value = analysis.levels.get(index)
+    value.start = run TextFlow.checked(context.tokens, value.start)
+    value.end = run TextFlow.checked(context.tokens, value.end)
+    if value.level > 126 || value.unwrappedLevel > 126 || !value.start.before(value.end) || value.start.before(previous) {
+      fail TextError { source: NO_NODE, message: "Text service returned invalid or overlapping bidi level ranges" }
+    }
+    if value.removed {
+      let mut unit = value.start.unit
+      while unit < value.end.unit || (unit == value.end.unit && value.end.offset != 0) {
+        let token = &context.tokens[unit]
+        if token.kind != TextTokenKind.Text && TextFlow.length(token) != 0 {
+          fail TextError { source: token.source, message: "Text service removed a non-text bidi token" }
+        }
+        unit = unit + 1
+      }
+    }
+    previous = value.end
+    analysis.levels.set(index, value)
+    index = index + 1
+  }
+  previous = TextCursor { unit: 0, offset: 0 }
+  index = 0
+  while index < analysis.paragraphs.length() {
+    let mut value = analysis.paragraphs.get(index)
+    value.end = run TextFlow.checked(context.tokens, value.end)
+    if value.level > 1 || !previous.before(value.end) {
+      fail TextError { source: NO_NODE, message: "Text service returned invalid paragraph boundaries" }
+    }
+    previous = value.end
+    analysis.paragraphs.set(index, value)
+    index = index + 1
+  }
+  if analysis.paragraphs.length() != 0 && !previous.equal(terminal) {
+    fail TextError { source: NO_NODE, message: "Text service omitted the final paragraph boundary" }
+  }
+}

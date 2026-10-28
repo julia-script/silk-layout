@@ -1,0 +1,25 @@
+{
+  "name": "fragmentation-flex-boundary-propagation",
+  "kind": "spec",
+  "spec": ["https://drafts.csswg.org/css-flexbox-1/#pagination", "https://drafts.csswg.org/css-break-3/#break-propagation", "https://drafts.csswg.org/css-break-3/#box-splitting"],
+  "input": {
+    "viewport": {"width": 300, "height": 100},
+    "fragmentation": {"kind": "column", "frames": [{"x": 0, "y": 0, "width": 100, "height": 50}, {"x": 100, "y": 0, "width": 100, "height": 50}, {"x": 200, "y": 0, "width": 100, "height": 50}]},
+    "nodes": [
+      {"parent": null, "style": {}},
+      {"parent": 0, "style": {"height": 10}},
+      {"parent": 0, "style": {"display": "flex", "padding": {"top": 5}}},
+      {"parent": 2, "style": {"width": 50, "height": 20, "breakBefore": "column"}},
+      {"parent": 2, "style": {"width": 50, "height": 20, "breakAfter": "column"}},
+      {"parent": 0, "style": {"height": 10}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 100, "height": 50}, {"x": 100, "y": 0, "width": 100, "height": 50}, {"x": 200, "y": 0, "width": 100, "height": 10}]},
+    {"rects": [{"x": 0, "y": 0, "width": 100, "height": 10}]},
+    {"rects": [{"x": 100, "y": 0, "width": 100, "height": 25}]},
+    {"rects": [{"x": 100, "y": 5, "width": 50, "height": 20}]},
+    {"rects": [{"x": 150, "y": 5, "width": 50, "height": 20}]},
+    {"rects": [{"x": 200, "y": 0, "width": 100, "height": 10}]}
+  ]}
+}

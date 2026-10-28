@@ -1,0 +1,136 @@
+{
+  "name": "fragment-position-relative-shell-sideways-lr",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "position",
+    "writing-modes"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-position-3/#abspos-breaking",
+    "https://drafts.csswg.org/css-break-3/#varying-size-boxes",
+    "https://drafts.csswg.org/css-break-3/#transforms"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 400
+    },
+    "fragmentation": {
+      "kind": "page",
+      "writingMode": "sideways-lr",
+      "frames": [
+        {
+          "x": 10,
+          "y": 20,
+          "width": 50,
+          "height": 100
+        },
+        {
+          "x": 200,
+          "y": 150,
+          "width": 50,
+          "height": 160
+        },
+        {
+          "x": 400,
+          "y": 300,
+          "width": 50,
+          "height": 120
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "writingMode": "sideways-lr",
+          "width": 1,
+          "position": "relative",
+          "insetLeft": 7,
+          "insetTop": 9
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "sideways-lr",
+          "position": "absolute",
+          "insetLeft": 40,
+          "insetTop": 3,
+          "height": 20,
+          "width": 70
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "writingMode": "sideways-lr",
+          "position": "absolute",
+          "insetLeft": 5,
+          "insetTop": 2,
+          "height": 7,
+          "width": 65
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 17,
+            "y": 29,
+            "width": 1,
+            "height": 100
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 57,
+            "y": 32,
+            "width": 10,
+            "height": 20
+          },
+          {
+            "x": 207,
+            "y": 162,
+            "width": 50,
+            "height": 20
+          },
+          {
+            "x": 407,
+            "y": 312,
+            "width": 10,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 62,
+            "y": 34,
+            "width": 5,
+            "height": 7
+          },
+          {
+            "x": 207,
+            "y": 164,
+            "width": 50,
+            "height": 7
+          },
+          {
+            "x": 407,
+            "y": 314,
+            "width": 10,
+            "height": 7
+          }
+        ]
+      }
+    ]
+  }
+}

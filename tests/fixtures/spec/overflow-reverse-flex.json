@@ -1,0 +1,69 @@
+{
+  "name": "overflow-reverse-flex",
+  "kind": "spec",
+  "features": [
+    "scrollable-overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollable-overflow-calculation",
+    "https://drafts.csswg.org/css-overflow-3/#scroll-origin",
+    "https://drafts.csswg.org/css-position-3/#relative-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "flexDirection": "column-reverse",
+          "direction": "rtl",
+          "alignItems": "flex-start",
+          "width": 100,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        },
+        "scrollOffset": {
+          "x": -30,
+          "y": -40
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 200,
+          "height": 200,
+          "flexShrink": 0
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "scrollableOverflowX": -100,
+        "scrollableOverflowY": -100,
+        "scrollableOverflowWidth": 200,
+        "scrollableOverflowHeight": 200
+      },
+      {
+        "x": -70,
+        "y": -60,
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 200,
+        "scrollableOverflowHeight": 200
+      }
+    ],
+    "viewportOverflow": {
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 100
+    }
+  }
+}

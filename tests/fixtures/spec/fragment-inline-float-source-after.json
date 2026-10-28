@@ -1,0 +1,148 @@
+{
+  "name": "fragment-inline-float-source-after",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "floats",
+    "source-text",
+    "break-controls"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-break-3/#possible-breaks",
+    "https://drafts.csswg.org/css-break-3/#forced-breaks",
+    "https://drafts.csswg.org/css-break-3/#parallel-flows"
+  ],
+  "input": {
+    "viewport": {
+      "width": 500,
+      "height": 100
+    },
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 35
+        },
+        {
+          "x": 70,
+          "y": 0,
+          "width": 60,
+          "height": 35
+        },
+        {
+          "x": 140,
+          "y": 0,
+          "width": 60,
+          "height": 35
+        },
+        {
+          "x": 210,
+          "y": 0,
+          "width": 60,
+          "height": 35
+        },
+        {
+          "x": 280,
+          "y": 0,
+          "width": 60,
+          "height": 35
+        }
+      ]
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "fontKey": 1,
+          "orphans": 1,
+          "widows": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 1,
+        "text": "aa"
+      },
+      {
+        "parent": 1,
+        "style": {
+          "float": "left",
+          "width": 10,
+          "height": 10,
+          "breakAfter": "column"
+        }
+      },
+      {
+        "parent": 1,
+        "text": "bb"
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0
+      },
+      {
+        "y": 0
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 70,
+            "y": 0,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

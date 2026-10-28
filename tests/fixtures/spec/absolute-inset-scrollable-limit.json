@@ -1,0 +1,78 @@
+{
+  "name": "absolute-inset-scrollable-limit",
+  "kind": "spec",
+  "features": [
+    "static-position",
+    "self-alignment",
+    "overflow-safety"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "position": "relative",
+          "width": 100,
+          "height": 20,
+          "overflowX": "auto",
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "width": 40,
+          "height": 6,
+          "inset": {
+            "left": 80,
+            "right": 10,
+            "top": 0
+          },
+          "justifySelf": "center",
+          "justifySelfSafety": "safe"
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#auto-safety-position",
+    "https://drafts.csswg.org/css-position-3/#staticpos-rect"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 65,
+        "y": 0,
+        "width": 40,
+        "height": 6
+      }
+    ]
+  }
+}

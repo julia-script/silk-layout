@@ -1,0 +1,170 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.format { Debug, Format, Formatter }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.writer { Writer, WriterError }
+import style { WritingMode, TextOrientation, Direction, UnicodeBidi, WhiteSpaceCollapse, TextJustify }
+
+pub struct TextError { pub source: usize, pub message: string<'static> }
+impl Copy for TextError {}
+impl Debug for TextError {
+  effect fn debug(self: &Self, formatter: &mut Formatter) ! WriterError ? &mut Writer {
+    return run Format.debugFields(self, "TextError", &mut formatter)
+  }
+}
+
+pub enum TextTokenKind { Text, Space, PreservedSpace, Tab, SegmentBreak, Atomic, Float, Anchor, Open, Close }
+pub struct TextToken<'a> {
+  pub kind: TextTokenKind, pub text: string<'a>,
+  pub source: usize, pub sourceStart: usize, pub sourceEnd: usize,
+  pub fontKey: usize, pub writingMode: WritingMode,
+  pub textOrientation: TextOrientation, pub direction: Direction,
+  pub unicodeBidi: UnicodeBidi, pub replacedInline: bool,
+  pub whiteSpaceCollapse: WhiteSpaceCollapse,
+  pub textJustify: TextJustify,
+  pub shapingBarrier: bool,
+}
+impl Copy for TextToken {}
+pub struct TextContext<'tokens, 'text> {
+  pub tokens: &'tokens [TextToken<'text>],
+  pub writingMode: WritingMode, pub textOrientation: TextOrientation, pub direction: Direction,
+  pub unicodeBidi: UnicodeBidi,
+  pub textJustify: TextJustify,
+}
+impl Copy for TextContext {}
+pub struct TextCursor { pub unit: usize, pub offset: usize }
+impl Copy for TextCursor {}
+impl TextCursor {
+  pub fn before(self: Self, other: Self) -> bool {
+    return self.unit < other.unit || (self.unit == other.unit && self.offset < other.offset)
+  }
+  pub fn equal(self: Self, other: Self) -> bool {
+    return self.unit == other.unit && self.offset == other.offset
+  }
+}
+pub enum TextBreakKind { Soft, Forced, Hyphenated }
+pub struct TextBreak { pub at: TextCursor, pub kind: TextBreakKind }
+impl Copy for TextBreak {}
+pub struct TextLevel {
+  pub start: TextCursor, pub end: TextCursor, pub level: u8,
+  // L1 with the whole paragraph on one line, for stable bidi fragmentation.
+  pub unwrappedLevel: u8,
+  // X9 semantic removal, including Unicode BN; source coverage is retained.
+  pub removed: bool,
+}
+impl Copy for TextLevel {}
+pub struct TextParagraph {
+  pub end: TextCursor, pub level: u8, pub hasStrong: bool,
+}
+impl Copy for TextParagraph {}
+pub struct TextAnalysis {
+  // Empty lists represent one paragraph with a uniform resolved level.
+  // Otherwise levels are sorted, disjoint overrides of the default level;
+  // paragraphs describes every paragraph, with the final end at context EOF.
+  pub level: u8, pub paragraph: TextParagraph,
+  pub levels: List<TextLevel>, pub paragraphs: List<TextParagraph>,
+}
+impl TextAnalysis {
+  pub fn uniform(units: usize, level: u8, paragraphLevel: u8, hasStrong: bool) -> TextAnalysis {
+    return TextAnalysis {
+      level: level,
+      paragraph: TextParagraph { end: TextCursor { unit: units, offset: 0 }, level: paragraphLevel, hasStrong: hasStrong },
+      levels: List<TextLevel>.make(), paragraphs: List<TextParagraph>.make(),
+    }
+  }
+  fn levelIndex(self: &Self, at: TextCursor) -> usize {
+    let mut low: usize = 0
+    let mut high = self.levels.length()
+    while low < high {
+      let middle = low + (high - low) / 2
+      if at.before(self.levels.get(middle).end) { high = middle }
+      else { low = middle + 1 }
+    }
+    return low
+  }
+  pub fn levelAt(self: &Self, at: TextCursor) -> u8 {
+    let index = self.levelIndex(at)
+    if index < self.levels.length() {
+      let value = self.levels.get(index)
+      if !at.before(value.start) { return value.level }
+    }
+    return self.level
+  }
+  pub fn unwrappedLevelAt(self: &Self, at: TextCursor) -> u8 {
+    let index = self.levelIndex(at)
+    if index < self.levels.length() {
+      let value = self.levels.get(index)
+      if !at.before(value.start) { return value.unwrappedLevel }
+    }
+    return self.level
+  }
+  pub fn removedAt(self: &Self, at: TextCursor) -> bool {
+    let index = self.levelIndex(at)
+    if index < self.levels.length() {
+      let value = self.levels.get(index)
+      if !at.before(value.start) { return value.removed }
+    }
+    return false
+  }
+  pub fn paragraphAt(self: &Self, at: TextCursor) -> TextParagraph {
+    if self.paragraphs.length() == 0 { return self.paragraph }
+    let mut low: usize = 0
+    let mut high = self.paragraphs.length()
+    while low < high {
+      let middle = low + (high - low) / 2
+      if at.before(self.paragraphs.get(middle).end) { high = middle }
+      else { low = middle + 1 }
+    }
+    if low == self.paragraphs.length() { low = low - 1 }
+    return self.paragraphs.get(low)
+  }
+  // L1 may change a line's levels, but shaping must preserve these boundaries.
+  pub fn boundaryAfter(self: &Self, at: TextCursor) -> TextCursor {
+    let mut boundary = self.paragraphAt(at).end
+    let index = self.levelIndex(at)
+    if index < self.levels.length() {
+      let value = self.levels.get(index)
+      let mut end = value.end
+      if at.before(value.start) { end = value.start }
+      if end.before(boundary) { boundary = end }
+    }
+    return boundary
+  }
+}
+pub struct TextRange { pub start: TextCursor, pub end: TextCursor }
+impl Copy for TextRange {}
+pub struct TextShapeRequest<'tokens, 'text> {
+  pub context: TextContext<'tokens, 'text>, pub start: TextCursor, pub end: TextCursor,
+  pub analysis: &'tokens TextAnalysis,
+  pub hyphenated: bool,
+  // Requested extra inline advance after line selection; zero means natural
+  // shaping. Preserve content coverage and vertical metrics. If the line has
+  // no eligible opportunities, return its natural advances for CSS fallback.
+  pub justificationSpace: f64,
+  // Visual hanging whitespace excluded from expansion on this selected line.
+  pub hangingRanges: &'tokens [TextRange],
+}
+impl Copy for TextShapeRequest {}
+pub union TextRun {
+  Text {
+    pub unit: usize, pub start: usize, pub end: usize, pub advance: f64,
+    pub fontKey: usize, pub bidiLevel: u8, pub shapeKey: usize
+  },
+  Object {
+    pub unit: usize, pub bidiLevel: u8,
+    // Additional spacing outside the atomic margin box, in visual line axes.
+    pub lineLeftSpacing: f64, pub lineRightSpacing: f64,
+  }
+}
+impl Copy for TextRun {}
+
+// Analyze normalized text with its complete surrounding paragraph before line
+// fitting. Levels are UAX #9 paragraph results, not visual node positions.
+// Shape logical-order runs with actual line boundaries and L1-adjusted levels;
+// runs must not cross analysis-level boundaries within a token. Preserve the
+// supplied analysis: line wrapping must not change paragraph fragmentation.
+pub interface TextMeasure {
+  fn beginTextLayout(provider: &mut Self)
+  effect fn analyze(provider: &mut Self, context: TextContext, output: &mut List<TextBreak>) -> TextAnalysis ! OutOfMemoryError | TextError ? &mut Allocator
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>) ! OutOfMemoryError | TextError ? &mut Allocator
+}

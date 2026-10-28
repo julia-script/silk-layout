@@ -1,0 +1,53 @@
+{
+  "name": "aspect-ratio",
+  "kind": "spec",
+  "features": [
+    "block",
+    "aspect-ratio"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 80,
+          "aspectRatio": 2
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-sizing-4/#aspect-ratio"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 40,
+        "contentWidth": 200,
+        "contentHeight": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 40,
+        "contentWidth": 80,
+        "contentHeight": 40
+      }
+    ]
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "name": "overflow-axis-flex-minimum",
+  "kind": "spec",
+  "features": [
+    "overflow",
+    "flex",
+    "automatic-minimum",
+    "spec-browser-divergence"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#overflow-control",
+    "https://drafts.csswg.org/css-flexbox-1/#min-size-auto"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex",
+          "width": 100
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "overflowX": "visible",
+          "overflowY": "hidden"
+        },
+        "measure": {
+          "minWidth": 200,
+          "maxWidth": 200,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 20,
+          "height": 10,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex",
+          "width": 100
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "overflowX": "clip",
+          "overflowY": "hidden"
+        },
+        "measure": {
+          "minWidth": 200,
+          "maxWidth": 200,
+          "height": 10
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "width": 20,
+          "height": 10,
+          "flexShrink": 0
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 10
+      },
+      {
+        "x": 80,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 100,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 10
+      },
+      {
+        "x": 200,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

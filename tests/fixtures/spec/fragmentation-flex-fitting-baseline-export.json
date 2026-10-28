@@ -1,0 +1,87 @@
+{
+  "name": "fragmentation-flex-fitting-baseline-export",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "flex",
+    "baseline"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#flex-baselines"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 80,
+          "height": 40
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 80,
+          "height": 20,
+          "alignItems": "flex-start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 20,
+        "hasFirstBaseline": true,
+        "hasLastBaseline": true,
+        "firstBaseline": 5,
+        "lastBaseline": 5
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 10,
+        "hasFirstBaseline": true,
+        "hasLastBaseline": true,
+        "firstBaseline": 5,
+        "lastBaseline": 5
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 5,
+        "hasFirstBaseline": false,
+        "hasLastBaseline": false
+      }
+    ]
+  }
+}

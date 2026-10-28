@@ -1,0 +1,147 @@
+{
+  "name": "text-mixed-flow-and-flex",
+  "kind": "chrome",
+  "features": [
+    "source-text",
+    "inline-fragments",
+    "floats",
+    "anonymous-flex-items",
+    "justification",
+    "font-service"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#white-space-processing",
+    "https://drafts.csswg.org/css-text-3/#expanding-text",
+    "https://drafts.csswg.org/css-flexbox-1/#flex-items"
+  ],
+  "input": {
+    "viewport": {
+      "width": 160,
+      "height": 180
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      },
+      {
+        "fontSize": 6,
+        "ascent": 4,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 4,
+        "capHeight": 4,
+        "subscriptOffset": 1,
+        "superscriptOffset": 2,
+        "baselines": {
+          "alphabetic": 4,
+          "ideographic": 6,
+          "central": 3,
+          "mathematical": 3
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 120,
+          "fontKey": 1,
+          "textAlign": "justify"
+        }
+      },
+      {
+        "parent": 0,
+        "text": "ab "
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "fontKey": 2,
+          "padding": {
+            "left": 1,
+            "right": 1
+          },
+          "margin": {
+            "left": 2
+          }
+        }
+      },
+      {
+        "parent": 2,
+        "text": "cd ef gh"
+      },
+      {
+        "parent": 0,
+        "text": " ij kl"
+      },
+      {
+        "parent": 0,
+        "style": {
+          "float": "left",
+          "width": 20,
+          "height": 25
+        }
+      },
+      {
+        "parent": 0,
+        "text": " mn op qr st uv wx yz"
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex",
+          "width": 80,
+          "fontKey": 1,
+          "margin": {
+            "top": 3
+          }
+        }
+      },
+      {
+        "parent": 7,
+        "text": "one two"
+      },
+      {
+        "parent": 7,
+        "style": {
+          "display": "inline-block",
+          "width": 15,
+          "height": 12
+        }
+      },
+      {
+        "parent": 7,
+        "text": " xy"
+      },
+      {
+        "parent": 0,
+        "text": "tail "
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "contents",
+          "fontKey": 2
+        }
+      },
+      {
+        "parent": 12,
+        "text": "\n end"
+      }
+    ]
+  }
+}

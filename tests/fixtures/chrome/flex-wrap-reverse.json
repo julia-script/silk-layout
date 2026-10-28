@@ -1,0 +1,42 @@
+{
+  "name": "flex-wrap-reverse",
+  "kind": "chrome",
+  "features": [
+    "flex",
+    "wrap",
+    "reversal"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 100,
+          "height": 100,
+          "flexWrap": "wrap-reverse",
+          "alignContent": "flex-start",
+          "alignItems": "flex-start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 60,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 60,
+          "height": 30
+        }
+      }
+    ]
+  }
+}

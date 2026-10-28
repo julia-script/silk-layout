@@ -1,0 +1,138 @@
+{
+  "name": "phantom-inline-float-positioning-anchor",
+  "kind": "spec",
+  "features": [
+    "inline-fragments",
+    "floats",
+    "position",
+    "phantom-lines"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-inline-3/#phantom-line-box",
+    "https://drafts.csswg.org/css-position-3/#def-cb",
+    "https://drafts.csswg.org/cssom-view/#dom-element-getclientrects"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 60,
+          "fontKey": 1,
+          "lineHeight": {
+            "length": 10
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "float": "left",
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline",
+          "position": "relative",
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "position": "absolute",
+          "width": 5,
+          "height": 5,
+          "insetLeft": 0,
+          "insetTop": 0
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 60,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 5,
+            "height": 5
+          }
+        ]
+      }
+    ]
+  }
+}

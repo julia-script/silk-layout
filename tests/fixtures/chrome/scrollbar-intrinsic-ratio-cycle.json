@@ -1,0 +1,49 @@
+{
+  "name": "scrollbar-intrinsic-ratio-cycle-chrome",
+  "kind": "chrome",
+  "features": [
+    "scrollbars",
+    "intrinsic",
+    "aspect-ratio"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "scrollbars": {
+      "auto": {
+        "horizontal": 12,
+        "vertical": 15,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      },
+      "thin": {
+        "horizontal": 6,
+        "vertical": 8,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": "max-content",
+          "aspectRatio": 1,
+          "overflowX": "auto",
+          "overflowY": "auto"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "height": 110
+        }
+      }
+    ]
+  }
+}

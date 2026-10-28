@@ -1,0 +1,40 @@
+{
+  "name": "flex-grow",
+  "kind": "chrome",
+  "features": [
+    "flex",
+    "grow"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 300,
+          "height": 30
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 1,
+          "minWidth": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 3,
+          "minWidth": 0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "percentage-dimensions",
+  "kind": "chrome",
+  "features": [
+    "block",
+    "percentage"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200,
+          "height": 100,
+          "padding": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": {
+            "percent": 0.5
+          },
+          "height": {
+            "percent": 0.5
+          }
+        }
+      }
+    ]
+  }
+}

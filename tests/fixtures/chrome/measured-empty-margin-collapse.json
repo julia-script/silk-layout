@@ -1,0 +1,73 @@
+{
+  "name": "measured-empty-margin-collapse-chrome",
+  "kind": "chrome",
+  "features": [
+    "block",
+    "measurement",
+    "margin-collapse",
+    "line-boxes"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flow-root"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "marginTop": 20,
+          "marginBottom": 30
+        },
+        "measure": {
+          "minWidth": 0,
+          "maxWidth": 0,
+          "height": 0,
+          "hasLineBoxes": false
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flow-root"
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "marginTop": 20,
+          "marginBottom": 30
+        },
+        "measure": {
+          "minWidth": 0,
+          "maxWidth": 0,
+          "height": 0
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "height": 10
+        }
+      }
+    ]
+  }
+}

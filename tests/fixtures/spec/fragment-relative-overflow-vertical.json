@@ -1,0 +1,123 @@
+{
+  "name": "fragment-relative-overflow-vertical",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "position",
+    "scrollbars",
+    "overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollable",
+    "https://drafts.csswg.org/css2/#blockwidth",
+    "https://drafts.csswg.org/css-break-3/#transforms"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 200,
+          "height": 200
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 80,
+          "height": 80,
+          "overflowX": "auto",
+          "overflowY": "auto",
+          "writingMode": "vertical-lr"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 70,
+          "height": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "relative",
+          "width": 10,
+          "height": 20,
+          "insetLeft": {
+            "percent": 0.1
+          },
+          "insetTop": {
+            "percent": 0.1
+          }
+        }
+      }
+    ],
+    "scrollbars": {
+      "auto": {
+        "horizontal": 10,
+        "vertical": 10,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      },
+      "thin": {
+        "horizontal": 5,
+        "vertical": 5,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      }
+    }
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 80,
+            "height": 80
+          }
+        ],
+        "contentWidth": 80,
+        "contentHeight": 70,
+        "horizontalScrollbar": true,
+        "verticalScrollbar": false,
+        "scrollbarGutterRight": 0,
+        "scrollbarGutterBottom": 10,
+        "scrollableOverflowWidth": 88,
+        "scrollableOverflowHeight": 70
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 70,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 78,
+            "y": 7,
+            "width": 10,
+            "height": 20
+          }
+        ]
+      }
+    ]
+  }
+}

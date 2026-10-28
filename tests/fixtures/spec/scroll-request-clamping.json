@@ -1,0 +1,35 @@
+{
+  "name": "scroll-request-clamping",
+  "kind": "spec",
+  "features": ["scrolling", "direction", "writing-mode"],
+  "spec": ["https://drafts.csswg.org/cssom-view/#scroll-an-element"],
+  "input": {
+    "viewport": {"width": 100, "height": 300},
+    "nodes": [
+      {"parent": null, "style": {"width": 100}},
+      {"parent": 0, "style": {"width": 50, "height": 50, "overflowX": "hidden", "overflowY": "hidden"}, "scrollOffset": {"x": 1000, "y": 1000}},
+      {"parent": 1, "style": {"width": 80, "height": 90}},
+      {"parent": 0, "style": {"width": 50, "height": 50, "overflowX": "hidden", "overflowY": "hidden"}, "scrollOffset": {"x": -1000, "y": -1000}},
+      {"parent": 3, "style": {"width": 80, "height": 90}},
+      {"parent": 0, "style": {"width": 50, "height": 50, "direction": "rtl", "overflowX": "hidden", "overflowY": "hidden"}, "scrollOffset": {"x": -1000, "y": 1000}},
+      {"parent": 5, "style": {"width": 80, "height": 90}},
+      {"parent": 0, "style": {"width": 50, "height": 50, "writingMode": "vertical-rl", "direction": "rtl", "overflowX": "hidden", "overflowY": "hidden"}, "scrollOffset": {"x": -1000, "y": -1000}},
+      {"parent": 7, "style": {"width": 80, "height": 90, "writingMode": "vertical-rl", "direction": "rtl"}},
+      {"parent": 0, "style": {"width": 50, "height": 50, "overflowX": "hidden", "overflowY": "hidden"}, "scrollOffset": {"x": 1000, "y": -1000}},
+      {"parent": 9, "style": {"width": 40, "height": 40}}
+    ]
+  },
+  "expected": {"sources": [
+    {"height": 250},
+    {"rects": [{"x": 0, "y": 0, "width": 50, "height": 50}]},
+    {"rects": [{"x": -30, "y": -40, "width": 80, "height": 90}]},
+    {"rects": [{"x": 0, "y": 50, "width": 50, "height": 50}]},
+    {"rects": [{"x": 0, "y": 50, "width": 80, "height": 90}]},
+    {"rects": [{"x": 0, "y": 100, "width": 50, "height": 50}]},
+    {"rects": [{"x": 0, "y": 60, "width": 80, "height": 90}]},
+    {"rects": [{"x": 0, "y": 150, "width": 50, "height": 50}]},
+    {"rects": [{"x": 0, "y": 150, "width": 80, "height": 90}]},
+    {"rects": [{"x": 0, "y": 200, "width": 50, "height": 50}]},
+    {"rects": [{"x": 0, "y": 200, "width": 40, "height": 40}]}
+  ]}
+}

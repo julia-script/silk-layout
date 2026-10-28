@@ -1,0 +1,120 @@
+{
+  "name": "inline-interruption-real-middle-boundary",
+  "kind": "spec",
+  "features": [
+    "inline-fragments"
+  ],
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visuren.html#anonymous-block-level",
+    "https://drafts.csswg.org/cssom-view/#dom-element-getclientrects",
+    "https://github.com/w3c/csswg-drafts/issues/13711"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 300
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 30,
+          "height": 15
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 7,
+          "height": 5
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 20,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 30,
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 15
+          },
+          {
+            "x": 0,
+            "y": 20,
+            "width": 7,
+            "height": 0
+          },
+          {
+            "x": 0,
+            "y": 20,
+            "width": 100,
+            "height": 10
+          },
+          {
+            "x": 0,
+            "y": 30,
+            "width": 0,
+            "height": 0
+          }
+        ]
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 15
+      },
+      {
+        "x": 0,
+        "y": 15,
+        "width": 7,
+        "height": 5
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

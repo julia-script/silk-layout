@@ -1,0 +1,16 @@
+{
+  "name": "resource-one-dimension-ratio",
+  "kind": "chrome",
+  "features": ["replaced", "natural-width", "natural-height", "natural-aspect-ratio"],
+  "description": "Separate resources have only width plus a viewBox ratio, only height plus a viewBox ratio, or a ratio alone. No missing dimension is synthesized in the resource markup.",
+  "spec": ["https://www.w3.org/TR/css-images-3/#natural-dimensions", "https://www.w3.org/TR/SVG2/coords.html#IntrinsicSizing"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flow-root", "width": 400}},
+      {"parent": 0, "style": {}, "natural": {"width": 120, "aspectRatio": 2}},
+      {"parent": 0, "style": {}, "natural": {"height": 45, "aspectRatio": 2}},
+      {"parent": 0, "style": {"width": 140}, "natural": {"aspectRatio": 2}}
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "fragment-position-bottom-full-containing-block",
+  "kind": "spec",
+  "spec": ["https://drafts.csswg.org/css-position-3/#abspos-breaking", "https://drafts.csswg.org/css-break-3/#transforms"],
+  "input": {
+    "viewport": {"width": 400, "height": 300},
+    "fragmentation": {"kind": "page", "frames": [{"x": 10, "y": 20, "width": 100, "height": 50}, {"x": 150, "y": 200, "width": 100, "height": 50}, {"x": 280, "y": 40, "width": 100, "height": 50}]},
+    "nodes": [
+      {"parent": null, "style": {"position": "relative", "height": 120}},
+      {"parent": 0, "style": {"position": "absolute", "insetBottom": 5, "insetLeft": 3, "width": 20, "height": 10}},
+      {"parent": 0, "style": {"position": "absolute", "insetTop": 0, "insetBottom": 0, "marginTop": "auto", "marginBottom": "auto", "insetLeft": 30, "width": 20, "height": 10}}
+    ]
+  },
+  "expected": {"sources": [{"rects": [{"x": 10, "y": 20, "width": 100, "height": 50}, {"x": 150, "y": 200, "width": 100, "height": 50}, {"x": 280, "y": 40, "width": 100, "height": 20}]}, {"rects": [{"x": 283, "y": 45, "width": 20, "height": 10}]}, {"rects": [{"x": 180, "y": 205, "width": 20, "height": 10}]}]}
+}

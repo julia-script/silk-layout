@@ -1,0 +1,82 @@
+{
+  "name": "margin-break-logical-sideways-rl",
+  "kind": "spec",
+  "spec": [
+    "https://drafts.csswg.org/css-break-4/#break-margins"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "height": 100,
+          "writingMode": "sideways-rl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "writingMode": "sideways-rl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "marginBreak": "keep",
+          "breakInside": "avoid",
+          "writingMode": "sideways-rl",
+          "marginRight": 8
+        }
+      }
+    ],
+    "fragmentation": {
+      "kind": "column",
+      "writingMode": "sideways-rl",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 40,
+          "height": 100
+        }
+      ],
+      "repeatStep": {
+        "x": 0,
+        "y": 100
+      }
+    }
+  },
+  "expected": {
+    "sources": [
+      {
+        "y": 0
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 30,
+            "height": 100
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 12,
+            "y": 100,
+            "width": 20,
+            "height": 100
+          }
+        ]
+      }
+    ]
+  }
+}

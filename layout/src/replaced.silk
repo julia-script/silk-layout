@@ -1,0 +1,119 @@
+import geometry { NaturalDimensions, Layout, Size, AvailableKind, max, min, clamp }
+import style { Style, DimensionKind, BoxSizing, WritingMode }
+import context { Input, ResolvedBox }
+
+pub fn preferredRatio(style: &Style, natural: NaturalDimensions) -> f64 {
+  if style.aspectRatio > 0.0 && (!style.aspectRatioAuto || natural.aspectRatio <= 0.0) { return style.aspectRatio }
+  return natural.aspectRatio
+}
+pub fn borderRatio(style: &Style) -> bool {
+  return style.boxSizing == BoxSizing.BorderBox && style.aspectRatio > 0.0 && !style.aspectRatioAuto
+}
+
+// CSS 2.1 §10.4: constrain both automatic dimensions together, preserving
+// their ratio unless opposing min/max constraints make that impossible.
+fn constrainPair(size: Size, minimum: Size, maximum: Size, ratio: f64) -> Size {
+  let maxWidth = max(minimum.width, maximum.width)
+  let maxHeight = max(minimum.height, maximum.height)
+  let w = size.width
+  let h = size.height
+  if w == 0.0 && h == 0.0 {
+    let width = max(minimum.width, minimum.height * ratio)
+    return Size { width: clamp(width, minimum.width, maxWidth), height: clamp(width / ratio, minimum.height, maxHeight) }
+  }
+  if w <= 0.0 || h <= 0.0 { return Size { width: clamp(w, minimum.width, maxWidth), height: clamp(h, minimum.height, maxHeight) } }
+  if w < minimum.width && h > maxHeight { return Size { width: minimum.width, height: maxHeight } }
+  if w > maxWidth && h < minimum.height { return Size { width: maxWidth, height: minimum.height } }
+  if w < minimum.width || h < minimum.height {
+    if minimum.width * h > minimum.height * w { return Size { width: minimum.width, height: min(maxHeight, minimum.width * h / w) } }
+    return Size { width: min(maxWidth, minimum.height * w / h), height: minimum.height }
+  }
+  if w > maxWidth || h > maxHeight {
+    if maxWidth * h < maxHeight * w { return Size { width: maxWidth, height: max(minimum.height, maxWidth * h / w) } }
+    return Size { width: max(minimum.width, maxHeight * w / h), height: maxHeight }
+  }
+  return size
+}
+
+pub fn layoutReplaced(style: &Style, input: Input, box: ResolvedBox, natural: NaturalDimensions) -> Layout {
+  let ratio = preferredRatio(style, natural)
+  let border = borderRatio(style)
+  let insetWidth = box.inset.horizontal()
+  let insetHeight = box.inset.vertical()
+  let mut ratioInsetWidth = insetWidth
+  let mut ratioInsetHeight = insetHeight
+  if border { ratioInsetWidth = 0.0
+    ratioInsetHeight = 0.0 }
+  let explicitRatio = style.aspectRatio > 0.0 && (!style.aspectRatioAuto || natural.aspectRatio <= 0.0)
+  let mut width = 300.0 + insetWidth
+  let mut height = 150.0 + insetHeight
+  // Sizing 3 §5.1 gives dimensionless objects author-controlled fallback
+  // intrinsic sizes. An absent dimension is distinct from a natural zero.
+  if style.minWidth.kind == DimensionKind.Length { width = box.min.width }
+  if style.minHeight.kind == DimensionKind.Length { height = box.min.height }
+  if natural.size.widthDefinite { width = natural.size.width + insetWidth }
+  if natural.size.heightDefinite { height = natural.size.height + insetHeight }
+  if box.size.widthDefinite { width = box.size.width }
+  if box.size.heightDefinite { height = box.size.height }
+  if ratio > 0.0 {
+    if box.size.widthDefinite && !box.size.heightDefinite {
+      height = max(0.0, width - ratioInsetWidth) / ratio + ratioInsetHeight
+    } else if box.size.heightDefinite && !box.size.widthDefinite {
+      width = max(0.0, height - ratioInsetHeight) * ratio + ratioInsetWidth
+    } else if !box.size.widthDefinite && !box.size.heightDefinite {
+      if natural.size.widthDefinite {
+        if explicitRatio || !natural.size.heightDefinite { height = max(0.0, width - ratioInsetWidth) / ratio + ratioInsetHeight }
+      } else if natural.size.heightDefinite {
+        width = max(0.0, height - ratioInsetHeight) * ratio + ratioInsetWidth
+      } else {
+        // Ratio-only resources: zero min-content; max-content stretches into
+        // definite inline space, then length minima, then the initial CB.
+        let vertical = style.writingMode != WritingMode.HorizontalTb
+        let mut available = input.availableWidth
+        let mut parentSize = input.parent.width
+        let mut parentDefinite = input.parent.widthDefinite
+        let mut initial = input.initialContainingBlock.width
+        let mut initialDefinite = input.initialContainingBlock.widthDefinite
+        let mut margin = box.margin.horizontal()
+        if vertical {
+          available = input.availableHeight
+          parentSize = input.parent.height
+          parentDefinite = input.parent.heightDefinite
+          initial = input.initialContainingBlock.height
+          initialDefinite = input.initialContainingBlock.heightDefinite
+          margin = box.margin.vertical()
+        }
+        let mut inlineSize = 0.0
+        if available.kind == AvailableKind.Definite { inlineSize = max(0.0, available.value - margin) }
+        else if parentDefinite { inlineSize = max(0.0, parentSize - margin) }
+        else if style.minWidth.kind == DimensionKind.Length || style.minHeight.kind == DimensionKind.Length {
+          width = max(box.min.width, max(0.0, box.min.height - ratioInsetHeight) * ratio + ratioInsetWidth)
+          inlineSize = width
+          if vertical { inlineSize = max(0.0, width - ratioInsetWidth) / ratio + ratioInsetHeight }
+        } else if initialDefinite { inlineSize = initial }
+        if vertical {
+          height = max(insetHeight, inlineSize)
+          width = max(0.0, height - ratioInsetHeight) * ratio + ratioInsetWidth
+        } else {
+          width = max(insetWidth, inlineSize)
+          height = max(0.0, width - ratioInsetWidth) / ratio + ratioInsetHeight
+        }
+      }
+    }
+  }
+  if ratio > 0.0 && !natural.size.widthDefinite && !natural.size.heightDefinite {
+    if input.intrinsicWidth && input.availableWidth.kind == AvailableKind.MinContent { width = insetWidth }
+    if input.intrinsicHeight && input.availableHeight.kind == AvailableKind.MinContent { height = insetHeight }
+  }
+  if ratio > 0.0 && !box.size.widthDefinite && !box.size.heightDefinite {
+    let size = constrainPair(
+      Size { width: max(0.0, width - ratioInsetWidth), height: max(0.0, height - ratioInsetHeight) },
+      Size { width: max(0.0, box.min.width - ratioInsetWidth), height: max(0.0, box.min.height - ratioInsetHeight) },
+      Size { width: max(0.0, box.max.width - ratioInsetWidth), height: max(0.0, box.max.height - ratioInsetHeight) }, ratio)
+    width = size.width + ratioInsetWidth
+    height = size.height + ratioInsetHeight
+  }
+  let mut result = Layout.zero()
+  result.size = Size { width: clamp(width, box.min.width, box.max.width), height: clamp(height, box.min.height, box.max.height) }
+  return result
+}

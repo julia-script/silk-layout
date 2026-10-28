@@ -1,0 +1,134 @@
+{
+  "name": "block-scroll-baseline-axes",
+  "kind": "spec",
+  "features": [
+    "baselines",
+    "writing-mode",
+    "overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#baseline-export",
+    "https://drafts.csswg.org/css-overflow-3/#block-axis-scroll-container"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 20,
+          "margin": {
+            "bottom": -5
+          },
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 20,
+          "margin": {
+            "bottom": -30
+          },
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "width": 20,
+          "height": 40,
+          "margin": {
+            "left": -5
+          },
+          "overflowX": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-lr",
+          "width": 20,
+          "height": 40,
+          "margin": {
+            "right": -5
+          },
+          "overflowX": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 20,
+          "overflowX": "hidden",
+          "overflowY": "clip"
+        },
+        "measure": {
+          "minWidth": 10,
+          "maxWidth": 10,
+          "height": 20,
+          "firstBaseline": 5,
+          "lastBaseline": 12
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 20,
+          "overflowY": "hidden"
+        },
+        "measure": {
+          "minWidth": 10,
+          "maxWidth": 10,
+          "height": 100,
+          "firstBaseline": 90,
+          "lastBaseline": 98
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "height": 125,
+        "firstBaseline": 90
+      },
+      {
+        "hasFirstBaseline": false,
+        "hasLastBaseline": true,
+        "lastBaseline": 15
+      },
+      {
+        "lastBaseline": 0
+      },
+      {
+        "lastBaseline": 15
+      },
+      {
+        "lastBaseline": 15
+      },
+      {
+        "firstBaseline": 5,
+        "lastBaseline": 12
+      },
+      {
+        "firstBaseline": 20,
+        "lastBaseline": 20
+      }
+    ]
+  }
+}

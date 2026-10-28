@@ -1,0 +1,63 @@
+{
+  "name": "overflow-relative-preserves-flow",
+  "kind": "spec",
+  "features": [
+    "scrollable-overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollable-overflow-calculation",
+    "https://drafts.csswg.org/css-overflow-3/#scroll-origin",
+    "https://drafts.csswg.org/css-position-3/#relative-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 200,
+          "height": 200,
+          "position": "relative",
+          "insetLeft": -50,
+          "insetTop": -100
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 200,
+        "scrollableOverflowHeight": 200
+      },
+      {
+        "x": -50,
+        "y": -100,
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 200,
+        "scrollableOverflowHeight": 200
+      }
+    ],
+    "viewportOverflow": {
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 100
+    }
+  }
+}

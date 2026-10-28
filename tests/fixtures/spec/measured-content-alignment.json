@@ -1,0 +1,152 @@
+{
+  "name": "measured-content-alignment",
+  "kind": "spec",
+  "features": [
+    "block",
+    "measurement",
+    "align-content",
+    "overflow-alignment",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#distribution-block"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 50,
+          "padding": 2,
+          "alignContent": "center"
+        },
+        "measure": {
+          "minWidth": 20,
+          "maxWidth": 20,
+          "height": 10,
+          "firstBaseline": 8
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 5,
+          "alignContent": "center"
+        },
+        "measure": {
+          "minWidth": 20,
+          "maxWidth": 20,
+          "height": 10,
+          "firstBaseline": 8
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 5,
+          "alignContent": "center",
+          "alignContentSafety": "unsafe"
+        },
+        "measure": {
+          "minWidth": 20,
+          "maxWidth": 20,
+          "height": 10,
+          "firstBaseline": 8
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 50,
+          "alignContent": "center"
+        },
+        "measure": {
+          "minWidth": 10,
+          "maxWidth": 60,
+          "height": 10,
+          "firstBaseline": 8,
+          "wrap": true
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 50,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "alignContent": "center"
+        },
+        "measure": {
+          "minWidth": 20,
+          "maxWidth": 20,
+          "height": 10,
+          "firstBaseline": 8
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 214
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 54,
+        "firstBaseline": 30,
+        "lastBaseline": 30,
+        "measurementOffsetX": 0,
+        "measurementOffsetY": 20
+      },
+      {
+        "x": 0,
+        "y": 54,
+        "height": 5,
+        "firstBaseline": 8,
+        "measurementOffsetY": 0
+      },
+      {
+        "x": 0,
+        "y": 59,
+        "height": 5,
+        "firstBaseline": 5.5,
+        "measurementOffsetY": -2.5
+      },
+      {
+        "x": 0,
+        "y": 64,
+        "width": 20,
+        "height": 50,
+        "firstBaseline": 18,
+        "lastBaseline": 38,
+        "measurementOffsetY": 10
+      },
+      {
+        "x": 0,
+        "y": 114,
+        "width": 50,
+        "height": 100,
+        "firstBaseline": 23,
+        "lastBaseline": 23,
+        "measurementOffsetX": -15,
+        "measurementOffsetY": 0
+      }
+    ]
+  }
+}

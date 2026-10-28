@@ -1,0 +1,238 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.format { Debug, Format, Formatter }
+import silk.writer { Writer, WriterError }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.usize
+import silk.string { String }
+import style { Style }
+import geometry { Layout, Point, Rect }
+import silk.option { Option }
+import box_tree { BoxTree, BoxNode }
+import fragments { FragmentArena, FragmentKind, TextFragmentKind }
+
+pub const NO_NODE: usize = usize.MAX
+pub struct NodeId { pub index: usize }
+impl Copy for NodeId {}
+pub struct BoxId { pub index: usize }
+impl Copy for BoxId {}
+pub struct InvalidBox { pub index: usize }
+impl Copy for InvalidBox {}
+impl Debug for InvalidBox {
+  effect fn debug(self: &Self, formatter: &mut Formatter) ! WriterError ? &mut Writer {
+    return run Format.debugFields(self, "InvalidBox", &mut formatter)
+  }
+}
+pub struct InvalidNode { pub index: usize }
+impl Copy for InvalidNode {}
+impl Debug for InvalidNode {
+  effect fn debug(self: &Self, formatter: &mut Formatter) ! WriterError ? &mut Writer {
+    return run Format.debugFields(self, "InvalidNode", &mut formatter)
+  }
+}
+pub enum Measurement { None, Content, Natural }
+pub union SourceContent { Element, Text { pub value: String } }
+pub struct Node {
+  pub styleIndex: usize, pub content: SourceContent,
+  pub parent: usize, pub firstChild: usize, pub lastChild: usize, pub nextSibling: usize,
+  pub measureKey: usize, pub measurement: Measurement,
+  pub scrollOffset: Point,
+}
+impl Node {
+  pub fn text<'a>(self: &'a Self) -> Option<string<'a>> {
+    return match &self.content {
+      SourceContent.Text { value } => Option<string<'a>>.Some { value: String.view(&value) }
+      SourceContent.Element => Option<string<'a>>.None
+    }
+  }
+  pub fn isText(self: &Self) -> bool {
+    return match &self.content {
+      SourceContent.Text { value: _ } => true
+      SourceContent.Element => false
+    }
+  }
+}
+pub struct Tree { pub nodes: List<Node>, pub styles: List<Style>, pub viewportScrollOffset: Point }
+impl Tree {
+  pub effect fn make(style: Style) -> Tree ! OutOfMemoryError ? &mut Allocator {
+    let mut nodes = List<Node>.make()
+    let mut styles = List<Style>.make()
+    run nodes.reserve(1)
+    run styles.reserve(1)
+    run styles.append(move style)
+    run nodes.append(Node { styleIndex: 0, content: SourceContent.Element, parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE, measureKey: 0, measurement: Measurement.None, scrollOffset: Point { x: 0.0, y: 0.0 } })
+    return Tree { nodes: move nodes, styles: move styles, viewportScrollOffset: Point { x: 0.0, y: 0.0 } }
+  }
+  pub fn root(self: &Self) -> NodeId { return NodeId { index: 0 } }
+  pub effect fn append(self: &mut Self, parent: NodeId, style: Style) -> NodeId ! OutOfMemoryError | InvalidNode ? &mut Allocator {
+    if parent.index >= self.nodes.length() { fail InvalidNode { index: parent.index } }
+    if self.nodes.asSlice()[parent.index].isText() || self.nodes.asSlice()[parent.index].measurement != Measurement.None { fail InvalidNode { index: parent.index } }
+    let index = self.nodes.length()
+    let last = self.nodes.asSlice()[parent.index].lastChild
+    let styleIndex = self.styles.length()
+    // Reserve both arenas before publishing either entry or sibling link.
+    run self.nodes.reserve(1)
+    run self.styles.reserve(1)
+    run self.styles.append(move style)
+    run self.nodes.append(Node { styleIndex: styleIndex, content: SourceContent.Element, parent: parent.index, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE, measureKey: 0, measurement: Measurement.None, scrollOffset: Point { x: 0.0, y: 0.0 } })
+    let nodes = self.nodes.asMutSlice()
+    if last == NO_NODE { nodes[parent.index].firstChild = index } else { nodes[last].nextSibling = index }
+    nodes[parent.index].lastChild = index
+    return NodeId { index: index }
+  }
+  pub effect fn appendText(self: &mut Self, parent: NodeId, value: String) -> NodeId ! OutOfMemoryError | InvalidNode ? &mut Allocator {
+    if parent.index >= self.nodes.length() { fail InvalidNode { index: parent.index } }
+    if self.nodes.asSlice()[parent.index].isText() || self.nodes.asSlice()[parent.index].measurement != Measurement.None { fail InvalidNode { index: parent.index } }
+    let index = self.nodes.length()
+    let last = self.nodes.asSlice()[parent.index].lastChild
+    let styleIndex = self.nodes.asSlice()[parent.index].styleIndex
+    run self.nodes.append(Node { styleIndex: styleIndex, content: SourceContent.Text { value: move value }, parent: parent.index, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE, measureKey: 0, measurement: Measurement.None, scrollOffset: Point { x: 0.0, y: 0.0 } })
+    let nodes = self.nodes.asMutSlice()
+    if last == NO_NODE { nodes[parent.index].firstChild = index } else { nodes[last].nextSibling = index }
+    nodes[parent.index].lastChild = index
+    return NodeId { index: index }
+  }
+  pub effect fn setScrollOffset(self: &mut Self, id: NodeId, offset: Point) ! InvalidNode {
+    if id.index >= self.nodes.length() { fail InvalidNode { index: id.index } }
+    let nodes = self.nodes.asMutSlice()
+    if nodes[id.index].isText() { fail InvalidNode { index: id.index } }
+    nodes[id.index].scrollOffset = offset
+  }
+  pub effect fn setMeasurement(self: &mut Self, id: NodeId, key: usize) ! InvalidNode {
+    if id.index >= self.nodes.length() { fail InvalidNode { index: id.index } }
+    let nodes = self.nodes.asMutSlice()
+    if nodes[id.index].isText() || nodes[id.index].firstChild != NO_NODE { fail InvalidNode { index: id.index } }
+    nodes[id.index].measureKey = key
+    nodes[id.index].measurement = Measurement.Content
+  }
+  pub effect fn setNaturalMeasurement(self: &mut Self, id: NodeId, key: usize) ! InvalidNode {
+    if id.index >= self.nodes.length() { fail InvalidNode { index: id.index } }
+    let nodes = self.nodes.asMutSlice()
+    if nodes[id.index].isText() || nodes[id.index].firstChild != NO_NODE { fail InvalidNode { index: id.index } }
+    nodes[id.index].measureKey = key
+    nodes[id.index].measurement = Measurement.Natural
+    let styleIndex = nodes[id.index].styleIndex
+    let styles = self.styles.asMutSlice()
+    styles[styleIndex].replaced = true
+  }
+}
+pub struct LayoutTree {
+  pub boxes: List<Layout>, pub boxNodes: List<BoxNode>,
+  pub anonymousStyles: List<Style>,
+  pub firstBySource: List<usize>, pub lastBySource: List<usize>,
+  pub fragments: FragmentArena,
+  pub viewportOverflow: Rect,
+}
+impl LayoutTree {
+  pub fn make() -> LayoutTree {
+    return LayoutTree {
+      boxes: List<Layout>.make(), boxNodes: List<BoxNode>.make(),
+      anonymousStyles: List<Style>.make(),
+      firstBySource: List<usize>.make(), lastBySource: List<usize>.make(),
+      fragments: FragmentArena.make(), viewportOverflow: Rect.zero(),
+    }
+  }
+  pub effect fn prepare(self: &mut Self, count: usize) ! OutOfMemoryError ? &mut Allocator {
+    self.viewportOverflow = Rect.zero()
+    self.boxNodes.clear()
+    self.anonymousStyles.clear()
+    self.firstBySource.clear()
+    self.lastBySource.clear()
+    run self.fragments.prepare(count)
+    self.boxes.clear()
+    run self.boxes.reserveExact(count)
+    let mut index: usize = 0
+    while index < count {
+      run self.boxes.append(Layout.zero())
+      index = index + 1
+    }
+  }
+  pub fn adopt<'a>(self: &mut Self, constructed: BoxTree<'a>) {
+    self.boxNodes = move constructed.boxes
+    self.anonymousStyles = move constructed.anonymousStyles
+    self.firstBySource = move constructed.firstBySource
+    self.lastBySource = move constructed.lastBySource
+  }
+  pub effect fn getBox(self: &Self, id: BoxId) -> Layout ! InvalidBox {
+    if id.index >= self.boxes.length() { fail InvalidBox { index: id.index } }
+    return self.boxes.get(id.index)
+  }
+  pub effect fn firstBox(self: &Self, id: NodeId) -> Option<BoxId> ! InvalidNode {
+    if id.index >= self.firstBySource.length() { fail InvalidNode { index: id.index } }
+    let first = self.firstBySource.get(id.index)
+    if first == NO_NODE { return Option<BoxId>.None }
+    return Option<BoxId>.Some { value: BoxId { index: first } }
+  }
+  pub effect fn sourceRects<'a>(self: &'a Self, id: NodeId) -> SourceRects<'a> ! InvalidNode {
+    if id.index >= self.firstBySource.length() { fail InvalidNode { index: id.index } }
+    let box = self.firstBySource.get(id.index)
+    let mut fragment = NO_NODE
+    if box != NO_NODE { fragment = self.fragments.first(box) }
+    return SourceRects { tree: self, source: id.index, box: box, fragment: fragment }
+  }
+  // CSSOM-style source bounds are a derived view, never a containing block
+  // or replacement for the fragment tree. CSSOM View bounding-box steps 3–4
+  // distinguish degenerate-only lists from a union containing positive area.
+  pub effect fn sourceBounds(self: &Self, id: NodeId) -> Rect ! InvalidNode {
+    let mut rects = run self.sourceRects(id)
+    let mut result = Rect.zero()
+    let mut firstRect = Rect.zero()
+    let mut first = true
+    let mut nonempty = false
+    let mut hasArea = false
+    while true {
+      let rect = match move rects.next() {
+        Option<Rect>.Some { value } => value
+        Option<Rect>.None => { break }
+      }
+      if first { firstRect = rect
+        first = false }
+      if rect.width != 0.0 || rect.height != 0.0 {
+        if nonempty { result = result.unionWith(rect) } else { result = rect }
+        nonempty = true
+      }
+      if rect.width != 0.0 && rect.height != 0.0 { hasArea = true }
+    }
+    if !hasArea { return firstRect }
+    return result
+  }
+}
+
+// A source text rectangle is a font/bidi run on a line, not an individual
+// shaping request or collapsed-space token. Keep paint fragments separate.
+pub struct SourceRects<'a> {
+  tree: &'a LayoutTree, source: usize, box: usize, fragment: usize,
+}
+impl SourceRects {
+  pub fn next(self: &mut Self) -> Option<Rect> {
+    while self.box != NO_NODE {
+      if self.fragment == NO_NODE {
+        self.box = self.tree.boxNodes.asSlice()[self.box].nextContinuation
+        if self.box != NO_NODE { self.fragment = self.tree.fragments.first(self.box) }
+        continue
+      }
+      let fragments = self.tree.fragments.values.asSlice()
+      let first = &fragments[self.fragment]
+      self.fragment = first.nextForBox
+      if first.positioningShell || first.source != self.source || (first.kind != FragmentKind.Box && first.kind != FragmentKind.Inline && first.kind != FragmentKind.Text) { continue }
+      let mut rect = Rect { x: first.worldLocation.x, y: first.worldLocation.y, width: first.size.width, height: first.size.height }
+      if first.kind == FragmentKind.Text {
+        let text = self.tree.fragments.texts.get(first.textData)
+        while text.kind == TextFragmentKind.Glyphs && self.fragment != NO_NODE {
+          let next = &fragments[self.fragment]
+          if next.source != self.source || next.kind != FragmentKind.Text || next.parent != first.parent { break }
+          let nextText = self.tree.fragments.texts.get(next.textData)
+          if nextText.kind != TextFragmentKind.Glyphs || nextText.fontKey != text.fontKey || nextText.bidiLevel != text.bidiLevel { break }
+          let sameHorizontal = next.worldLocation.y == first.worldLocation.y && next.size.height == first.size.height
+          let sameVertical = next.worldLocation.x == first.worldLocation.x && next.size.width == first.size.width
+          if !sameHorizontal && !sameVertical { break }
+          rect = rect.unionWith(Rect { x: next.worldLocation.x, y: next.worldLocation.y, width: next.size.width, height: next.size.height })
+          self.fragment = next.nextForBox
+        }
+      }
+      return Option<Rect>.Some { value: rect }
+    }
+    return Option<Rect>.None
+  }
+}

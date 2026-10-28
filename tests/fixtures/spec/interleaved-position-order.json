@@ -1,0 +1,79 @@
+{
+  "name": "interleaved-position-order",
+  "kind": "spec",
+  "features": [
+    "position",
+    "static-position",
+    "relative",
+    "display-contents",
+    "tree-order"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-position-3/#static-position",
+    "https://drafts.csswg.org/css-display-3/#box-generation"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "contents"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "position": "relative",
+          "height": 10,
+          "insetTop": 20
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 100,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "name": "flex-static-cross-safe-column",
+  "kind": "spec",
+  "features": [
+    "flex",
+    "static-position",
+    "overflow-alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#abspos-items",
+    "https://drafts.csswg.org/css-align-3/#auto-safety-position",
+    "https://drafts.csswg.org/css-align-3/"
+  ],
+  "input": {
+    "viewport": {
+      "width": 250,
+      "height": 250
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "position": "relative",
+          "width": 200,
+          "height": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex",
+          "flexDirection": "column",
+          "width": 20,
+          "height": 100,
+          "margin": {
+            "left": 50
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "position": "absolute",
+          "width": 40,
+          "height": 10,
+          "alignSelf": "center",
+          "alignSelfSafety": "safe"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 200,
+            "height": 200
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 50,
+            "y": 0,
+            "width": 20,
+            "height": 100
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 40,
+            "y": 0,
+            "width": 40,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

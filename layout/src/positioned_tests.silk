@@ -1,0 +1,346 @@
+import fragmentation { FragmentationError }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.usize
+import text { TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun }
+import silk.effect { Effect }
+import silk.testing { Testing, AssertionError }
+import style { Style, Dimension, Edges, Display, DisplayOutside, DisplayInside, Position, Direction, WritingMode, FlexDirection, FlexWrap, Align, OverflowAlignment }
+import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize, abs }
+import tree { Tree, LayoutTree, InvalidNode, NO_NODE }
+import engine { compute }
+
+struct EmptyMeasure {}
+impl Measure for EmptyMeasure {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    return FontMetrics.zero()
+  }
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop provider
+    drop request
+    return ScrollbarMetrics.zero()
+  }
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop provider
+    drop key
+    let mut size = Size { width: 0.0, height: 0.0 }
+    if request.known.widthDefinite { size.width = request.known.width }
+    if request.known.heightDefinite { size.height = request.known.height }
+    return Measured { size: size, scrollableOverflow: Rect.zero(), contentBlockSize: 0.0, firstBaselines: BaselineSet.zero(), lastBaselines: BaselineSet.zero(), hasBaseline: false, hasLineBoxes: false }
+  }
+}
+impl TextMeasure for EmptyMeasure {
+  fn beginTextLayout(provider: &mut Self) { drop provider }
+  effect fn analyze(provider: &mut Self, context: TextContext, output: &mut List<TextBreak>) -> TextAnalysis ! OutOfMemoryError | TextError ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if context.tokens.length > 0 { source = context.tokens[0].source }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>) ! OutOfMemoryError | TextError ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if request.start.unit < request.context.tokens.length { source = request.context.tokens[request.start.unit].source }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+}
+effect fn near(actual: f64, expected: f64) ! AssertionError<'static> {
+  run Testing.expect(abs(actual - expected) < 0.00001, "positioned consumer geometry follows the cited CSS clause")
+}
+enum Case { RowReverse, ReverseRtl, LogicalStart, VerticalRow, VerticalColumnReverse, Sideways, WrapReverse, SafeMain, UnsafeMain, SafeCross, DistributedOverflow, SelfStart, AutoMargins, NegativeRtlMargins, VerticalMargins, Overconstrained, VerticalOverconstrained, Relative, VerticalRelative, Fixed, InsetSelfAlignment, VerticalSelfAlignment, DefaultInsetSafety, UnsafeInsetSafety, StaticJustification, VerticalBlock }
+effect fn scenario(case: Case) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.position = Position.Relative
+  root.width = Dimension.px(200.0)
+  root.height = Dimension.px(100.0)
+  root.alignItems = Align.FlexStart
+  let mut child = Style.make()
+  child.position = Position.Absolute
+  child.width = Dimension.px(40.0)
+  child.height = Dimension.px(20.0)
+  let mut x = 0.0
+  let mut y = 0.0
+  if case == Case.InsetSelfAlignment {
+    // Position 3 §4.3: actual self alignment, not the parent's flex alignment.
+    child.inset = Edges.all(Dimension.px(10.0))
+    child.justifySelf = Align.Center
+    child.alignSelf = Align.Center
+    x = 80.0
+    y = 40.0
+  } else if case == Case.VerticalSelfAlignment {
+    root.writingMode = WritingMode.VerticalRl
+    child.inset = Edges.all(Dimension.px(10.0))
+    child.justifySelf = Align.Center
+    child.alignSelf = Align.End
+    x = 10.0
+    y = 40.0
+  } else if case == Case.DefaultInsetSafety || case == Case.UnsafeInsetSafety {
+    // Align 3 §4.4.1.2: 180px subject covers [80,180], but default
+    // clamps its centered [40,220] to the original CB's [0,200] limits.
+    child.width = Dimension.px(180.0)
+    child.inset.left = Dimension.px(80.0)
+    child.inset.right = Dimension.px(20.0)
+    child.justifySelf = Align.Center
+    x = 20.0
+    if case == Case.UnsafeInsetSafety { child.justifySelfSafety = OverflowAlignment.Unsafe
+      x = 40.0 }
+  } else if case == Case.StaticJustification {
+    root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flow }
+    root.justifyItems = Align.Center
+    x = 80.0
+    y = 10.0
+  } else if case == Case.VerticalBlock {
+    root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flow }
+    root.writingMode = WritingMode.VerticalRl
+    // Position 3 §3.5.3: preceding 30px block ends at x=170;
+    // the hypothetical 40px box occupies [130,170].
+    x = 130.0
+  }
+  // Flexbox §4.1: sole fixed-size hypothetical flex item, independently
+  // of actual siblings. The free extents are 160 horizontally and 80 vertically.
+  if case == Case.RowReverse || case == Case.ReverseRtl || case == Case.LogicalStart {
+    root.flexDirection = FlexDirection.RowReverse
+    x = 160.0
+    if case == Case.ReverseRtl { root.direction = Direction.Rtl
+      x = 0.0 }
+    if case == Case.LogicalStart { root.justifyContent = Align.Start
+      x = 0.0 }
+  } else if case == Case.VerticalRow {
+    root.writingMode = WritingMode.VerticalRl
+    root.direction = Direction.Rtl
+    x = 160.0
+    y = 80.0
+  } else if case == Case.VerticalColumnReverse {
+    root.writingMode = WritingMode.VerticalRl
+    root.flexDirection = FlexDirection.ColumnReverse
+  } else if case == Case.Sideways {
+    root.writingMode = WritingMode.SidewaysLr
+    y = 80.0
+  } else if case == Case.WrapReverse {
+    root.flexWrap = FlexWrap.WrapReverse
+    y = 80.0
+  } else if case == Case.SafeMain || case == Case.UnsafeMain || case == Case.DistributedOverflow {
+    child.width = Dimension.px(240.0)
+    root.justifyContent = Align.Center
+    root.flexDirection = FlexDirection.RowReverse
+    root.justifyContentSafety = OverflowAlignment.Safe
+    if case == Case.UnsafeMain { root.justifyContentSafety = OverflowAlignment.Unsafe
+      x = -20.0 }
+    if case == Case.DistributedOverflow { root.justifyContent = Align.SpaceAround
+      root.justifyContentSafety = OverflowAlignment.Default }
+  } else if case == Case.SafeCross {
+    child.height = Dimension.px(120.0)
+    root.alignItems = Align.Center
+    root.alignItemsSafety = OverflowAlignment.Safe
+  } else if case == Case.SelfStart {
+    root.flexDirection = FlexDirection.Column
+    child.direction = Direction.Rtl
+    child.alignSelf = Align.SelfStart
+    x = 160.0
+  } else if case == Case.AutoMargins {
+    // Position 3 §4.2: (200-10-30-40)/2 = 60; (100-5-15-20)/2 = 30.
+    child.inset.left = Dimension.px(10.0)
+    child.inset.right = Dimension.px(30.0)
+    child.inset.top = Dimension.px(5.0)
+    child.inset.bottom = Dimension.px(15.0)
+    child.margin = Edges.all(Dimension.auto())
+    x = 70.0
+    y = 35.0
+  } else if case == Case.NegativeRtlMargins {
+    // Negative inline space goes to inline-end, using the CB, not child direction.
+    root.direction = Direction.Rtl
+    child.width = Dimension.px(240.0)
+    child.inset.left = Dimension.px(10.0)
+    child.inset.right = Dimension.px(30.0)
+    child.margin.left = Dimension.auto()
+    child.margin.right = Dimension.auto()
+    x = -70.0
+  } else if case == Case.VerticalMargins {
+    root.writingMode = WritingMode.VerticalRl
+    root.direction = Direction.Rtl
+    child.height = Dimension.px(140.0)
+    child.inset.top = Dimension.px(10.0)
+    child.inset.bottom = Dimension.px(20.0)
+    child.margin.top = Dimension.auto()
+    child.margin.bottom = Dimension.auto()
+    x = 160.0
+    y = -60.0
+  } else if case == Case.Overconstrained {
+    // CSS2 §10.3.7: RTL containing block discards left even for an LTR child.
+    root.direction = Direction.Rtl
+    child.inset.left = Dimension.px(10.0)
+    child.inset.right = Dimension.px(30.0)
+    x = 130.0
+  } else if case == Case.VerticalOverconstrained {
+    root.writingMode = WritingMode.VerticalRl
+    root.direction = Direction.Rtl
+    child.inset = Edges.all(Dimension.px(10.0))
+    x = 150.0
+    y = 70.0
+  } else if case == Case.Relative {
+    // Position 3 §3.3: relative inset precedence uses the parent's writing mode.
+    root.direction = Direction.Rtl
+    child.position = Position.Relative
+    child.inset.left = Dimension.px(10.0)
+    child.inset.right = Dimension.px(30.0)
+    x = 130.0
+  } else if case == Case.VerticalRelative {
+    root.writingMode = WritingMode.VerticalRl
+    root.direction = Direction.Rtl
+    child.position = Position.Relative
+    child.inset = Edges.all(Dimension.px(10.0))
+    x = 150.0
+    y = 70.0
+  } else if case == Case.Fixed {
+    // Fixed insets use the viewport, while output stays source-parent relative.
+    root.margin.left = Dimension.px(30.0)
+    root.inset.left = Dimension.px(20.0)
+    child.position = Position.Fixed
+    child.inset.left = Dimension.px(10.0)
+    child.inset.top = Dimension.px(15.0)
+    x = -40.0
+    y = 15.0
+  }
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let mut sibling = Style.make()
+  sibling.width = Dimension.px(30.0)
+  sibling.height = Dimension.px(10.0)
+  // Relative cases need no preceding flex item; every abspos case does.
+  if case == Case.Relative || case == Case.VerticalRelative { sibling.display = Display.None }
+  let siblingId = run tree.append(rootId, move sibling)
+  drop siblingId
+  let childId = run tree.append(rootId, move child)
+  let mut output = LayoutTree.make()
+  let mut measure = EmptyMeasure {}
+  run compute(&tree, &mut output, &mut measure, OptionalSize.definite(400.0, 300.0))
+  let result = run output.sourceBounds(childId)
+  let parentBounds = run output.sourceBounds(rootId)
+  run near(result.x - parentBounds.x, x)
+  run near(result.y - parentBounds.y, y)
+}
+effect fn check(case: Case) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run scenario(case) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn absoluteFlexRowReverseUsesMainStart() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.RowReverse) }
+test effect fn absoluteFlexReverseComposesWithRtl() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.ReverseRtl) }
+test effect fn absoluteFlexLogicalStartIgnoresMainReversal() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.LogicalStart) }
+test effect fn absoluteFlexVerticalRowMapsBothAxes() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.VerticalRow) }
+test effect fn absoluteFlexVerticalColumnReverseUsesBlockAxis() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.VerticalColumnReverse) }
+test effect fn absoluteFlexSidewaysInlineStartIsBottom() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.Sideways) }
+test effect fn absoluteFlexWrapReverseMapsCrossStart() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.WrapReverse) }
+test effect fn absoluteFlexSafeMainAlignmentFallsBackToLogicalStart() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.SafeMain) }
+test effect fn absoluteFlexUnsafeMainAlignmentPreservesCenter() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.UnsafeMain) }
+test effect fn absoluteFlexSafeCrossAlignmentInheritsItemsSafety() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.SafeCross) }
+test effect fn absoluteFlexDistributedOverflowUsesSafeFallback() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.DistributedOverflow) }
+test effect fn absoluteFlexSelfStartUsesChildDirection() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.SelfStart) }
+test effect fn absoluteAutoMarginsDivideInsetRemainingSpace() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.AutoMargins) }
+test effect fn absoluteNegativeInlineAutoMarginsUseContainingDirection() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.NegativeRtlMargins) }
+test effect fn absoluteVerticalInlineAutoMarginsUseLogicalEnd() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.VerticalMargins) }
+test effect fn absoluteOverconstraintUsesContainingDirection() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.Overconstrained) }
+test effect fn absoluteVerticalOverconstraintKeepsLogicalStartInsets() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.VerticalOverconstrained) }
+test effect fn relativeOverconstraintUsesContainingDirection() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.Relative) }
+test effect fn relativeVerticalOverconstraintKeepsLogicalStartInsets() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.VerticalRelative) }
+test effect fn fixedInsetsUseViewportButOutputUsesSourceParent() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.Fixed) }
+test effect fn absoluteInsetSelfAlignmentUsesBothLogicalProperties() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.InsetSelfAlignment) }
+test effect fn absoluteVerticalSelfAlignmentMapsInlineAndBlockAxes() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.VerticalSelfAlignment) }
+test effect fn absoluteDefaultSafetyUsesOriginalContainingBlockLimit() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.DefaultInsetSafety) }
+test effect fn absoluteUnsafeSelfAlignmentMayOverflowContainingBlock() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.UnsafeInsetSafety) }
+test effect fn absoluteBlockStaticJustificationInheritsItems() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.StaticJustification) }
+test effect fn absoluteVerticalBlockStaticPositionFollowsBlockProgression() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.VerticalBlock) }
+
+test effect fn blockStaticPositionFlattensContentsAndIgnoresRelativeShift() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut rootStyle = Style.make()
+  rootStyle.position = Position.Relative
+  rootStyle.width = Dimension.px(200.0)
+  rootStyle.height = Dimension.px(100.0)
+  rootStyle.direction = Direction.Rtl
+  let mut tree = run Tree.make(move rootStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut contentsStyle = Style.make()
+  contentsStyle.display = Display.Contents
+  let contents = run tree.append(root, move contentsStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut previousStyle = Style.make()
+  previousStyle.height = Dimension.px(30.0)
+  previousStyle.position = Position.Relative
+  previousStyle.inset.top = Dimension.px(50.0)
+  let previous = run tree.append(contents, move previousStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut hiddenStyle = Style.make()
+  hiddenStyle.display = Display.None
+  let hidden = run tree.append(contents, move hiddenStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut suppressedStyle = Style.make()
+  suppressedStyle.position = Position.Absolute
+  suppressedStyle.width = Dimension.px(90.0)
+  suppressedStyle.height = Dimension.px(90.0)
+  let suppressed = run tree.append(hidden, move suppressedStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut childStyle = Style.make()
+  childStyle.position = Position.Absolute
+  childStyle.width = Dimension.px(40.0)
+  childStyle.height = Dimension.px(20.0)
+  let child = run tree.append(contents, move childStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut output = LayoutTree.make()
+  let mut measure = EmptyMeasure {}
+  run compute(&tree, &mut output, &mut measure, OptionalSize.definite(400.0, 300.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let result = run output.sourceBounds(child)
+  let preceding = run output.sourceBounds(previous)
+  let parentBounds = run output.sourceBounds(root)
+  let hiddenResult = run output.sourceBounds(suppressed)
+  // Position 3 §3.5.3: block-start is the unshifted preceding block-end;
+  // inline-start is the right content edge. Contents contributes no box.
+  run near(result.x - parentBounds.x, 160.0)
+  run near(result.y - parentBounds.y, 30.0)
+  run near(preceding.y - parentBounds.y, 50.0)
+  run Testing.expect(output.firstBySource.get(contents.index) == NO_NODE && output.firstBySource.get(hidden.index) == NO_NODE && output.firstBySource.get(suppressed.index) == NO_NODE, "contents and suppressed descendants have no generated boxes")
+  run near(hiddenResult.width, 0.0)
+  run near(hiddenResult.height, 0.0)
+}
+
+test effect fn absoluteInsetStretchClampsAndInvertedRectangleReducesEndInset() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut rootStyle = Style.make()
+  rootStyle.position = Position.Relative
+  rootStyle.width = Dimension.px(200.0)
+  rootStyle.height = Dimension.px(100.0)
+  let mut tree = run Tree.make(move rootStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut stretchedStyle = Style.make()
+  stretchedStyle.position = Position.Absolute
+  stretchedStyle.maxWidth = Dimension.px(80.0)
+  stretchedStyle.height = Dimension.px(20.0)
+  stretchedStyle.inset.left = Dimension.px(10.0)
+  stretchedStyle.inset.right = Dimension.px(30.0)
+  let stretched = run tree.append(root, move stretchedStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut invertedStyle = Style.make()
+  invertedStyle.position = Position.Absolute
+  invertedStyle.width = Dimension.px(40.0)
+  invertedStyle.height = Dimension.px(20.0)
+  invertedStyle.inset.top = Dimension.px(120.0)
+  invertedStyle.inset.bottom = Dimension.px(30.0)
+  invertedStyle.margin.top = Dimension.auto()
+  invertedStyle.margin.bottom = Dimension.auto()
+  let inverted = run tree.append(root, move invertedStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut output = LayoutTree.make()
+  let mut measure = EmptyMeasure {}
+  run compute(&tree, &mut output, &mut measure, OptionalSize.definite(400.0, 300.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let stretchedBox = run output.sourceBounds(stretched)
+  let invertedBox = run output.sourceBounds(inverted)
+  let parentBounds = run output.sourceBounds(root)
+  // Position 3 §4.1: 160px stretch-fit is clamped by the 80px maximum.
+  run near(stretchedBox.width, 80.0)
+  run near(stretchedBox.x - parentBounds.x, 10.0)
+  // §3.5.2 reduces bottom from 30 to -20: zero-height rectangle at 120.
+  // §4.2 then divides -20 between the block-axis auto margins.
+  run near(invertedBox.y - parentBounds.y, 110.0)
+}

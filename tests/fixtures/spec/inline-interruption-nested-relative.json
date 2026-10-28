@@ -1,0 +1,173 @@
+{
+  "name": "inline-interruption-nested-relative",
+  "kind": "spec",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 300
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "position": "relative",
+          "inset": {
+            "left": 7,
+            "top": 3
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline",
+          "position": "relative",
+          "inset": {
+            "left": 5,
+            "top": 2
+          }
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "display": "block",
+          "width": 30,
+          "height": 15
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 20
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "position": "absolute",
+          "width": {
+            "percent": 0.5
+          },
+          "height": 4,
+          "inset": {
+            "left": 0,
+            "top": 0
+          }
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visuren.html#anonymous-block-level",
+    "https://drafts.csswg.org/css-position-3/#def-cb",
+    "https://drafts.csswg.org/cssom-view/#element-get-the-bounding-box",
+    "https://github.com/w3c/csswg-drafts/issues/13711"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 45
+      },
+      {
+        "x": 7,
+        "y": 13,
+        "width": 100,
+        "height": 35,
+        "rects": [
+          {
+            "x": 7,
+            "y": 13,
+            "width": 20,
+            "height": 0
+          },
+          {
+            "x": 7,
+            "y": 13,
+            "width": 100,
+            "height": 15
+          },
+          {
+            "x": 7,
+            "y": 48,
+            "width": 40,
+            "height": 0
+          }
+        ]
+      },
+      {
+        "x": 5,
+        "y": 2,
+        "width": 100,
+        "height": 35,
+        "rects": [
+          {
+            "x": 12,
+            "y": 15,
+            "width": 20,
+            "height": 0
+          },
+          {
+            "x": 12,
+            "y": 15,
+            "width": 100,
+            "height": 15
+          },
+          {
+            "x": 12,
+            "y": 50,
+            "width": 40,
+            "height": 0
+          }
+        ]
+      },
+      {
+        "x": 0,
+        "y": -10,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 15
+      },
+      {
+        "x": 0,
+        "y": 15,
+        "width": 40,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 4
+      }
+    ]
+  }
+}

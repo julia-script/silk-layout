@@ -1,0 +1,2017 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import geometry { Layout, Point, Size, Rect, ResolvedEdges, OptionalSize, AvailableSpace, Measure, max, min, clamp, abs }
+import style { Style, Position, DimensionKind, Direction, WritingMode, Align, FlexDirection, FlexWrap, OverflowAlignment, Overflow, Float, BoxDecorationBreak }
+import tree { NO_NODE }
+import box_tree { BoxTree, BoxKind }
+import fragments { FragmentKind }
+import context { Input, ResolvedBox, resolveBox, childrenInput, withGutter, resolve, resolves, outOfFlow, isFlex, scrollable, usedOverflowForAxis, UNBOUNDED }
+import engine { layoutNode, layoutInBfc, flowMarginRect, resolveFragmentBox }
+import layout_pass { LayoutPass, FullBoxGeometry, CacheKind }
+import text { TextMeasure, TextError }
+import fragmentation { FragmentationError, FragmentInput, FragmentAncestor }
+import breaks { FragmentainerKind, BreakRelaxation }
+import fragment_position { instance, physicalPosition, flowPosition, flowTranslation, blockStart }
+import silk.option { Option }
+import fragment_box as FragmentBox
+import silk.list { List }
+import fragment_fit { WidowCheck, WidowDecision, collectWidows, validateWidows }
+import axes { Axes }
+import block { inlineOffset }
+import bfc { BfcState }
+
+// Fragment ancestry, generated ancestry and source ancestry are deliberately
+// separate. In particular an interrupted inline does not own its lifted blocks.
+fn fragmentPosition(output: &LayoutPass, id: usize, visual: bool) -> Point {
+  return physicalPosition(output, id, visual)
+}
+fn globalPosition(nodes: &BoxTree, output: &LayoutPass, id: usize) -> Point {
+  if id == NO_NODE { return Point { x: 0.0, y: 0.0 } }
+  return fragmentPosition(output, output.fragments.first(id), true)
+}
+fn normalPosition(nodes: &BoxTree, output: &LayoutPass, id: usize) -> Point {
+  if id == NO_NODE { return Point { x: 0.0, y: 0.0 } }
+  return flowPosition(output, output.fragments.first(id))
+}
+fn requestedScrollOffset(nodes: &BoxTree, id: usize, viewportScroll: Point) -> Point {
+  if id == NO_NODE || id == 0 { return viewportScroll }
+  let style = nodes.style(id)
+  let mut result = Point { x: 0.0, y: 0.0 }
+  // Non-atomic inlines do not establish scroll containers.
+  if nodes.node(id).kind == BoxKind.Inline { return result }
+  if scrollable(usedOverflowForAxis(style, true)) { result.x = nodes.node(id).scrollOffset.x }
+  if scrollable(usedOverflowForAxis(style, false)) { result.y = nodes.node(id).scrollOffset.y }
+  return result
+}
+fn clampScroll(request: Point, port: Rect, overflow: Rect) -> Point {
+  // Reachable overflow already includes writing-mode, flex reversal and
+  // alignment-origin restrictions. Preserve both-sided alignment overflow.
+  return Point {
+    x: clamp(request.x, min(0.0, overflow.x - port.x), max(0.0, overflow.x + overflow.width - port.x - port.width)),
+    y: clamp(request.y, min(0.0, overflow.y - port.y), max(0.0, overflow.y + overflow.height - port.y - port.height)),
+  }
+}
+fn scrollOffset(nodes: &BoxTree, output: &LayoutPass, id: usize, viewportScroll: Point) -> Point {
+  let request = requestedScrollOffset(nodes, id, viewportScroll)
+  if id == NO_NODE || id == 0 { return request }
+  let layout = &output.boxes[id]
+  return clampScroll(request, layout.paddingRect(), layout.scrollableOverflow)
+}
+fn generatedParent(nodes: &BoxTree, id: usize) -> usize {
+  let mut parent = nodes.node(id).parent
+  while parent != NO_NODE && (nodes.node(parent).kind == BoxKind.Inline || nodes.node(parent).kind == BoxKind.InlineFormatting) {
+    parent = nodes.node(parent).parent
+  }
+  if parent == 0 { return NO_NODE }
+  return parent
+}
+fn absoluteContainingBlock(nodes: &BoxTree, id: usize) -> usize {
+  if nodes.style(id).position == Position.Fixed { return NO_NODE }
+  let source = nodes.node(id).source
+  if source == NO_NODE { return NO_NODE }
+  let mut parent = nodes.sources[source].parent
+  while parent != NO_NODE {
+    let box = nodes.firstBySource.get(parent)
+    if box != NO_NODE && nodes.styles[nodes.sources[parent].styleIndex].position != Position.Static { return box }
+    parent = nodes.sources[parent].parent
+  }
+  return NO_NODE
+}
+fn fixedTree(nodes: &BoxTree, id: usize) -> bool {
+  let mut source = nodes.node(id).source
+  while source != NO_NODE {
+    if nodes.firstBySource.get(source) != NO_NODE && nodes.styles[nodes.sources[source].styleIndex].position == Position.Fixed { return true }
+    source = nodes.sources[source].parent
+  }
+  return false
+}
+// CSS2 keeps lifted blocks in their original block flow. Their interrupted
+// inline scope still has nonpainting geometry (CSSWG #13711 / #14104).
+// Materialize it before positioned descendants consume the inline CB, not in
+// the CSSOM iterator. The preceding piece owns it, preserving source order.
+effect fn interruption(nodes: &BoxTree, output: &mut LayoutPass, id: usize, last: usize) ! OutOfMemoryError ? &mut Allocator {
+  let node = nodes.node(id)
+  let first = node.interruptionFirst
+  let container = nodes.node(first).parent
+  if output.frame != NO_NODE {
+    run fragmentedInterruption(nodes, &mut output, id, last, container)
+    return
+  }
+  let parent = output.fragments.first(container)
+  if parent == NO_NODE || output.fragments.first(first) == NO_NODE || output.fragments.first(last) == NO_NODE { return }
+  let content = output.boxes[container].contentRect()
+  let firstBox = output.boxes[first]
+  let lastBox = output.boxes[last]
+  let mut rect = Rect { x: content.x, y: firstBox.location.y, width: content.width, height: max(0.0, lastBox.location.y + lastBox.size.height - firstBox.location.y) }
+  let mode = nodes.style(container).writingMode
+  if mode != WritingMode.HorizontalTb {
+    rect.y = content.y
+    rect.height = content.height
+    rect.x = firstBox.location.x
+    rect.width = max(0.0, lastBox.location.x + lastBox.size.width - firstBox.location.x)
+    if mode == WritingMode.VerticalRl || mode == WritingMode.SidewaysRl {
+      rect.x = lastBox.location.x
+      rect.width = max(0.0, firstBox.location.x + firstBox.size.width - lastBox.location.x)
+    }
+  }
+  let mut fragment = output.fragment(id, node.source, FragmentKind.Inline)
+  fragment.parent = parent
+  fragment.location = Point { x: rect.x, y: rect.y }
+  fragment.size = Size { width: rect.width, height: rect.height }
+  fragment.contentRect = Rect { x: 0.0, y: 0.0, width: rect.width, height: rect.height }
+  fragment.paddingRect = fragment.contentRect
+  fragment.first = false
+  fragment.last = false
+  fragment.decorationEdges = 0
+  fragment.nonpainting = true
+  drop run output.fragments.append(fragment)
+}
+effect fn fragmentedInterruption(nodes: &BoxTree, output: &mut LayoutPass, id: usize, last: usize, container: usize) ! OutOfMemoryError ? &mut Allocator {
+  let mut frame: usize = 0
+  let mut end = output.frameRoots.length()
+  if fixedTree(nodes, id) {
+    frame = output.frame
+    end = frame + 1
+  }
+  while frame < end {
+    let parent = instance(&output, container, frame)
+    if parent != NO_NODE {
+      let parentFragment = output.fragments.values.get(parent)
+      let parentOrigin = fragmentPosition(&output, parent, false)
+      let mut rect = Rect.zero()
+      let mut found = false
+      let mut child = nodes.node(id).interruptionFirst
+      while child != NO_NODE {
+        let fragmentId = instance(&output, child, frame)
+        if fragmentId != NO_NODE {
+          let fragment = output.fragments.values.get(fragmentId)
+          let point = fragmentPosition(&output, fragmentId, false)
+          let childRect = Rect { x: point.x - parentOrigin.x, y: point.y - parentOrigin.y, width: fragment.size.width, height: fragment.size.height }
+          if found { rect = rect.unionWith(childRect) } else { rect = childRect }
+          found = true
+        }
+        if child == last { break }
+        child = nodes.node(child).nextSibling
+      }
+      if found {
+        if nodes.style(container).writingMode == WritingMode.HorizontalTb {
+          rect.x = parentFragment.contentRect.x
+          rect.width = parentFragment.contentRect.width
+        } else {
+          rect.y = parentFragment.contentRect.y
+          rect.height = parentFragment.contentRect.height
+        }
+        let mut fragment = output.fragment(id, nodes.node(id).source, FragmentKind.Inline)
+        fragment.fragmentainer = frame
+        fragment.parent = parent
+        fragment.location = Point { x: rect.x, y: rect.y }
+        fragment.size = Size { width: rect.width, height: rect.height }
+        fragment.contentRect = Rect { x: 0.0, y: 0.0, width: rect.width, height: rect.height }
+        fragment.paddingRect = fragment.contentRect
+        fragment.first = false
+        fragment.last = false
+        fragment.decorationEdges = 0
+        fragment.nonpainting = true
+        let emitted = run output.fragments.append(fragment)
+        match output.fragmentFullBox(parent) {
+          Option<FullBoxGeometry>.Some { value } => {
+            run output.rememberFragmentBox(id, emitted.index, FullBoxGeometry { parent: value.content, known: OptionalSize.none(), content: OptionalSize.none() })
+          }
+          Option<FullBoxGeometry>.None => {}
+        }
+      }
+    }
+    frame = frame + 1
+  }
+}
+fn textOnlyContinuation(nodes: &BoxTree, id: usize) -> bool {
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    let node = nodes.node(child)
+    if node.kind != BoxKind.Text {
+      if node.kind != BoxKind.Inline || (node.firstForSource && node.lastForSource)
+        || !textOnlyContinuation(nodes, child) { return false }
+    }
+    child = node.nextSibling
+  }
+  return true
+}
+fn phantomInterruption(nodes: &BoxTree, output: &LayoutPass, id: usize) -> bool {
+  if id == NO_NODE || nodes.node(id).interruptionFirst == NO_NODE || !textOnlyContinuation(nodes, id) { return false }
+  let mut current = output.fragments.first(id)
+  if current == NO_NODE { return false }
+  while current != NO_NODE {
+    let fragment = &output.fragments.values.asSlice()[current]
+    if fragment.kind != FragmentKind.Inline || !fragment.phantom { return false }
+    current = fragment.nextForBox
+  }
+  return true
+}
+effect fn interruptions(nodes: &BoxTree, output: &mut LayoutPass, first: usize) ! OutOfMemoryError ? &mut Allocator {
+  let mut id = first
+  while id != NO_NODE {
+    let mut next = nodes.node(id).nextContinuation
+    if nodes.node(id).interruptionFirst != NO_NODE {
+      let mut last = nodes.node(id).interruptionLast
+      // An actual phantom continuation between consumed block ranges is not
+      // a new inline fragment boundary. Retain its structural anchor ancestry,
+      // but do not turn collapsed whitespace/OOF-only content into a box.
+      while phantomInterruption(nodes, &output, next) {
+        last = nodes.node(next).interruptionLast
+        let mut current = output.fragments.first(next)
+        while current != NO_NODE {
+          let values = output.fragments.values.asMutSlice()
+          values[current].kind = FragmentKind.Line
+          values[current].source = NO_NODE
+          values[current].nonpainting = true
+          values[current].decorationEdges = 0
+          values[current].size = Size.zero()
+          values[current].contentRect = Rect.zero()
+          values[current].paddingRect = Rect.zero()
+          values[current].layoutBounds = Rect.zero()
+          values[current].scrollableOverflow = Rect.zero()
+          current = values[current].nextForBox
+        }
+        next = nodes.node(next).nextContinuation
+      }
+      run interruption(nodes, &mut output, id, last)
+    }
+    id = next
+  }
+}
+fn inlineContainingRect(nodes: &BoxTree, output: &LayoutPass, id: usize, frame: usize) -> Rect {
+  let style = nodes.style(id)
+  let reverseX = startReverse(style, true)
+  let reverseY = startReverse(style, false)
+  // The compositor emits an Inline fragment even for an empty continuation.
+  // A missing fragment is not a zero-sized containing-block substitute.
+  let mut firstBox = id
+  let mut firstId = NO_NODE
+  while firstBox != NO_NODE {
+    firstId = output.fragments.first(firstBox)
+    while firstId != NO_NODE {
+      let candidate = output.fragments.values.get(firstId)
+      if frame == NO_NODE || candidate.fragmentainer == frame { break }
+      firstId = candidate.nextForBox
+    }
+    if firstId != NO_NODE { break }
+    firstBox = nodes.node(firstBox).nextContinuation
+  }
+  let first = &output.fragments.values.asSlice()[firstId]
+  let firstRect = first.contentRect.translated(flowPosition(output, firstId))
+  let mut startX = firstRect.x
+  let mut startY = firstRect.y
+  let mut endX = firstRect.x + firstRect.width
+  let mut endY = firstRect.y + firstRect.height
+  if reverseX { startX = endX
+    endX = firstRect.x }
+  if reverseY { startY = endY
+    endY = firstRect.y }
+  let mut firstLine = first.parent
+  while firstLine != NO_NODE && output.fragments.values.asSlice()[firstLine].kind != FragmentKind.Line { firstLine = output.fragments.values.asSlice()[firstLine].parent }
+  let mut box = firstBox
+  while box != NO_NODE {
+    let mut current = output.fragments.first(box)
+    if box == firstBox { current = first.nextForBox }
+    while current != NO_NODE {
+      let fragment = &output.fragments.values.asSlice()[current]
+      if (frame == NO_NODE || fragment.fragmentainer == frame) && fragment.kind == FragmentKind.Inline {
+        let rect = fragment.contentRect.translated(flowPosition(output, current))
+        let mut sx = rect.x
+        let mut sy = rect.y
+        let mut ex = rect.x + rect.width
+        let mut ey = rect.y + rect.height
+        if reverseX { sx = ex
+          ex = rect.x }
+        if reverseY { sy = ey
+          ey = rect.y }
+        let mut line = fragment.parent
+        while line != NO_NODE && output.fragments.values.asSlice()[line].kind != FragmentKind.Line { line = output.fragments.values.asSlice()[line].parent }
+        // Bidi fragments on the first line choose the inline-start-most
+        // first fragment, not the first emitted visual run.
+        if line == firstLine {
+          let mut earlier = sx < startX
+          if reverseX { earlier = sx > startX }
+          if style.writingMode != WritingMode.HorizontalTb {
+            earlier = sy < startY
+            if reverseY { earlier = sy > startY }
+          }
+          if earlier { startX = sx
+            startY = sy }
+        }
+        if reverseX { endX = min(endX, ex) } else { endX = max(endX, ex) }
+        if reverseY { endY = min(endY, ey) } else { endY = max(endY, ey) }
+      }
+      current = fragment.nextForBox
+    }
+    box = nodes.node(box).nextContinuation
+  }
+  let mut x = startX
+  let mut y = startY
+  let mut width = endX - startX
+  let mut height = endY - startY
+  if reverseX { x = endX
+    width = startX - endX }
+  if reverseY { y = endY
+    height = startY - endY }
+  return Rect { x: x, y: y, width: max(0.0, width), height: max(0.0, height) }
+}
+fn containingRect(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize) -> Rect {
+  if id == NO_NODE { return Rect { x: 0.0, y: 0.0, width: viewport.width, height: viewport.height } }
+  if nodes.node(id).kind == BoxKind.Inline { return inlineContainingRect(nodes, output, id, NO_NODE) }
+  let fragment = output.fragments.first(id)
+  return output.fragments.values.asSlice()[fragment].paddingRect.translated(flowPosition(output, fragment))
+}
+fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize) -> Input {
+  let positioned = outOfFlow(nodes.style(id))
+  let mut parent = generatedParent(nodes, id)
+  if positioned { parent = absoluteContainingBlock(nodes, id) }
+  let mut input = Input.make(viewport)
+  if positioned && parent != NO_NODE {
+    let rect = containingRect(nodes, output, parent, viewport)
+    input.parent = OptionalSize.definite(rect.width, rect.height)
+  } else if parent != NO_NODE {
+    let rect = output.boxes[parent].contentRect()
+    input.parent = OptionalSize {
+      width: rect.width, height: rect.height,
+      widthDefinite: output.boxes[parent].widthDefinite,
+      heightDefinite: output.boxes[parent].heightDefinite,
+    }
+  }
+  if output.frame != NO_NODE && !positioned {
+    match output.fullBox(id) {
+      Option<FullBoxGeometry>.Some { value } => {
+        input.parent = value.parent
+        input.known = value.known
+      }
+      Option<FullBoxGeometry>.None => {}
+    }
+  }
+  if parent != NO_NODE {
+    input.parentWritingMode = nodes.style(parent).writingMode
+    input.parentTextOrientation = nodes.style(parent).textOrientation
+  }
+  return input
+}
+fn usedBox(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize) -> ResolvedBox {
+  return withGutter(resolveBox(nodes.style(id), usedInput(nodes, output, id, viewport)), output.boxes[id].scrollbarGutter)
+}
+fn usedChildrenInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize, parent: OptionalSize) -> Input {
+  let input = usedInput(nodes, output, id, viewport)
+  let mut box = withGutter(resolveBox(nodes.style(id), input), output.boxes[id].scrollbarGutter)
+  box.size = OptionalSize {
+    width: output.boxes[id].size.width, height: output.boxes[id].size.height,
+    widthDefinite: output.boxes[id].widthDefinite, heightDefinite: output.boxes[id].heightDefinite,
+  }
+  return childrenInput(input, nodes.style(id), box, parent)
+}
+fn nextPositionSource(nodes: &BoxTree, id: usize) -> usize {
+  if !nodes.styles[nodes.sources[id].styleIndex].display.isNone() && nodes.sources[id].firstChild != NO_NODE { return nodes.sources[id].firstChild }
+  let mut current = id
+  while current != NO_NODE {
+    if nodes.sources[current].nextSibling != NO_NODE { return nodes.sources[current].nextSibling }
+    current = nodes.sources[current].parent
+  }
+  return NO_NODE
+}
+// Physical low-edge coordinates, with start determined by the containing
+// block's writing mode (Position 3 §§3.3, 3.5.3, 4.2).
+fn startReverse(style: &Style, horizontal: bool) -> bool {
+  let vertical = style.writingMode != WritingMode.HorizontalTb
+  if horizontal == !vertical {
+    let mut reverse = style.usedDirection() == Direction.Rtl
+    if style.writingMode == WritingMode.SidewaysLr { reverse = !reverse }
+    return reverse
+  }
+  return style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
+}
+fn alignmentOffset(value: Align, free: f64, reverse: bool, logicalReverse: bool, selfReverse: bool, horizontal: bool, safe: bool) -> f64 {
+  let mut align = value
+  // Flexbox §8.2 / Box Alignment §5.1: a sole item's distribution
+  // falls back to safe flex-start or safe center.
+  if align == Align.SpaceBetween { align = Align.FlexStart
+    if free < 0.0 { align = Align.Start } }
+  if align == Align.SpaceAround || align == Align.SpaceEvenly { align = Align.Center
+    if free < 0.0 { align = Align.Start } }
+  if safe && free < 0.0 { align = Align.Start }
+  if align == Align.Center { return free / 2.0 }
+  let mut end = reverse
+  if align == Align.FlexEnd { end = !reverse }
+  else if align == Align.Start || align == Align.Baseline { end = logicalReverse }
+  else if align == Align.End || align == Align.LastBaseline { end = !logicalReverse }
+  else if align == Align.SelfStart { end = selfReverse }
+  else if align == Align.SelfEnd { end = !selfReverse }
+  else if align == Align.Left { end = logicalReverse
+    if horizontal { end = false } }
+  else if align == Align.Right { end = logicalReverse
+    if horizontal { end = true } }
+  if end { return free }
+  return 0.0
+}
+fn relativeOffset(style: &Style, containingStyle: &Style, containing: OptionalSize) -> Point {
+  let left = resolves(style.inset.left, containing.widthDefinite)
+  let right = resolves(style.inset.right, containing.widthDefinite)
+  let top = resolves(style.inset.top, containing.heightDefinite)
+  let bottom = resolves(style.inset.bottom, containing.heightDefinite)
+  let mut result = Point { x: 0.0, y: 0.0 }
+  if left && (!right || !startReverse(containingStyle, true)) { result.x = resolve(style.inset.left, containing.width, containing.widthDefinite, 0.0) }
+  else if right { result.x = -resolve(style.inset.right, containing.width, containing.widthDefinite, 0.0) }
+  if top && (!bottom || !startReverse(containingStyle, false)) { result.y = resolve(style.inset.top, containing.height, containing.heightDefinite, 0.0) }
+  else if bottom { result.y = -resolve(style.inset.bottom, containing.height, containing.heightDefinite, 0.0) }
+  return result
+}
+fn stickyAxis(style: &Style, containingStyle: &Style, horizontal: bool, position: f64, size: f64, containingLow: f64, containingSize: f64, marginLow: f64, marginHigh: f64, scrollLow: f64, scrollSize: f64, scrollDefinite: bool) -> f64 {
+  let mut lowDimension = style.inset.top
+  let mut highDimension = style.inset.bottom
+  if horizontal { lowDimension = style.inset.left
+    highDimension = style.inset.right }
+  let hasLow = resolves(lowDimension, scrollDefinite)
+  let hasHigh = resolves(highDimension, scrollDefinite)
+  if !hasLow && !hasHigh { return 0.0 }
+  let mut low = resolve(lowDimension, scrollSize, scrollDefinite, 0.0)
+  let mut high = resolve(highDimension, scrollSize, scrollDefinite, 0.0)
+  // Position 3 §3.4: enlarge at the containing block's logical end,
+  // even when that edge's original inset was auto.
+  if scrollSize - low - high < size {
+    if startReverse(containingStyle, horizontal) { low = scrollSize - high - size }
+    else { high = scrollSize - low - size }
+  }
+  // The pinned draft says margin EDGE, not border edge. Keep actual used
+  // margins (including auto/negative margins) and normal collapsed placement.
+  let positionLow = min(marginLow, abs(position - marginLow - containingLow))
+  let positionHigh = min(marginHigh, abs(containingLow + containingSize - position - size - marginHigh))
+  let minimum = containingLow + positionLow - position
+  let maximum = containingLow + containingSize - size - positionHigh - position
+  let mut offset = 0.0
+  if hasLow { offset = max(offset, scrollLow + low - position) }
+  if hasHigh { offset = min(offset, scrollLow + scrollSize - high - size - position) }
+  // A one-sided inset never pushes in the opposite direction, even if the
+  // normal position box already overflows its containing block.
+  if offset > 0.0 { return min(offset, max(0.0, maximum)) }
+  if offset < 0.0 { return max(offset, min(0.0, minimum)) }
+  return 0.0
+}
+fn sticky(nodes: &BoxTree, output: &mut LayoutPass, id: usize, fragmentId: usize, viewport: OptionalSize, viewportScroll: Point, viewportOverflow: Rect) {
+  let parent = generatedParent(nodes, id)
+  let viewportStyle = Style.make()
+  let mut containingStyle = &viewportStyle
+  let mut containingOrigin = Point { x: viewportOverflow.x, y: viewportOverflow.y }
+  let mut containing = viewport
+  containing.width = viewportOverflow.width
+  containing.height = viewportOverflow.height
+  if parent != NO_NODE {
+    containingStyle = nodes.style(parent)
+    let parentBox = usedBox(nodes, &output, parent, viewport)
+    containingOrigin = globalPosition(nodes, &output, parent)
+    containingOrigin.x = containingOrigin.x + parentBox.inset.left
+    containingOrigin.y = containingOrigin.y + parentBox.inset.top
+    containing = OptionalSize.definite(max(0.0, output.boxes[parent].size.width - parentBox.inset.horizontal()), max(0.0, output.boxes[parent].size.height - parentBox.inset.vertical()))
+    // Position 3 leaves scrolling CB extents ambiguous (CSSWG #2609).
+    // Follow Chrome's scrolling content area, independently of scrollport insets.
+    let overflow = output.boxes[parent].scrollableOverflow
+    if scrollable(usedOverflowForAxis(containingStyle, true)) {
+      containingOrigin.x = containingOrigin.x + overflow.x - parentBox.border.left - parentBox.gutter.left
+      containing.width = max(0.0, overflow.width - parentBox.padding.horizontal())
+    }
+    if scrollable(usedOverflowForAxis(containingStyle, false)) {
+      containingOrigin.y = containingOrigin.y + overflow.y - parentBox.border.top - parentBox.gutter.top
+      containing.height = max(0.0, overflow.height - parentBox.padding.vertical())
+    }
+  }
+  let scroll = scrollOffset(nodes, &output, parent, viewportScroll)
+  containingOrigin.x = containingOrigin.x - scroll.x
+  containingOrigin.y = containingOrigin.y - scroll.y
+  let position = fragmentPosition(&output, fragmentId, true)
+  let mut scrollOrigin = Point { x: 0.0, y: 0.0 }
+  let mut scrollSize = viewport
+  let mut foundX = false
+  let mut foundY = false
+  let mut ancestor = nodes.node(id).parent
+  while ancestor != NO_NODE && ancestor != 0 && (!foundX || !foundY) {
+    let ancestorStyle = nodes.style(ancestor)
+    if nodes.node(ancestor).kind != BoxKind.Inline && nodes.node(ancestor).kind != BoxKind.InlineFormatting {
+      let useX = !foundX && scrollable(usedOverflowForAxis(ancestorStyle, true))
+      let useY = !foundY && scrollable(usedOverflowForAxis(ancestorStyle, false))
+      if useX || useY {
+        let box = usedBox(nodes, &output, ancestor, viewport)
+        let origin = globalPosition(nodes, &output, ancestor)
+        // Overflow 3: the scrollport is the padding box, not content box.
+        if useX {
+          scrollOrigin.x = origin.x + box.border.left + box.gutter.left
+          scrollSize.width = max(0.0, output.boxes[ancestor].size.width - box.border.horizontal() - box.gutter.horizontal())
+          scrollSize.widthDefinite = true
+          foundX = true
+        }
+        if useY {
+          scrollOrigin.y = origin.y + box.border.top + box.gutter.top
+          scrollSize.height = max(0.0, output.boxes[ancestor].size.height - box.border.vertical() - box.gutter.vertical())
+          scrollSize.heightDefinite = true
+          foundY = true
+        }
+      }
+    }
+    ancestor = nodes.node(ancestor).parent
+  }
+  let fragment = output.fragments.values.get(fragmentId)
+  let x = stickyAxis(nodes.style(id), containingStyle, true, position.x, fragment.size.width, containingOrigin.x, containing.width, fragment.usedMargin.left, fragment.usedMargin.right, scrollOrigin.x, scrollSize.width, scrollSize.widthDefinite)
+  let y = stickyAxis(nodes.style(id), containingStyle, false, position.y, fragment.size.height, containingOrigin.y, containing.height, fragment.usedMargin.top, fragment.usedMargin.bottom, scrollOrigin.y, scrollSize.height, scrollSize.heightDefinite)
+  let fragments = output.fragments.values.asMutSlice()
+  fragments[fragmentId].visualOffset.x = fragments[fragmentId].visualOffset.x + x
+  fragments[fragmentId].visualOffset.y = fragments[fragmentId].visualOffset.y + y
+}
+fn nextGenerated(nodes: &BoxTree, root: usize, id: usize) -> usize {
+  let mut current = id
+  while current != root && current != NO_NODE {
+    if nodes.node(current).nextSibling != NO_NODE { return nodes.node(current).nextSibling }
+    current = nodes.node(current).parent
+  }
+  return NO_NODE
+}
+fn absoluteAlignment(low: f64, high: f64, outer: f64, limitLow: f64, limitHigh: f64, reverse: bool, logicalReverse: bool, align: Align, safety: OverflowAlignment, selfReverse: bool, horizontal: bool) -> f64 {
+  let free = high - low - outer
+  let mut position = low + alignmentOffset(align, free, reverse, logicalReverse, selfReverse, horizontal, false)
+  // Align §4.4.1.2: default/safe abspos alignment may overflow the
+  // alignment rectangle, but must cover it while respecting the limit rect.
+  if align != Align.Auto && align != Align.Normal && safety != OverflowAlignment.Unsafe && free < 0.0 {
+    let start = min(limitLow, low)
+    let end = max(limitHigh, high)
+    if outer > end - start {
+      position = start
+      if logicalReverse { position = end - outer }
+    } else {
+      position = clamp(position, max(start, high - outer), min(low, end - outer))
+    }
+  }
+  return position
+}
+
+fn insetPosition(low: f64, high: f64, hasLow: bool, hasHigh: bool, size: f64, containing: f64, limitLow: f64, limitHigh: f64, marginLow: f64, marginHigh: f64, autoLow: bool, autoHigh: bool, reverse: bool, inlineAxis: bool, staticPosition: f64, align: Align, safety: OverflowAlignment, selfReverse: bool, horizontal: bool) -> f64 {
+  if hasLow && hasHigh {
+    let free = containing - low - high - size - marginLow - marginHigh
+    if autoLow && autoHigh {
+      if inlineAxis && free < 0.0 {
+        if reverse { return low + free }
+        return low
+      }
+      return low + free / 2.0
+    }
+    if autoLow { return low + free }
+    if autoHigh { return low + marginLow }
+    return absoluteAlignment(low, containing - high, size + marginLow + marginHigh, limitLow, limitHigh, reverse, reverse, align, safety, selfReverse, horizontal) + marginLow
+  }
+  if hasLow { return low + marginLow }
+  if hasHigh { return containing - high - size - marginHigh }
+  return staticPosition + marginLow
+}
+
+
+effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, viewport: OptionalSize, fragmented: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let parent = generatedParent(nodes, id)
+  let cb = absoluteContainingBlock(nodes, id)
+  let viewportStyle = Style.make()
+  let mut cbStyle = &viewportStyle
+  if cb != NO_NODE { cbStyle = nodes.style(cb) }
+  let mut cbRect = containingRect(nodes, &output, cb, viewport)
+  let attached = fragmented && fixedTree(nodes, id)
+  if fragmented && !attached {
+    if cb == NO_NODE {
+      let first = run output.requiredFrame(0)
+      let mut initial = first.rect
+      match output.frames.page(0) {
+        Option<FragmentAncestor>.Some { value } => { initial = value.rect }
+        Option<FragmentAncestor>.None => {}
+      }
+      cbRect = initial.translated(flowTranslation(&output, 0))
+    } else {
+      cbRect = joinedContainingRect(nodes, &output, cb, viewport)
+    }
+  }
+  if attached {
+    if cb != NO_NODE {
+      let selected = containingExisting(nodes, &output, cb, output.frame)
+      if selected == NO_NODE {
+        fail FragmentationError { frame: output.frame, message: "Fixed descendant has no containing-block instance on its page" }
+      }
+      if nodes.node(cb).kind == BoxKind.Inline {
+        cbRect = inlineContainingRect(nodes, &output, cb, output.frame)
+      } else if selected != NO_NODE {
+        cbRect = output.fragments.values.get(selected).paddingRect.translated(flowPosition(&output, selected))
+      }
+    } else {
+      let shift = flowTranslation(&output, output.frame)
+      cbRect.x = shift.x
+      cbRect.y = shift.y
+      match output.frames.page(output.frame) {
+        Option<FragmentAncestor>.Some { value } => { cbRect = value.rect.translated(shift) }
+        Option<FragmentAncestor>.None => {}
+      }
+    }
+  }
+  let mut containing = viewport
+  if cb != NO_NODE || fragmented { containing = OptionalSize.definite(cbRect.width, cbRect.height) }
+  let origin = Point { x: cbRect.x, y: cbRect.y }
+  let mut limits = ResolvedEdges { left: cbRect.x, right: cbRect.x + cbRect.width, top: cbRect.y, bottom: cbRect.y + cbRect.height }
+  if style.position != Position.Fixed {
+    // A scrollable original CB can expose abspos overflow in each reachable
+    // direction. Fixed boxes without anchor positioning retain finite limits.
+    let viewportContaining = cb == NO_NODE || cb == 0
+    let reachable = reachableLimits(cbStyle, cbRect, cbRect, viewportContaining)
+    if viewportContaining || scrollable(usedOverflowForAxis(cbStyle, true)) {
+      if reachable.left == -UNBOUNDED { limits.left = -UNBOUNDED }
+      if reachable.right == UNBOUNDED { limits.right = UNBOUNDED }
+    }
+    if viewportContaining || scrollable(usedOverflowForAxis(cbStyle, false)) {
+      if reachable.top == -UNBOUNDED { limits.top = -UNBOUNDED }
+      if reachable.bottom == UNBOUNDED { limits.bottom = UNBOUNDED }
+    }
+  }
+  let mut input = Input.make(containing)
+  if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
+    input = usedChildrenInput(nodes, &output, cb, viewport, containing)
+  }
+  let mut scrollAncestor = nodes.node(id).parent
+  while scrollAncestor != NO_NODE {
+    let ancestor = nodes.node(scrollAncestor)
+    let ancestorStyle = nodes.style(scrollAncestor)
+    if ancestor.kind != BoxKind.Inline && ancestor.kind != BoxKind.InlineFormatting && (scrollable(usedOverflowForAxis(ancestorStyle, true)) || scrollable(usedOverflowForAxis(ancestorStyle, false))) {
+      let constraints = usedChildrenInput(nodes, &output, scrollAncestor, viewport, containing)
+      input.scrollportSize = constraints.scrollportSize
+      break
+    }
+    scrollAncestor = ancestor.parent
+  }
+  input.initialContainingBlock = viewport
+  if fragmented && !attached && output.frames.depth() > 0 {
+    let first = run output.requiredFrame(0)
+    input.initialContainingBlock = OptionalSize.definite(first.rect.width, first.rect.height)
+    match output.frames.page(0) {
+      Option<FragmentAncestor>.Some { value } => { input.initialContainingBlock = OptionalSize.definite(value.rect.width, value.rect.height) }
+      Option<FragmentAncestor>.None => {}
+    }
+  }
+  input.blockRoot = true
+  input.blockify = true
+  input.shrinkToFit = true
+  input.parentWritingMode = cbStyle.writingMode
+  input.parentTextOrientation = cbStyle.textOrientation
+  let box = resolveBox(style, input)
+  let inlineHorizontal = cbStyle.writingMode == WritingMode.HorizontalTb
+  let mut xAlign = style.alignSelf
+  let mut yAlign = style.justifySelf
+  let mut xSafety = style.alignSelfSafety
+  let mut ySafety = style.justifySelfSafety
+  if inlineHorizontal { xAlign = style.justifySelf
+    yAlign = style.alignSelf
+    xSafety = style.justifySelfSafety
+    ySafety = style.alignSelfSafety }
+  let stretchX = xAlign == Align.Stretch || (!style.replaced && (xAlign == Align.Auto || xAlign == Align.Normal))
+  let stretchY = yAlign == Align.Stretch || (!style.replaced && (yAlign == Align.Auto || yAlign == Align.Normal))
+  let hasLeft = resolves(style.inset.left, containing.widthDefinite)
+  let hasRight = resolves(style.inset.right, containing.widthDefinite)
+  let hasTop = resolves(style.inset.top, containing.heightDefinite)
+  let hasBottom = resolves(style.inset.bottom, containing.heightDefinite)
+  let mut left = resolve(style.inset.left, containing.width, containing.widthDefinite, 0.0)
+  let mut right = resolve(style.inset.right, containing.width, containing.widthDefinite, 0.0)
+  let mut top = resolve(style.inset.top, containing.height, containing.heightDefinite, 0.0)
+  let mut bottom = resolve(style.inset.bottom, containing.height, containing.heightDefinite, 0.0)
+  // Position 3 §3.5.2: an inverted inset rectangle reduces its weaker
+  // (logical end) inset until the rectangle has zero extent.
+  if hasLeft && hasRight && left + right > containing.width {
+    if startReverse(cbStyle, true) { left = containing.width - right }
+    else { right = containing.width - left }
+  }
+  if hasTop && hasBottom && top + bottom > containing.height {
+    if startReverse(cbStyle, false) { top = containing.height - bottom }
+    else { bottom = containing.height - top }
+  }
+  if hasLeft && hasRight && stretchX && !box.size.widthDefinite && style.width.kind == DimensionKind.Auto {
+    input.known.width = clamp(containing.width - left - right - box.margin.horizontal(), box.min.width, box.max.width)
+    input.known.widthDefinite = true
+  }
+  if hasTop && hasBottom && stretchY && !box.size.heightDefinite && style.height.kind == DimensionKind.Auto {
+    input.known.height = clamp(containing.height - top - bottom - box.margin.vertical(), box.min.height, box.max.height)
+    input.known.heightDefinite = true
+  }
+  if containing.widthDefinite { input.availableWidth = AvailableSpace.definite(max(0.0, containing.width - left - right)) }
+  if containing.heightDefinite { input.availableHeight = AvailableSpace.definite(max(0.0, containing.height - top - bottom)) }
+  let savedParent = output.fragmentParent
+  let mut physicalParent = NO_NODE
+  if cb != NO_NODE { physicalParent = output.fragments.first(cb) }
+  else if style.position != Position.Fixed { physicalParent = output.fragments.first(0) }
+  output.fragmentParent = physicalParent
+  let checkpoint = output.checkpoint()
+  if fragmented { input.performLayout = false }
+  let mut result = run layoutNode(nodes, &mut output, &mut measurer, id, input)
+  if fragmented { output.restoreCheckpoint(checkpoint) }
+  output.closeCheckpoint(checkpoint)
+  input.performLayout = true
+  output.fragmentParent = savedParent
+  let anchor = output.staticAnchor(id)
+  let parentPosition = normalPosition(nodes, &output, parent)
+  let mut x = parentPosition.x
+  let mut y = parentPosition.y
+  let mut physicalStatic = anchor.valid
+  let mut staticFrame: usize = 0
+  if fragmented && parent != NO_NODE {
+    staticFrame = output.fragments.values.get(output.fragments.first(parent)).fragmentainer
+  }
+  if !anchor.valid {
+    let mut staticRoot = parent
+    if staticRoot == NO_NODE { staticRoot = 0 }
+    let mut parentBox = resolveBox(&viewportStyle, Input.make(viewport))
+    let mut ps = &viewportStyle
+    let mut innerWidth = viewport.width
+    let mut innerHeight = viewport.height
+    if parent != NO_NODE {
+      parentBox = usedBox(nodes, &output, parent, viewport)
+      ps = nodes.style(parent)
+      innerWidth = max(0.0, output.boxes[parent].size.width - parentBox.inset.horizontal())
+      innerHeight = max(0.0, output.boxes[parent].size.height - parentBox.inset.vertical())
+      if fragmented {
+        let mut rect = joinedContainingRect(nodes, &output, parent, viewport)
+        if attached && fixedTree(nodes, parent) {
+          let selected = containingExisting(nodes, &output, parent, output.frame)
+          let physical = output.fragments.values.get(selected)
+          staticFrame = physical.fragmentainer
+          rect = physical.paddingRect.translated(flowPosition(&output, selected))
+        }
+        innerWidth = max(0.0, rect.width - parentBox.padding.horizontal())
+        innerHeight = max(0.0, rect.height - parentBox.padding.vertical())
+        x = rect.x - parentBox.border.left - parentBox.gutter.left
+        y = rect.y - parentBox.border.top - parentBox.gutter.top
+      }
+    }
+    let reverseX = startReverse(ps, true)
+    let reverseY = startReverse(ps, false)
+    x = x + parentBox.inset.left
+    y = y + parentBox.inset.top
+    if isFlex(ps) {
+      // Flexbox §4.1: the sole hypothetical item determines the main
+      // position; the cross rectangle is the container's content box.
+      let row = ps.flexDirection == FlexDirection.Row || ps.flexDirection == FlexDirection.RowReverse
+      let horizontal = row == (ps.writingMode == WritingMode.HorizontalTb)
+      let mut xReverse = reverseX
+      let mut yReverse = reverseY
+      let reversed = ps.flexDirection == FlexDirection.RowReverse || ps.flexDirection == FlexDirection.ColumnReverse
+      if horizontal { if reversed { xReverse = !xReverse }
+        if ps.flexWrap == FlexWrap.WrapReverse { yReverse = !yReverse } }
+      else { if reversed { yReverse = !yReverse }
+        if ps.flexWrap == FlexWrap.WrapReverse { xReverse = !xReverse } }
+      let mut crossAlign = style.alignSelf
+      let mut crossSafety = style.alignSelfSafety
+      if crossAlign == Align.Auto { crossAlign = ps.alignItems
+        crossSafety = ps.alignItemsSafety }
+      if horizontal {
+        x = x + alignmentOffset(ps.justifyContent, innerWidth - result.size.width - box.margin.horizontal(), xReverse, reverseX, startReverse(style, true), true, ps.justifyContentSafety == OverflowAlignment.Safe)
+        y = absoluteAlignment(y, y + innerHeight, result.size.height + box.margin.vertical(), limits.top, limits.bottom, yReverse, reverseY, crossAlign, crossSafety, startReverse(style, false), false)
+      } else {
+        x = absoluteAlignment(x, x + innerWidth, result.size.width + box.margin.horizontal(), limits.left, limits.right, xReverse, reverseX, crossAlign, crossSafety, startReverse(style, true), true)
+        y = y + alignmentOffset(ps.justifyContent, innerHeight - result.size.height - box.margin.vertical(), yReverse, reverseY, startReverse(style, false), false, ps.justifyContentSafety == OverflowAlignment.Safe)
+      }
+    } else {
+      physicalStatic = true
+      // Position 3 §3.5.3: zero block thickness, spanning the inline
+      // content edges. Contents is transparent; floats and abspos do not
+      // advance the normal-flow block position.
+      let vertical = ps.writingMode != WritingMode.HorizontalTb
+      let mut inlineAlign = style.justifySelf
+      let mut inlineSafety = style.justifySelfSafety
+      if inlineAlign == Align.Auto { inlineAlign = ps.justifyItems
+        inlineSafety = ps.justifyItemsSafety }
+      if vertical {
+        if reverseX { x = x + innerWidth - result.size.width - box.margin.horizontal() }
+        y = absoluteAlignment(y, y + innerHeight, result.size.height + box.margin.vertical(), limits.top, limits.bottom, reverseY, reverseY, inlineAlign, inlineSafety, startReverse(style, false), false)
+      } else {
+        x = absoluteAlignment(x, x + innerWidth, result.size.width + box.margin.horizontal(), limits.left, limits.right, reverseX, reverseX, inlineAlign, inlineSafety, startReverse(style, true), true)
+      }
+      let mut previous = nodes.node(staticRoot).firstChild
+      while previous != NO_NODE && previous != id {
+        let previousStyle = nodes.style(previous)
+        if nodes.node(previous).kind == BoxKind.InlineFormatting && !nodes.node(previous).anonymousBlock && nodes.node(previous).firstChild != NO_NODE {
+          previous = nodes.node(previous).firstChild
+        } else {
+          if !outOfFlow(previousStyle) && previousStyle.float == Float.None {
+            let previousBox = usedBox(nodes, &output, previous, viewport)
+            let mut previousPosition = normalPosition(nodes, &output, previous)
+            let mut previousSize = output.boxes[previous].size
+            let mut previousMargin = previousBox.margin
+            if fragmented {
+              let mut selected = output.fragments.last(previous)
+              while selected != NO_NODE && output.fragments.values.get(selected).overflowOnly {
+                selected = output.fragments.values.get(selected).previousForBox
+              }
+              if selected != NO_NODE {
+                let physical = output.fragments.values.get(selected)
+                staticFrame = physical.fragmentainer
+                previousPosition = flowPosition(&output, selected)
+                previousSize = physical.size
+                previousMargin = physical.usedMargin
+              }
+            }
+            if vertical {
+              if reverseX { x = previousPosition.x - previousMargin.left - result.size.width - box.margin.horizontal() }
+              else { x = previousPosition.x + previousSize.width + previousMargin.right }
+            } else { y = previousPosition.y + previousSize.height + previousMargin.bottom }
+          }
+          previous = nextGenerated(nodes, staticRoot, previous)
+        }
+      }
+    }
+  }
+  else {
+    let anchorPosition = flowPosition(&output, anchor.parentFragment)
+    let mut rect = anchor.rect.translated(anchorPosition)
+    if attached && style.position == Position.Fixed {
+      let anchorFrame = output.fragments.values.get(anchor.parentFragment).fragmentainer
+      let geometry = run output.requiredFrame(anchorFrame)
+      let mut pageRect = geometry.rect
+      match output.frames.page(anchorFrame) {
+        Option<FragmentAncestor>.Some { value } => { pageRect = value.rect }
+        Option<FragmentAncestor>.None => {}
+      }
+      let shift = flowTranslation(&output, anchorFrame)
+      rect.x = rect.x - pageRect.x - shift.x + cbRect.x
+      rect.y = rect.y - pageRect.y - shift.y + cbRect.y
+    }
+    let mut staticStyle = &viewportStyle
+    if parent != NO_NODE { staticStyle = nodes.style(parent) }
+    let reverseX = startReverse(staticStyle, true)
+    let reverseY = startReverse(staticStyle, false)
+    let mut inlineAlign = style.justifySelf
+    let mut inlineSafety = style.justifySelfSafety
+    if inlineAlign == Align.Auto { inlineAlign = staticStyle.justifyItems
+      inlineSafety = staticStyle.justifyItemsSafety }
+    x = rect.x
+    y = rect.y
+    // Static-CB direction, not paragraph direction, governs self alignment.
+    // The zero inline extent still uses the abspos overflow-limit exception.
+    if staticStyle.writingMode == WritingMode.HorizontalTb {
+      let mut extent = rect.width
+      // The hypothetical stand-in has zero inline extent (CSS2 §10.3.7's
+      // approximation). Do not substitute the absolute box's actual width
+      // when converting its bidi caret into this static-CB alignment.
+      if anchor.inlineLevel { extent = 0.0 }
+      x = absoluteAlignment(x, x + extent, result.size.width + box.margin.horizontal(), limits.left, limits.right, reverseX, reverseX, inlineAlign, inlineSafety, startReverse(style, true), true)
+      if reverseY { y = y + rect.height - result.size.height - box.margin.vertical() }
+    } else {
+      let mut extent = rect.height
+      if anchor.inlineLevel { extent = 0.0 }
+      y = absoluteAlignment(y, y + extent, result.size.height + box.margin.vertical(), limits.top, limits.bottom, reverseY, reverseY, inlineAlign, inlineSafety, startReverse(style, false), false)
+      if reverseX { x = x + rect.width - result.size.width - box.margin.horizontal() }
+    }
+  }
+  if attached && style.position == Position.Fixed && !anchor.valid {
+    let geometry = run output.requiredFrame(staticFrame)
+    let mut pageRect = geometry.rect
+    match output.frames.page(staticFrame) {
+      Option<FragmentAncestor>.Some { value } => { pageRect = value.rect }
+      Option<FragmentAncestor>.None => {}
+    }
+    let shift = flowTranslation(&output, staticFrame)
+    x = x - pageRect.x - shift.x + cbRect.x
+    y = y - pageRect.y - shift.y + cbRect.y
+  }
+  if fragmented && !attached && physicalStatic && cb != NO_NODE {
+    let semantic = run semanticStaticPosition(nodes, &output, cb, Point { x: x, y: y }, result.size)
+    x = semantic.x
+    y = semantic.y
+  }
+  // Position 3 §§4.2–4.3: auto margins precede self alignment; actual
+  // alignment's auto is normal, not the static parent's items alignment.
+  x = origin.x + insetPosition(left, right, hasLeft, hasRight, result.size.width, containing.width, limits.left - origin.x, limits.right - origin.x, box.margin.left, box.margin.right, style.margin.left.kind == DimensionKind.Auto, style.margin.right.kind == DimensionKind.Auto, startReverse(cbStyle, true), inlineHorizontal, x - origin.x, xAlign, xSafety, startReverse(style, true), true)
+  y = origin.y + insetPosition(top, bottom, hasTop, hasBottom, result.size.height, containing.height, limits.top - origin.y, limits.bottom - origin.y, box.margin.top, box.margin.bottom, style.margin.top.kind == DimensionKind.Auto, style.margin.bottom.kind == DimensionKind.Auto, startReverse(cbStyle, false), !inlineHorizontal, y - origin.y, yAlign, ySafety, startReverse(style, false), false)
+  if fragmented {
+    run fragmentedAbsolute(nodes, &mut output, &mut measurer, id, cb, input, Point { x: x, y: y }, result.size)
+    return
+  }
+  // Scalar layout remains normal and generated-parent-relative. The physical
+  // fragment is CB-owned, so publish its final placement in that coordinate space.
+  let generatedOrigin = normalPosition(nodes, &output, nodes.node(id).parent)
+  result.location = Point { x: x - generatedOrigin.x, y: y - generatedOrigin.y }
+  run output.store(id, result, true)
+  let physicalOrigin = fragmentPosition(&output, physicalParent, false)
+  let fragment = output.publication(id)
+  let fragments = output.fragments.values.asMutSlice()
+  fragments[fragment].location = Point { x: x - physicalOrigin.x, y: y - physicalOrigin.y }
+}
+
+fn monolithicContaining(nodes: &BoxTree, output: &LayoutPass, cb: usize) -> bool {
+  if cb == NO_NODE { return false }
+  let mut current = output.fragments.first(cb)
+  while current != NO_NODE {
+    let fragment = output.fragments.values.get(current)
+    let id = fragment.box
+    if id != NO_NODE && id != 0 && nodes.node(id).kind != BoxKind.Inline && nodes.node(id).kind != BoxKind.InlineFormatting {
+      if nodes.node(id).fragmentMonolithic { return true }
+    }
+    current = fragment.parent
+  }
+  return false
+}
+
+fn containingExisting(nodes: &BoxTree, output: &LayoutPass, cb: usize, frame: usize) -> usize {
+  let mut box = cb
+  while box != NO_NODE {
+    let found = instance(output, box, frame)
+    if found != NO_NODE { return found }
+    box = nodes.node(box).nextContinuation
+  }
+  return NO_NODE
+}
+
+// A flex item's allocation belongs to its parent's sizing algorithm. Cache the
+// size-only allocations together so sibling continuations do not repeat it.
+effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, parent: usize, initial: OptionalSize) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let parentBox = output.fragments.values.get(parent).box
+  let metadata = match output.fragmentFullBox(parent) {
+    Option<FullBoxGeometry>.Some { value } => value
+    Option<FullBoxGeometry>.None => { fail FragmentationError { frame: output.frame, message: "Flex continuation has no full containing-block geometry" } }
+  }
+  let mut input = usedInput(nodes, &output, parentBox, initial)
+  input.parent = metadata.parent
+  input.known = metadata.known
+  let box = resolveBox(nodes.style(parentBox), input)
+  input.known = OptionalSize.definite(metadata.content.width + box.inset.horizontal(), metadata.content.height + box.inset.vertical())
+  input.indefiniteWidth = !metadata.content.widthDefinite
+  input.indefiniteHeight = !metadata.content.heightDefinite
+  input.performLayout = false
+  input.fragmentation = FragmentInput.continuous()
+  match output.lookup(id, input, CacheKind.FlexAllocation) {
+    Option<Layout>.Some { value } => { return value }
+    Option<Layout>.None => {}
+  }
+  let checkpoint = output.checkpoint()
+  let mut bfc = BfcState.make()
+  drop run layoutInBfc(nodes, &mut output, &mut measurer, parentBox, input, &mut bfc)
+  let mut child = nodes.node(parentBox).firstChild
+  while child != NO_NODE {
+    if nodes.node(child).needsFragmentGeometry && !outOfFlow(nodes.style(child)) {
+      let mut allocation = output.boxes[child]
+      allocation.location.x = allocation.location.x - box.inset.left
+      allocation.location.y = allocation.location.y - box.inset.top
+      run output.remember(child, input, CacheKind.FlexAllocation, allocation)
+    }
+    child = nodes.node(child).nextSibling
+  }
+  let mut result = output.boxes[id]
+  result.location.x = result.location.x - box.inset.left
+  result.location.y = result.location.y - box.inset.top
+  output.restoreCheckpoint(checkpoint)
+  output.closeCheckpoint(checkpoint)
+  return result
+}
+
+effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, frame: usize) -> usize ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if id == NO_NODE || id == 0 { return run output.ensureFrameRoot(frame) }
+  let existing = containingExisting(nodes, &output, id, frame)
+  if existing != NO_NODE { return existing }
+  let first = output.fragments.first(id)
+  if first == NO_NODE {
+    fail FragmentationError { frame: frame, message: "Positioned descendant has no semantic containing-block geometry" }
+  }
+  let mut fragment = output.fragments.values.get(first)
+  let mut parentBox = NO_NODE
+  if fragment.parent != NO_NODE { parentBox = output.fragments.values.get(fragment.parent).box }
+  let parent = run containingInstance(nodes, &mut output, &mut measurer, parentBox, frame)
+  let geometry = run output.requiredFrame(frame)
+  let parentOrigin = fragmentPosition(&output, parent, false)
+  let mut metadata = output.fragmentFullBox(first)
+  if nodes.node(id).kind != BoxKind.Inline {
+    let firstFrame = run output.requiredFrame(0)
+    let mut initial = OptionalSize.definite(firstFrame.rect.width, firstFrame.rect.height)
+    match output.frames.page(0) {
+      Option<FragmentAncestor>.Some { value } => { initial = OptionalSize.definite(value.rect.width, value.rect.height) }
+      Option<FragmentAncestor>.None => {}
+    }
+    let mut input = usedInput(nodes, &output, id, initial)
+    match &metadata {
+      Option<FullBoxGeometry>.Some { value } => {
+        input.parent = value.parent
+        input.known = value.known
+      }
+      Option<FullBoxGeometry>.None => {}
+    }
+    let parentFragment = output.fragments.values.get(parent)
+    let parentContent = parentFragment.contentRect
+    if parentBox == 0 || parentBox == NO_NODE {
+      input.parent = OptionalSize.definite(geometry.rect.width, geometry.rect.height)
+    } else {
+      match output.fragmentFullBox(parent) {
+        Option<FullBoxGeometry>.Some { value } => { input.parent = value.content }
+        Option<FullBoxGeometry>.None => {}
+      }
+    }
+    if output.frames.writingMode == WritingMode.HorizontalTb {
+      input.parent.width = parentContent.width
+      input.parent.widthDefinite = true
+      input.availableWidth = AvailableSpace.definite(parentContent.width)
+      if !outOfFlow(nodes.style(id)) && (parentBox == NO_NODE || nodes.node(parentBox).kind != BoxKind.Flex) { input.known.widthDefinite = false }
+    } else {
+      input.parent.height = parentContent.height
+      input.parent.heightDefinite = true
+      input.availableHeight = AvailableSpace.definite(parentContent.height)
+      if !outOfFlow(nodes.style(id)) && (parentBox == NO_NODE || nodes.node(parentBox).kind != BoxKind.Flex) { input.known.heightDefinite = false }
+    }
+    if parentBox != NO_NODE {
+      input.parentWritingMode = nodes.style(parentBox).writingMode
+      input.parentJustifyItems = nodes.style(parentBox).justifyItems
+      input.parentJustifyItemsSafety = nodes.style(parentBox).justifyItemsSafety
+    }
+    let flexItem = parentBox != NO_NODE && nodes.node(parentBox).kind == BoxKind.Flex && !outOfFlow(nodes.style(id))
+    let mut allocation = Layout.zero()
+    if flexItem {
+      allocation = run flexShellAllocation(nodes, &mut output, &mut measurer, id, parent, initial)
+      input.known = OptionalSize.definite(allocation.size.width, allocation.size.height)
+      input.indefiniteWidth = !allocation.widthDefinite
+      input.indefiniteHeight = !allocation.heightDefinite
+    }
+    if outOfFlow(nodes.style(id)) {
+      input = run absoluteFrameInput(nodes, &output, id, parentBox, parent, frame, 0.0, BreakRelaxation.Strict, input)
+    }
+    let full = run resolveFragmentBox(nodes, &mut output, &mut measurer, id, input)
+    let current = FragmentBox.current(nodes.style(id), full, output.resumes.get(id), input.fragmentation, output.frames.writingMode)
+    let axes = Axes.make(input.parentWritingMode)
+    let logical = axes.box(current)
+    let parentSize = Size { width: parentContent.width, height: parentContent.height }
+    let available = axes.size(parentSize).width
+    let mut direction = output.frames.direction
+    if parentBox != NO_NODE { direction = nodes.style(parentBox).usedDirection() }
+    let margin = axes.edges(full.margin)
+    let mut offset = inlineOffset(nodes.style(id), input, axes, direction, margin, logical.size.width, available)
+    if nodes.style(id).float == Float.Left { offset = margin.left }
+    if nodes.style(id).float == Float.Right { offset = available - logical.size.width - margin.right }
+    let size = Size { width: current.size.width, height: current.size.height }
+    let mut point = axes.physicalPoint(Point { x: offset, y: 0.0 }, size, parentSize)
+    point.x = point.x + parentContent.x
+    point.y = point.y + parentContent.y
+    if flexItem { point = allocation.location }
+    if outOfFlow(nodes.style(id)) {
+      let containing = run frameContainingRect(nodes, &output, parentBox, parent, frame)
+      let desired = flowPosition(&output, first)
+      let placed = placedInline(nodes, &output, id, parentBox, input, containing, desired, size)
+      point = Point { x: placed.x - parentOrigin.x, y: placed.y - parentOrigin.y }
+    }
+    if output.frames.writingMode == WritingMode.HorizontalTb {
+      fragment.location.x = point.x
+      fragment.size.width = size.width
+    } else {
+      fragment.location.y = point.y
+      fragment.size.height = size.height
+    }
+    match &metadata {
+      Option<FullBoxGeometry>.Some { value } => {
+        let mut updated = value
+        updated.parent = input.parent
+        updated.known = input.known
+        if full.size.widthDefinite { updated.content.width = max(0.0, full.size.width - full.inset.horizontal()) }
+        if full.size.heightDefinite { updated.content.height = max(0.0, full.size.height - full.inset.vertical()) }
+        metadata = Option<FullBoxGeometry>.Some { value: updated }
+      }
+      Option<FullBoxGeometry>.None => {}
+    }
+  }
+  fragment.parent = parent
+  fragment.fragmentainer = frame
+  fragment.first = false
+  fragment.last = false
+  fragment.overflowOnly = true
+  fragment.positioningShell = true
+  fragment.nonpainting = true
+  fragment.decorationEdges = 0
+  fragment.usedMargin = ResolvedEdges.zero()
+  fragment.visualOffset = Point { x: 0.0, y: 0.0 }
+  fragment.layoutBounds = Rect.zero()
+  fragment.scrollableOverflow = Rect.zero()
+  fragment.hasFirstBaseline = false
+  fragment.hasLastBaseline = false
+  if output.frames.writingMode == WritingMode.HorizontalTb {
+    fragment.location.y = geometry.rect.y - parentOrigin.y
+    fragment.size.height = 0.0
+  } else {
+    fragment.location.x = geometry.rect.x - parentOrigin.x
+    if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl {
+      fragment.location.x = fragment.location.x + geometry.rect.width
+    }
+    fragment.size.width = 0.0
+  }
+  fragment.contentRect = Rect { x: 0.0, y: 0.0, width: fragment.size.width, height: fragment.size.height }
+  fragment.paddingRect = fragment.contentRect
+  let emitted = run output.fragments.append(fragment)
+  match move metadata {
+    Option<FullBoxGeometry>.Some { value } => {
+      let mut metadata = value
+      if nodes.node(id).kind == BoxKind.Inline {
+        match output.fragmentFullBox(parent) {
+          Option<FullBoxGeometry>.Some { value: parentGeometry } => { metadata.parent = parentGeometry.content }
+          Option<FullBoxGeometry>.None => {}
+        }
+      }
+      run output.rememberFragmentBox(id, emitted.index, metadata)
+    }
+    Option<FullBoxGeometry>.None => {}
+  }
+  return emitted.index
+}
+
+effect fn frameContainingRect(nodes: &BoxTree, output: &LayoutPass, cb: usize, parent: usize, frame: usize) -> Rect ! FragmentationError {
+  if cb == NO_NODE {
+    match output.frames.page(frame) {
+      Option<FragmentAncestor>.Some { value } => { return value.rect }
+      Option<FragmentAncestor>.None => {}
+    }
+    let geometry = run output.requiredFrame(frame)
+    return geometry.rect
+  }
+  if nodes.node(cb).kind == BoxKind.Inline {
+    let rect = inlineContainingRect(nodes, output, cb, frame)
+    let shift = flowTranslation(output, frame)
+    return rect.translated(Point { x: -shift.x, y: -shift.y })
+  }
+  return output.fragments.values.get(parent).paddingRect.translated(fragmentPosition(output, parent, false))
+}
+
+effect fn absoluteFrameInput(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, parent: usize, frame: usize, offset: f64, relaxation: BreakRelaxation, original: Input) -> Input ! FragmentationError {
+  let geometry = run output.requiredFrame(frame)
+  let containing = run frameContainingRect(nodes, output, cb, parent, frame)
+  let style = nodes.style(id)
+  let mut input = original
+  input.fragmentation = FragmentInput.continuous()
+  input.fragmentation.active = true
+  input.fragmentation.offset = offset
+  input.fragmentation.limit = geometry.blockExtent
+  input.fragmentation.canBreakBefore = offset > 0.0
+  input.fragmentation.kind = output.frames.kind
+  input.fragmentation.contextKinds = output.frames.activeKinds()
+  input.fragmentation.boundaryKinds = output.frames.boundaryKinds(frame)
+  input.fragmentation.contextStart = frame == 0
+  input.fragmentation.marginStart = offset == 0.0
+  input.fragmentation.marginEnd = true
+  input.fragmentation.rectoOnRight = output.frames.rectoOnRight
+  input.fragmentation.relaxation = relaxation
+  // Varying inline geometry is a fresh percentage basis; the block percentage
+  // basis remains the full CB, never the unconsumed part of this page.
+  if output.frames.writingMode == WritingMode.HorizontalTb {
+    input.parent.width = containing.width
+    input.parent.widthDefinite = true
+    let left = resolve(style.inset.left, containing.width, true, 0.0)
+    let right = resolve(style.inset.right, containing.width, true, 0.0)
+    input.availableWidth = AvailableSpace.definite(max(0.0, containing.width - left - right))
+    if original.known.widthDefinite && style.width.kind == DimensionKind.Auto {
+      let box = resolveBox(style, input)
+      input.known.width = clamp(containing.width - left - right - box.margin.horizontal(), box.min.width, box.max.width)
+    }
+  } else {
+    input.parent.height = containing.height
+    input.parent.heightDefinite = true
+    let top = resolve(style.inset.top, containing.height, true, 0.0)
+    let bottom = resolve(style.inset.bottom, containing.height, true, 0.0)
+    input.availableHeight = AvailableSpace.definite(max(0.0, containing.height - top - bottom))
+    if original.known.heightDefinite && style.height.kind == DimensionKind.Auto {
+      let box = resolveBox(style, input)
+      input.known.height = clamp(containing.height - top - bottom - box.margin.vertical(), box.min.height, box.max.height)
+    }
+  }
+  return input
+}
+
+fn placedInline(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, input: Input, containing: Rect, desired: Point, size: Size) -> Point {
+  let style = nodes.style(id)
+  let viewportStyle = Style.make()
+  let mut cbStyle = &viewportStyle
+  if cb != NO_NODE { cbStyle = nodes.style(cb) }
+  let box = resolveBox(style, input)
+  let mut point = desired
+  let mut firstOrigin = Point { x: 0.0, y: 0.0 }
+  if cb != NO_NODE {
+    let first = output.fragments.first(cb)
+    let fragment = output.fragments.values.get(first)
+    firstOrigin = flowPosition(output, first)
+    firstOrigin.x = firstOrigin.x + fragment.paddingRect.x
+    firstOrigin.y = firstOrigin.y + fragment.paddingRect.y
+  }
+  if output.frames.writingMode == WritingMode.HorizontalTb {
+    let left = resolve(style.inset.left, containing.width, true, 0.0)
+    let right = resolve(style.inset.right, containing.width, true, 0.0)
+    let mut align = style.justifySelf
+    let mut safety = style.justifySelfSafety
+    if cbStyle.writingMode != WritingMode.HorizontalTb { align = style.alignSelf
+      safety = style.alignSelfSafety }
+    point.x = containing.x + insetPosition(left, right, resolves(style.inset.left, true), resolves(style.inset.right, true), size.width, containing.width, 0.0, containing.width, box.margin.left, box.margin.right, style.margin.left.kind == DimensionKind.Auto, style.margin.right.kind == DimensionKind.Auto, startReverse(cbStyle, true), cbStyle.writingMode == WritingMode.HorizontalTb, desired.x - firstOrigin.x - box.margin.left, align, safety, startReverse(style, true), true)
+  } else {
+    let top = resolve(style.inset.top, containing.height, true, 0.0)
+    let bottom = resolve(style.inset.bottom, containing.height, true, 0.0)
+    let mut align = style.justifySelf
+    let mut safety = style.justifySelfSafety
+    if cbStyle.writingMode == WritingMode.HorizontalTb { align = style.alignSelf
+      safety = style.alignSelfSafety }
+    point.y = containing.y + insetPosition(top, bottom, resolves(style.inset.top, true), resolves(style.inset.bottom, true), size.height, containing.height, 0.0, containing.height, box.margin.top, box.margin.bottom, style.margin.top.kind == DimensionKind.Auto, style.margin.bottom.kind == DimensionKind.Auto, startReverse(cbStyle, false), cbStyle.writingMode != WritingMode.HorizontalTb, desired.y - firstOrigin.y - box.margin.top, align, safety, startReverse(style, false), false)
+  }
+  return point
+}
+
+struct AbsoluteStart { frame: usize, offset: f64 }
+
+fn containingSegment(nodes: &BoxTree, output: &LayoutPass, cb: usize, frame: usize) -> Option<Rect> {
+  let mut result = Rect.zero()
+  let mut found = false
+  let mut box = cb
+  while box != NO_NODE {
+    let mut current = output.fragments.first(box)
+    while current != NO_NODE {
+      let fragment = output.fragments.values.get(current)
+      if fragment.fragmentainer == frame && !fragment.overflowOnly {
+        let mut rect = fragment.paddingRect
+        if nodes.node(cb).kind == BoxKind.Inline { rect = fragment.contentRect }
+        else if nodes.style(cb).boxDecorationBreak == BoxDecorationBreak.Clone {
+          if output.frames.writingMode == WritingMode.HorizontalTb {
+            if !fragment.first {
+              rect.height = rect.height - fragment.contentRect.y + rect.y
+              rect.y = fragment.contentRect.y
+            }
+            if !fragment.last { rect.height = fragment.contentRect.y + fragment.contentRect.height - rect.y }
+          } else {
+            let reverse = output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl
+            if (!reverse && !fragment.first) || (reverse && !fragment.last) {
+              rect.width = rect.width - fragment.contentRect.x + rect.x
+              rect.x = fragment.contentRect.x
+            }
+            if (!reverse && !fragment.last) || (reverse && !fragment.first) { rect.width = fragment.contentRect.x + fragment.contentRect.width - rect.x }
+          }
+        }
+        rect = rect.translated(fragmentPosition(output, current, false))
+        if found { result = result.unionWith(rect) } else { result = rect }
+        found = true
+      }
+      current = fragment.nextForBox
+    }
+    box = nodes.node(box).nextContinuation
+  }
+  if found { return Option<Rect>.Some { value: result } }
+  return Option<Rect>.None
+}
+
+fn joinedContainingRect(nodes: &BoxTree, output: &LayoutPass, cb: usize, viewport: OptionalSize) -> Rect {
+  let mut rect = containingRect(nodes, output, cb, viewport)
+  if cb == NO_NODE || nodes.node(cb).kind == BoxKind.Inline { return rect }
+  // Break3 §5.3: break-fill increases the used content extent. Join accepted
+  // normal fragments, not a hypothetical re-layout, retaining those gaps but
+  // excluding overflow-only shells and duplicate cloned padding.
+  let mut extent = 0.0
+  let mut frame: usize = 0
+  while frame < output.frameRoots.length() {
+    match containingSegment(nodes, output, cb, frame) {
+      Option<Rect>.Some { value } => {
+        if output.frames.writingMode == WritingMode.HorizontalTb { extent = extent + value.height }
+        else { extent = extent + value.width }
+      }
+      Option<Rect>.None => {}
+    }
+    frame = frame + 1
+  }
+  if output.frames.writingMode == WritingMode.HorizontalTb { rect.height = extent }
+  else {
+    if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl { rect.x = rect.x + rect.width - extent }
+    rect.width = extent
+  }
+  return rect
+}
+
+effect fn locateAbsolute(nodes: &BoxTree, output: &LayoutPass, cb: usize, location: Point, size: Size) -> AbsoluteStart ! FragmentationError {
+  let mut distance = blockStart(output, location, size)
+  let mut frame: usize = 0
+  // Inline containing rectangles already span accepted line fragments in the
+  // continuous frame coordinate space, including the fill at a line break.
+  // Concatenating their painted line bounds would remove that fill twice.
+  if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
+    let first = output.fragments.first(cb)
+    let firstFragment = output.fragments.values.get(first)
+    let origin = flowPosition(output, first)
+    let padding = firstFragment.paddingRect.translated(origin)
+    distance = distance - blockStart(output, Point { x: padding.x, y: padding.y }, Size { width: padding.width, height: padding.height })
+    frame = firstFragment.fragmentainer
+    let mut last = frame
+    let mut box = cb
+    while box != NO_NODE {
+      let mut current = output.fragments.first(box)
+      while current != NO_NODE {
+        let fragment = output.fragments.values.get(current)
+        if !fragment.overflowOnly && fragment.fragmentainer > last { last = fragment.fragmentainer }
+        current = fragment.nextForBox
+      }
+      box = nodes.node(box).nextContinuation
+    }
+    while frame <= last {
+      match containingSegment(nodes, output, cb, frame) {
+        Option<Rect>.Some { value: segment } => {
+          let geometry = run output.requiredFrame(frame)
+          let mut extent = segment.height
+          let mut offset = segment.y - geometry.rect.y
+          if output.frames.writingMode != WritingMode.HorizontalTb {
+            extent = segment.width
+            offset = segment.x - geometry.rect.x
+            if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl {
+              offset = geometry.rect.x + geometry.rect.width - segment.x - segment.width
+            }
+          }
+          if frame == last {
+            distance = distance + offset
+            break
+          }
+          if distance < extent { return AbsoluteStart { frame: frame, offset: offset + distance } }
+          distance = distance - extent
+        }
+        Option<Rect>.None => {}
+      }
+      frame = frame + 1
+    }
+  }
+  while true {
+    let geometry = run output.requiredFrame(frame)
+    if distance < geometry.blockExtent { return AbsoluteStart { frame: frame, offset: distance } }
+    distance = distance - geometry.blockExtent
+    frame = frame + 1
+  }
+}
+
+effect fn semanticStaticPosition(nodes: &BoxTree, output: &LayoutPass, cb: usize, point: Point, size: Size) -> Point ! FragmentationError {
+  if nodes.node(cb).kind == BoxKind.Inline { return point }
+  let mut position = blockStart(output, point, size)
+  let mut target: usize = 0
+  while true {
+    let geometry = run output.requiredFrame(target)
+    if position < geometry.blockExtent { break }
+    position = position - geometry.blockExtent
+    target = target + 1
+  }
+  let first = output.fragments.first(cb)
+  let firstFragment = output.fragments.values.get(first)
+  let firstRect = firstFragment.paddingRect.translated(flowPosition(output, first))
+  let origin = blockStart(output, Point { x: firstRect.x, y: firstRect.y }, Size { width: firstRect.width, height: firstRect.height })
+  let mut distance = 0.0
+  let mut frame = firstFragment.fragmentainer
+  while frame <= target {
+    match containingSegment(nodes, output, cb, frame) {
+      Option<Rect>.Some { value: segment } => {
+        let geometry = run output.requiredFrame(frame)
+        let mut extent = segment.height
+        let mut offset = segment.y - geometry.rect.y
+        if output.frames.writingMode != WritingMode.HorizontalTb {
+          extent = segment.width
+          offset = segment.x - geometry.rect.x
+          if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl {
+            offset = geometry.rect.x + geometry.rect.width - segment.x - segment.width
+          }
+        }
+        if frame == target { distance = distance + position - offset }
+        else { distance = distance + extent }
+      }
+      Option<Rect>.None => {
+        if frame == target { distance = distance + position }
+      }
+    }
+    frame = frame + 1
+  }
+  let mut result = point
+  if output.frames.writingMode == WritingMode.HorizontalTb { result.y = origin + distance }
+  else if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl { result.x = -origin - distance - size.width }
+  else { result.x = origin + distance }
+  return result
+}
+
+effect fn previewPositionedWidows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, cb: usize, original: Input, checks: &mut List<WidowCheck>) -> WidowDecision ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut frame = output.frame + 1
+  let waiting = output.resumes.get(id).notBeforeFrame
+  if waiting > frame { frame = waiting }
+  while true {
+    drop run output.ensureFrameRoot(frame)
+    output.frame = frame
+    let parent = run containingInstance(nodes, &mut output, &mut measurer, cb, frame)
+    output.fragmentParent = parent
+    let checkpoint = output.checkpoint()
+    let mut relaxation = BreakRelaxation.Strict
+    let mut deferred = false
+    while true {
+      let input = run absoluteFrameInput(nodes, &output, id, cb, parent, frame, 0.0, relaxation, original)
+      drop run layoutNode(nodes, &mut output, &mut measurer, id, input)
+      let state = output.resumes.get(id)
+      if !state.blocked { break }
+      let forced = state.before.forced.active(input.fragmentation.activeKinds())
+      output.restoreCheckpoint(checkpoint)
+      if forced.kinds.any() && !state.started && !state.beforeHandled {
+        run output.defer(id, forced)
+        deferred = true
+        break
+      }
+      if relaxation == BreakRelaxation.Strict { relaxation = BreakRelaxation.Lines }
+      else if relaxation == BreakRelaxation.Lines { relaxation = BreakRelaxation.Avoidance }
+      else {
+        output.closeCheckpoint(checkpoint)
+        fail FragmentationError { frame: frame, message: "Positioned widow lookahead cannot advance after relaxation" }
+      }
+    }
+    output.closeCheckpoint(checkpoint)
+    if !deferred {
+      let decision = validateWidows(&output, checks.asMutSlice())
+      if decision.failed != NO_NODE || !decision.pending { return decision }
+    }
+    frame = frame + 1
+    let next = output.resumes.get(id).notBeforeFrame
+    if next > frame { frame = next }
+  }
+}
+
+// Continuous measurement resolves positioning only. Each physical instance is
+// laid out against its real frame; no rectangles from the probe are sliced.
+effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, cb: usize, original: Input, location: Point, fullSize: Size) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let attached = fixedTree(nodes, id)
+  let unfragmented = attached || monolithicContaining(nodes, &output, cb)
+  let savedFrame = output.frame
+  let savedParent = output.fragmentParent
+  let mut frame = output.frame
+  let mut startOffset = 0.0
+  if unfragmented && !attached {
+    frame = output.fragments.values.get(output.fragments.first(cb)).fragmentainer
+  }
+  if !unfragmented {
+    let start = run locateAbsolute(nodes, &output, cb, location, fullSize)
+    frame = start.frame
+    startOffset = start.offset
+  }
+  let mut first = true
+  let mut relaxation = BreakRelaxation.Strict
+  let mut checks = List<WidowCheck>.make()
+  while true {
+    drop run output.ensureFrameRoot(frame)
+    output.frame = frame
+    let geometry = run output.requiredFrame(frame)
+    let shift = flowTranslation(&output, frame)
+    let mut parent = containingExisting(nodes, &output, cb, frame)
+    if parent == NO_NODE && !attached { parent = run containingInstance(nodes, &mut output, &mut measurer, cb, frame) }
+    output.fragmentParent = parent
+    let mut point = Point { x: location.x - shift.x, y: location.y - shift.y }
+    let mut input = original
+    if !unfragmented {
+      let mut offset = 0.0
+      if first { offset = startOffset }
+      input = run absoluteFrameInput(nodes, &output, id, cb, parent, frame, offset, relaxation, original)
+      if output.frames.writingMode == WritingMode.HorizontalTb { point.y = geometry.rect.y + offset }
+      else if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl { point.x = geometry.rect.x + geometry.rect.width - offset }
+      else { point.x = geometry.rect.x + offset }
+    }
+    let checkpoint = output.checkpoint()
+    let emissionStart = output.fragments.values.length()
+    let mut result = run layoutNode(nodes, &mut output, &mut measurer, id, input)
+    let state = output.resumes.get(id)
+    if !unfragmented && state.blocked {
+      let forced = state.before.forced.active(input.fragmentation.activeKinds())
+      output.restoreCheckpoint(checkpoint)
+      output.closeCheckpoint(checkpoint)
+      if forced.kinds.any() && !state.started && !state.beforeHandled {
+        run output.defer(id, forced)
+        frame = output.resumes.get(id).notBeforeFrame
+        first = false
+      } else if input.fragmentation.offset > 0.0 {
+        frame = frame + 1
+        first = false
+      } else if relaxation == BreakRelaxation.Strict { relaxation = BreakRelaxation.Lines }
+      else if relaxation == BreakRelaxation.Lines { relaxation = BreakRelaxation.Avoidance }
+      else {
+        fail FragmentationError { frame: frame, message: "Positioned flow cannot make progress in an empty fragmentainer" }
+      }
+      continue
+    }
+    if !unfragmented {
+      run collectWidows(nodes, &output, emissionStart, relaxation, &mut checks)
+      if checks.length() > 0 {
+        let preview = output.checkpoint()
+        let decision = run previewPositionedWidows(nodes, &mut output, &mut measurer, id, cb, original, &mut checks)
+        output.restoreCheckpoint(preview)
+        output.closeCheckpoint(preview)
+        if decision.failed != NO_NODE {
+          output.restoreCheckpoint(checkpoint)
+          output.closeCheckpoint(checkpoint)
+          run output.limitLines(decision.failed, decision.limit)
+          continue
+        }
+      }
+    }
+    output.closeCheckpoint(checkpoint)
+    if attached && output.frames.nearest(FragmentainerKind.Page) != NO_NODE && frame > 0 {
+      let values = output.fragments.values.asMutSlice()
+      let mut emitted = emissionStart
+      while emitted < values.length {
+        values[emitted].repeated = true
+        emitted = emitted + 1
+      }
+    }
+    let fragment = output.publication(id)
+    if fragment != NO_NODE {
+      if !unfragmented {
+        let containing = run frameContainingRect(nodes, &output, cb, parent, frame)
+        let inlinePoint = placedInline(nodes, &output, id, cb, input, containing, location, result.size)
+        if output.frames.writingMode == WritingMode.HorizontalTb { point.x = inlinePoint.x }
+        else { point.y = inlinePoint.y }
+      }
+      if !unfragmented && (output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl) {
+        point.x = point.x - result.size.width
+      }
+      let parentOrigin = fragmentPosition(&output, parent, false)
+      result.location = Point { x: point.x - parentOrigin.x, y: point.y - parentOrigin.y }
+      run output.store(id, result, true)
+    }
+    if unfragmented || state.contentComplete { break }
+    first = false
+    relaxation = BreakRelaxation.Strict
+    frame = frame + 1
+    if state.notBeforeFrame > frame { frame = state.notBeforeFrame }
+  }
+  output.frame = savedFrame
+  output.fragmentParent = savedParent
+}
+
+// Overflow 3 §3.3 and Align 3 §5.3: a scroll container's origin is
+// main-start/cross-start for flex, block-start/inline-start otherwise.
+fn overflowReverse(style: &Style, horizontal: bool) -> bool {
+  let mut reverse = startReverse(style, horizontal)
+  if isFlex(style) {
+    let row = style.flexDirection == FlexDirection.Row || style.flexDirection == FlexDirection.RowReverse
+    let mainHorizontal = row == (style.writingMode == WritingMode.HorizontalTb)
+    if horizontal == mainHorizontal {
+      if style.flexDirection == FlexDirection.RowReverse || style.flexDirection == FlexDirection.ColumnReverse { reverse = !reverse }
+    } else if style.flexWrap == FlexWrap.WrapReverse { reverse = !reverse }
+  }
+  return reverse
+}
+fn alignmentOpensOrigin(style: &Style, horizontal: bool) -> bool {
+  let mut align = style.alignContent
+  let mut safety = style.alignContentSafety
+  let logicalReverse = startReverse(style, horizontal)
+  let reverse = overflowReverse(style, horizontal)
+  if isFlex(style) {
+    let row = style.flexDirection == FlexDirection.Row || style.flexDirection == FlexDirection.RowReverse
+    let mainHorizontal = row == (style.writingMode == WritingMode.HorizontalTb)
+    if horizontal == mainHorizontal { align = style.justifyContent
+      safety = style.justifyContentSafety }
+    else if style.flexWrap == FlexWrap.NoWrap { return false }
+  } else if horizontal == (style.writingMode == WritingMode.HorizontalTb) { return false }
+  let offset = alignmentOffset(align, -1.0, reverse, logicalReverse, logicalReverse, horizontal, safety == OverflowAlignment.Safe)
+  if reverse { return offset > -1.0 }
+  return offset < 0.0
+}
+pub fn reachableLimits(style: &Style, padding: Rect, flow: Rect, viewport: bool) -> ResolvedEdges {
+  let mut left = -UNBOUNDED
+  let mut right = UNBOUNDED
+  let mut top = -UNBOUNDED
+  let mut bottom = UNBOUNDED
+  if viewport || scrollable(usedOverflowForAxis(style, true)) {
+    let mut reverse = overflowReverse(style, true)
+    if viewport { reverse = startReverse(style, true) }
+    if reverse { right = padding.x + padding.width
+      if !viewport && alignmentOpensOrigin(style, true) { right = max(right, flow.x + flow.width) } }
+    else { left = padding.x
+      if !viewport && alignmentOpensOrigin(style, true) { left = min(left, flow.x) } }
+  }
+  if viewport || scrollable(usedOverflowForAxis(style, false)) {
+    let mut reverse = overflowReverse(style, false)
+    if viewport { reverse = startReverse(style, false) }
+    if reverse { bottom = padding.y + padding.height
+      if !viewport && alignmentOpensOrigin(style, false) { bottom = max(bottom, flow.y + flow.height) } }
+    else { top = padding.y
+      if !viewport && alignmentOpensOrigin(style, false) { top = min(top, flow.y) } }
+  }
+  return ResolvedEdges { left: left, right: right, top: top, bottom: bottom }
+}
+pub fn addOverflow(base: Rect, rect: Rect, limits: ResolvedEdges) -> Rect {
+  let left = max(rect.x, limits.left)
+  let right = min(rect.x + rect.width, limits.right)
+  let top = max(rect.y, limits.top)
+  let bottom = min(rect.y + rect.height, limits.bottom)
+  // Empty intersections must not expand the other axis. Border boxes with
+  // zero area are absent; zero-area boxes' nonempty descendant overflow isn't.
+  if right <= left || bottom <= top { return base }
+  return base.unionWith(Rect { x: left, y: top, width: right - left, height: bottom - top })
+}
+fn propagatedOverflow(style: &Style, rect: Rect, padding: Rect) -> Rect {
+  let mut left = rect.x
+  let mut right = rect.x + rect.width
+  let mut top = rect.y
+  let mut bottom = rect.y + rect.height
+  // Preserve the pinned clip rule and replaced elements' used-value clip.
+  if usedOverflowForAxis(style, true) != Overflow.Visible {
+    left = max(left, padding.x)
+    right = min(right, padding.x + padding.width)
+  }
+  if usedOverflowForAxis(style, false) != Overflow.Visible {
+    top = max(top, padding.y)
+    bottom = min(bottom, padding.y + padding.height)
+  }
+  return Rect { x: left, y: top, width: max(0.0, right - left), height: max(0.0, bottom - top) }
+}
+fn fragmentFlowMargin(nodes: &BoxTree, output: &LayoutPass, parentId: usize, childId: usize) -> Rect {
+  let parent = &output.fragments.values.asSlice()[parentId]
+  let child = &output.fragments.values.asSlice()[childId]
+  let style = nodes.style(child.box)
+  let horizontal = nodes.style(parent.box).writingMode == WritingMode.HorizontalTb
+  let mut basis = parent.contentRect.width
+  if !horizontal { basis = parent.contentRect.height }
+  let mut definite = true
+  match output.fragmentFullBox(childId) {
+    Option<FullBoxGeometry>.Some { value } => {
+      basis = value.parent.width
+      definite = value.parent.widthDefinite
+      if !horizontal { basis = value.parent.height
+        definite = value.parent.heightDefinite }
+    }
+    Option<FullBoxGeometry>.None => {}
+  }
+  let mut margin = child.usedMargin
+  // Exclude CSS2 inline-axis overconstraint correction, just as flowMarginRect
+  // does in continuous layout. Keep the fragment's consumed block margins:
+  // resolving those declarations again would restore discarded/sliced edges.
+  if horizontal {
+    if style.margin.left.kind != DimensionKind.Auto { margin.left = resolve(style.margin.left, basis, definite, 0.0) }
+    if style.margin.right.kind != DimensionKind.Auto { margin.right = resolve(style.margin.right, basis, definite, 0.0) }
+  } else {
+    if style.margin.top.kind != DimensionKind.Auto { margin.top = resolve(style.margin.top, basis, definite, 0.0) }
+    if style.margin.bottom.kind != DimensionKind.Auto { margin.bottom = resolve(style.margin.bottom, basis, definite, 0.0) }
+  }
+  return Rect { x: -max(0.0, margin.left), y: -max(0.0, margin.top), width: child.size.width + max(0.0, margin.left) + max(0.0, margin.right), height: child.size.height + max(0.0, margin.top) + max(0.0, margin.bottom) }
+}
+
+fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normalViewport: Rect) -> Rect {
+  let mut result = normalViewport
+  let viewportStyle = Style.make()
+  let mut viewportLimits = reachableLimits(&viewportStyle, viewport, viewport, true)
+  let unlimited = ResolvedEdges { left: -UNBOUNDED, right: UNBOUNDED, top: -UNBOUNDED, bottom: UNBOUNDED }
+  if output.frame != NO_NODE { viewportLimits = unlimited }
+  // Physical parents precede children, including CB-owned absolute subtrees.
+  // Line/inline fragments pass overflow through; only actual box fragments clip.
+  let mut index = output.fragments.values.length()
+  while index > 0 {
+    index = index - 1
+    let fragment = output.fragments.values.get(index)
+    // Nonpainting scopes contribute no own rectangle, but CB-owned absolute
+    // descendants still propagate their overflow through that physical scope.
+    let id = fragment.box
+    let mut positioned = false
+    let mut fixed = false
+    let mut overflow = fragment.scrollableOverflow
+    if id != NO_NODE {
+      positioned = outOfFlow(nodes.style(id))
+      fixed = nodes.style(id).position == Position.Fixed && fragment.kind == FragmentKind.Box
+      if fragment.kind == FragmentKind.Box {
+        // A single physical fragment has unambiguous scalar used metrics.
+        // Multi-fragment boxes keep their per-fragment overflow authoritative.
+        if output.frame == NO_NODE || fragment.previousForBox == NO_NODE && fragment.nextForBox == NO_NODE {
+          output.boxes[id].scrollableOverflow = overflow
+        }
+        overflow = propagatedOverflow(nodes.style(id), overflow, fragment.paddingRect)
+      }
+    }
+    if !fixed {
+      let position = Point { x: fragment.location.x + fragment.visualOffset.x, y: fragment.location.y + fragment.visualOffset.y }
+      let border = Rect { x: position.x, y: position.y, width: fragment.size.width, height: fragment.size.height }
+      overflow = overflow.translated(position)
+      let parentId = fragment.parent
+      if parentId == NO_NODE {
+        if !fragment.nonpainting { result = addOverflow(result, border, viewportLimits) }
+        result = addOverflow(result, overflow, viewportLimits)
+      } else {
+        let parent = output.fragments.values.get(parentId)
+        let cb = parent.box
+        let mut limits = unlimited
+        if cb != NO_NODE && parent.kind == FragmentKind.Box {
+          let mut normal = parent.contentRect
+          if output.frame == NO_NODE { normal = output.boxes[cb].normalFlowOverflow() }
+          limits = reachableLimits(nodes.style(cb), parent.paddingRect, normal, cb == 0)
+        }
+        let mut combined = parent.scrollableOverflow
+        if !fragment.nonpainting { combined = addOverflow(combined, border, limits) }
+        if !positioned && !fragment.nonpainting {
+          let mut margin = fragment.layoutBounds.translated(position)
+          if output.frame == NO_NODE && fragment.kind == FragmentKind.Box && parent.kind == FragmentKind.Box && id != NO_NODE && cb != NO_NODE {
+            let layout = output.boxes[id]
+            if isFlex(nodes.style(cb)) {
+              margin = Rect { x: position.x - layout.usedMargin.left, y: position.y - layout.usedMargin.top, width: max(0.0, layout.size.width + layout.usedMargin.horizontal()), height: max(0.0, layout.size.height + layout.usedMargin.vertical()) }
+            } else {
+              margin = flowMarginRect(nodes, cb, id, &layout, &output.boxes[cb]).translated(Point { x: position.x - layout.location.x, y: position.y - layout.location.y })
+            }
+          } else if output.frame != NO_NODE && fragment.kind == FragmentKind.Box && parent.kind == FragmentKind.Box
+            && id != NO_NODE && cb != NO_NODE && !isFlex(nodes.style(cb)) {
+            margin = fragmentFlowMargin(nodes, &output, parentId, index).translated(position)
+          }
+          combined = addOverflow(combined, margin, limits)
+        }
+        let fragments = output.fragments.values.asMutSlice()
+        fragments[parentId].scrollableOverflow = addOverflow(combined, overflow, limits)
+      }
+    }
+  }
+  return result
+}
+
+fn fragmentSource(output: &LayoutPass, id: usize) -> usize {
+  let mut current = id
+  while current != NO_NODE {
+    let fragment = &output.fragments.values.asSlice()[current]
+    if fragment.source != NO_NODE { return fragment.source }
+    current = fragment.parent
+  }
+  return NO_NODE
+}
+fn sourceRelative(nodes: &BoxTree, output: &LayoutPass, source: usize, viewport: OptionalSize, frame: usize) -> Point {
+  let mut offset = Point { x: 0.0, y: 0.0 }
+  let viewportStyle = Style.make()
+  let mut current = source
+  while current != NO_NODE {
+    let id = nodes.firstBySource.get(current)
+    if id != NO_NODE {
+      let style = nodes.style(id)
+      if style.position == Position.Fixed { return offset }
+      if style.position == Position.Relative {
+        let parent = generatedParent(nodes, id)
+        let mut containing = viewport
+        let mut containingStyle = &viewportStyle
+        if parent != NO_NODE {
+          let rect = output.boxes[parent].contentRect()
+          containing = OptionalSize {
+            width: rect.width, height: rect.height,
+            widthDefinite: output.boxes[parent].widthDefinite,
+            heightDefinite: output.boxes[parent].heightDefinite,
+          }
+          containingStyle = nodes.style(parent)
+        }
+        if output.frame != NO_NODE {
+          containing = viewport
+          let ownInstance = containingExisting(nodes, output, id, frame)
+          let mut metadata = output.fullBox(id)
+          if ownInstance != NO_NODE {
+            match output.fragmentFullBox(ownInstance) {
+              Option<FullBoxGeometry>.Some { value } => { metadata = Option<FullBoxGeometry>.Some { value: value } }
+              Option<FullBoxGeometry>.None => {}
+            }
+          }
+          match move metadata {
+            Option<FullBoxGeometry>.Some { value } => { containing = value.parent }
+            Option<FullBoxGeometry>.None => {
+              let parentId = instance(output, parent, frame)
+              if parentId != NO_NODE {
+                match output.fragmentFullBox(parentId) {
+                  Option<FullBoxGeometry>.Some { value } => { containing = value.content }
+                  Option<FullBoxGeometry>.None => {
+                    let content = output.fragments.values.get(parentId).contentRect
+                    containing = OptionalSize { width: content.width, height: content.height, widthDefinite: containingStyle.writingMode == WritingMode.HorizontalTb, heightDefinite: containingStyle.writingMode != WritingMode.HorizontalTb }
+                  }
+                }
+              }
+            }
+          }
+        }
+        let own = relativeOffset(style, containingStyle, containing)
+        offset.x = offset.x + own.x
+        offset.y = offset.y + own.y
+      }
+    }
+    current = nodes.sources[current].parent
+  }
+  return offset
+}
+fn positionRelative(nodes: &BoxTree, output: &mut LayoutPass, viewport: OptionalSize) {
+  let mut index: usize = 0
+  while index < output.fragments.values.length() {
+    let fragment = output.fragments.values.get(index)
+    let source = fragmentSource(&output, index)
+    let parentSource = fragmentSource(&output, fragment.parent)
+    if source != parentSource {
+      // CSS2 9.2.1.1: relative split inlines also move lifted block descendants.
+      // Subtract what the physical parent already supplies, so nested inline
+      // fragments and source continuations never apply the translation twice.
+      let own = sourceRelative(nodes, &output, source, viewport, fragment.fragmentainer)
+      let parent = sourceRelative(nodes, &output, parentSource, viewport, fragment.fragmentainer)
+      let fragments = output.fragments.values.asMutSlice()
+      fragments[index].visualOffset = Point { x: own.x - parent.x, y: own.y - parent.y }
+    }
+    index = index + 1
+  }
+}
+
+pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, viewport: OptionalSize, viewportScroll: Point) -> Rect ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let viewportRect = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
+  if nodes.sources.length == 0 { return viewportRect }
+  let mut normalViewport = viewportRect
+  let viewportStyle = Style.make()
+  let viewportLimits = reachableLimits(&viewportStyle, viewportRect, viewportRect, true)
+  let mut visual = viewportScroll.x != 0.0 || viewportScroll.y != 0.0
+  let mut relative = false
+  // Source preorder is not generated arena order after an inline interruption.
+  // Layout an absolute ancestor before visiting any of its source descendants.
+  let mut source: usize = 0
+  while source != NO_NODE {
+    let mut id = nodes.firstBySource.get(source)
+    while id != NO_NODE {
+      let style = nodes.style(id)
+      if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
+      if outOfFlow(style) { run absolute(nodes, &mut output, &mut measurer, id, viewport, false) }
+      else if output.boxes[id].hasBox() && generatedParent(nodes, id) == NO_NODE && nodes.node(id).kind != BoxKind.Inline {
+        let layout = output.boxes[id]
+        let box = usedBox(nodes, &output, id, viewport)
+        let mut margin = box.margin
+        if style.margin.left.kind == DimensionKind.Auto { margin.left = layout.usedMargin.left }
+        if style.margin.right.kind == DimensionKind.Auto { margin.right = layout.usedMargin.right }
+        if style.margin.top.kind == DimensionKind.Auto { margin.top = layout.usedMargin.top }
+        if style.margin.bottom.kind == DimensionKind.Auto { margin.bottom = layout.usedMargin.bottom }
+        let left = max(0.0, margin.left)
+        let right = max(0.0, margin.right)
+        let top = max(0.0, margin.top)
+        let bottom = max(0.0, margin.bottom)
+        let position = normalPosition(nodes, &output, id)
+        let rect = Rect { x: position.x - left, y: position.y - top, width: layout.size.width + left + right, height: layout.size.height + top + bottom }
+        normalViewport = addOverflow(normalViewport, rect, viewportLimits)
+      }
+      relative = relative || style.position == Position.Relative
+      let scroll = requestedScrollOffset(nodes, id, viewportScroll)
+      visual = visual || style.position == Position.Sticky || scroll.x != 0.0 || scroll.y != 0.0
+      id = nodes.node(id).nextContinuation
+    }
+    source = nextPositionSource(nodes, source)
+  }
+  if relative { positionRelative(nodes, &mut output, viewport) }
+  let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport)
+  run output.selectScrollbars(nodes)
+  if output.needsRelayout || !visual { return overflow }
+  let usedViewportScroll = clampScroll(viewportScroll, viewportRect, overflow)
+  // Scrolling affects the children of the scrollport, not its own border.
+  // CB-owned fragments naturally omit intervening source scroll containers;
+  // fixed roots have no fragment parent and never inherit viewport scrolling.
+  let mut index: usize = 0
+  while index < output.fragments.values.length() {
+    let fragment = output.fragments.values.get(index)
+    if fragment.parent != NO_NODE {
+      let parent = output.fragments.values.get(fragment.parent)
+      if parent.kind == FragmentKind.Box && parent.box != NO_NODE {
+        let scroll = scrollOffset(nodes, &output, parent.box, usedViewportScroll)
+        let fragments = output.fragments.values.asMutSlice()
+        fragments[index].visualOffset.x = fragments[index].visualOffset.x - scroll.x
+        fragments[index].visualOffset.y = fragments[index].visualOffset.y - scroll.y
+      }
+    }
+    if fragment.box != NO_NODE && (fragment.kind == FragmentKind.Box || fragment.kind == FragmentKind.Inline) && nodes.style(fragment.box).position == Position.Sticky {
+      sticky(nodes, &mut output, fragment.box, index, viewport, usedViewportScroll, overflow)
+    }
+    index = index + 1
+  }
+  return overflow
+}
+
+fn fragmentScroll(nodes: &BoxTree, output: &LayoutPass, fragmentId: usize, viewportScroll: Point) -> Point {
+  if fragmentId == NO_NODE { return viewportScroll }
+  let fragment = output.fragments.values.get(fragmentId)
+  if fragment.box == NO_NODE { return Point { x: 0.0, y: 0.0 } }
+  if fragment.box == 0 { return viewportScroll }
+  let request = requestedScrollOffset(nodes, fragment.box, viewportScroll)
+  return clampScroll(request, fragment.paddingRect, fragment.scrollableOverflow)
+}
+
+fn stickyFragment(nodes: &BoxTree, output: &mut LayoutPass, id: usize, fragmentId: usize, viewport: OptionalSize, viewportScroll: Point) {
+  let fragment = output.fragments.values.get(fragmentId)
+  let frame = fragment.fragmentainer
+  let viewportStyle = Style.make()
+  let parent = generatedParent(nodes, id)
+  let parentFragment = instance(&output, parent, frame)
+  let root = output.frameRoots.get(frame)
+  let mut containingId = root
+  let mut containingStyle = &viewportStyle
+  if parentFragment != NO_NODE {
+    containingId = parentFragment
+    containingStyle = nodes.style(parent)
+  }
+  let containingFragment = output.fragments.values.get(containingId)
+  let origin = fragmentPosition(&output, containingId, true)
+  let scroll = fragmentScroll(nodes, &output, containingId, viewportScroll)
+  let mut containing = containingFragment.contentRect.translated(Point { x: origin.x - scroll.x, y: origin.y - scroll.y })
+  if parent != NO_NODE {
+    let padding = containingFragment.paddingRect
+    let content = containingFragment.contentRect
+    let overflow = containingFragment.scrollableOverflow
+    if scrollable(usedOverflowForAxis(containingStyle, true)) {
+      containing.x = origin.x - scroll.x + overflow.x + content.x - padding.x
+      containing.width = max(0.0, overflow.width - padding.width + content.width)
+    }
+    if scrollable(usedOverflowForAxis(containingStyle, false)) {
+      containing.y = origin.y - scroll.y + overflow.y + content.y - padding.y
+      containing.height = max(0.0, overflow.height - padding.height + content.height)
+    }
+  }
+  let mut port = Rect { x: 0.0, y: 0.0, width: viewport.width, height: viewport.height }
+  match output.frames.page(frame) {
+    Option<FragmentAncestor>.Some { value } => { port = value.rect }
+    Option<FragmentAncestor>.None => {}
+  }
+  let mut foundX = false
+  let mut foundY = false
+  let mut ancestor = nodes.node(id).parent
+  while ancestor != NO_NODE && ancestor != 0 && (!foundX || !foundY) {
+    let ancestorId = instance(&output, ancestor, frame)
+    if ancestorId != NO_NODE && nodes.node(ancestor).kind != BoxKind.Inline && nodes.node(ancestor).kind != BoxKind.InlineFormatting {
+      let style = nodes.style(ancestor)
+      let padding = output.fragments.values.get(ancestorId).paddingRect.translated(fragmentPosition(&output, ancestorId, true))
+      if !foundX && scrollable(usedOverflowForAxis(style, true)) {
+        port.x = padding.x
+        port.width = padding.width
+        foundX = true
+      }
+      if !foundY && scrollable(usedOverflowForAxis(style, false)) {
+        port.y = padding.y
+        port.height = padding.height
+        foundY = true
+      }
+    }
+    ancestor = nodes.node(ancestor).parent
+  }
+  let point = fragmentPosition(&output, fragmentId, true)
+  let x = stickyAxis(nodes.style(id), containingStyle, true, point.x, fragment.size.width, containing.x, containing.width, fragment.usedMargin.left, fragment.usedMargin.right, port.x, port.width, viewport.widthDefinite)
+  let y = stickyAxis(nodes.style(id), containingStyle, false, point.y, fragment.size.height, containing.y, containing.height, fragment.usedMargin.top, fragment.usedMargin.bottom, port.y, port.height, viewport.heightDefinite)
+  let values = output.fragments.values.asMutSlice()
+  values[fragmentId].visualOffset.x = values[fragmentId].visualOffset.x + x
+  values[fragmentId].visualOffset.y = values[fragmentId].visualOffset.y + y
+}
+
+pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, viewport: OptionalSize, viewportScroll: Point) -> Rect ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let savedFrame = output.frame
+  let viewportRect = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
+  if nodes.sources.length == 0 { return viewportRect }
+  // Finish every non-fixed parallel flow first. Absolute-only pages are real
+  // accepted pages and therefore participate in the subsequent fixed pass.
+  let mut source: usize = 0
+  while source != NO_NODE {
+    let mut id = nodes.firstBySource.get(source)
+    while id != NO_NODE {
+      if !fixedTree(nodes, id) {
+        if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
+        if outOfFlow(nodes.style(id)) { run absolute(nodes, &mut output, &mut measurer, id, viewport, true) }
+      }
+      id = nodes.node(id).nextContinuation
+    }
+    source = nextPositionSource(nodes, source)
+  }
+  let mut frame: usize = 0
+  let mut count: usize = 1
+  if output.frames.nearest(FragmentainerKind.Page) != NO_NODE { count = output.frameRoots.length() }
+  while frame < count {
+    output.frame = frame
+    let mut pageViewport = viewport
+    match output.frames.page(frame) {
+      Option<FragmentAncestor>.Some { value } => {
+        if frame > 0 {
+          match output.frames.page(frame - 1) {
+            Option<FragmentAncestor>.Some { value: previous } => {
+              if previous.index == value.index { frame = frame + 1
+                continue }
+            }
+            Option<FragmentAncestor>.None => {}
+          }
+        }
+        pageViewport = OptionalSize.definite(value.rect.width, value.rect.height)
+      }
+      Option<FragmentAncestor>.None => {}
+    }
+    source = 0
+    while source != NO_NODE {
+      let mut id = nodes.firstBySource.get(source)
+      while id != NO_NODE {
+        if fixedTree(nodes, id) {
+          if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
+          if outOfFlow(nodes.style(id)) { run absolute(nodes, &mut output, &mut measurer, id, pageViewport, true) }
+        }
+        id = nodes.node(id).nextContinuation
+      }
+      source = nextPositionSource(nodes, source)
+    }
+    frame = frame + 1
+  }
+  output.frame = savedFrame
+  positionRelative(nodes, &mut output, viewport)
+  let overflow = treeOverflow(nodes, &mut output, viewportRect, viewportRect)
+  run output.selectScrollbars(nodes)
+  if output.needsRelayout { return overflow }
+  let usedViewportScroll = clampScroll(viewportScroll, viewportRect, overflow)
+  let mut index: usize = 0
+  while index < output.fragments.values.length() {
+    let fragment = output.fragments.values.get(index)
+    if fragment.parent != NO_NODE {
+      let parent = output.fragments.values.get(fragment.parent)
+      if parent.kind == FragmentKind.Box && parent.box != NO_NODE {
+        let scroll = fragmentScroll(nodes, &output, fragment.parent, usedViewportScroll)
+        let values = output.fragments.values.asMutSlice()
+        values[index].visualOffset.x = values[index].visualOffset.x - scroll.x
+        values[index].visualOffset.y = values[index].visualOffset.y - scroll.y
+      }
+    }
+    if fragment.box != NO_NODE && (fragment.kind == FragmentKind.Box || fragment.kind == FragmentKind.Inline) && nodes.style(fragment.box).position == Position.Sticky {
+      stickyFragment(nodes, &mut output, fragment.box, index, viewport, usedViewportScroll)
+    }
+    index = index + 1
+  }
+  return overflow
+}

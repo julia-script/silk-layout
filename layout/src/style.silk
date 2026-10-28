@@ -1,0 +1,182 @@
+import silk.ownership { Copy }
+
+// Values have already passed CSS parsing and cascade. Percentages are fractions.
+// Keeping a percentage coefficient distinguishes 0% from 0px in indefinite axes.
+pub enum DimensionKind { Auto, Length, Percent, Calc, MinContent, MaxContent, FitContent, Content, None }
+pub struct Dimension { pub kind: DimensionKind, pub value: f64, pub percent: f64 }
+impl Copy for Dimension {}
+impl Dimension {
+  pub fn auto() -> Dimension { return Dimension { kind: DimensionKind.Auto, value: 0.0, percent: 0.0 } }
+  pub fn px(value: f64) -> Dimension { return Dimension { kind: DimensionKind.Length, value: value, percent: 0.0 } }
+  pub fn pct(value: f64) -> Dimension { return Dimension { kind: DimensionKind.Percent, value: 0.0, percent: value } }
+  pub fn calc(length: f64, percent: f64) -> Dimension { return Dimension { kind: DimensionKind.Calc, value: length, percent: percent } }
+  pub fn keyword(kind: DimensionKind) -> Dimension { return Dimension { kind: kind, value: 0.0, percent: 0.0 } }
+}
+pub struct Edges { pub top: Dimension, pub right: Dimension, pub bottom: Dimension, pub left: Dimension }
+impl Copy for Edges {}
+impl Edges {
+  pub fn all(value: Dimension) -> Edges { return Edges { top: value, right: value, bottom: value, left: value } }
+}
+// CSS Display 3 §2: participation in the parent and layout of descendants
+// are independent. Box-suppression values have neither outside nor inside.
+pub enum DisplayOutside { Block, Inline }
+pub enum DisplayInside { Flow, FlowRoot, Flex }
+pub union Display {
+  Box { pub outside: DisplayOutside, pub inside: DisplayInside },
+  None,
+  Contents
+}
+impl Copy for Display {}
+impl Display {
+  pub fn isNone(self: &Self) -> bool {
+    return match self.* {
+      Display.None => true
+      _ => false
+    }
+  }
+  pub fn isContents(self: &Self) -> bool {
+    return match self.* {
+      Display.Contents => true
+      _ => false
+    }
+  }
+  pub fn outsideIs(self: &Self, expected: DisplayOutside) -> bool {
+    return match self.* {
+      Display.Box { outside, inside: _ } => outside == expected
+      _ => false
+    }
+  }
+  pub fn insideIs(self: &Self, expected: DisplayInside) -> bool {
+    return match self.* {
+      Display.Box { outside: _, inside } => inside == expected
+      _ => false
+    }
+  }
+  pub fn blockified(self: &Self) -> Display {
+    return match self.* {
+      Display.Box { outside, inside } => {
+        let mut inner = inside
+        // §2.7 preserves CSS2's inline-block -> block computed-value rule.
+        if outside == DisplayOutside.Inline && inside == DisplayInside.FlowRoot { inner = DisplayInside.Flow }
+        return Display.Box { outside: DisplayOutside.Block, inside: inner }
+      }
+      Display.None => Display.None
+      Display.Contents => Display.Contents
+    }
+  }
+}
+pub enum BoxSizing { ContentBox, BorderBox }
+pub enum Direction { Ltr, Rtl }
+pub enum UnicodeBidi { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext }
+pub enum WritingMode { HorizontalTb, VerticalRl, VerticalLr, SidewaysRl, SidewaysLr }
+pub enum TextOrientation { Mixed, Upright, Sideways }
+pub enum FlexDirection { Row, RowReverse, Column, ColumnReverse }
+pub enum FlexWrap { NoWrap, Wrap, WrapReverse }
+pub enum Align { Auto, Normal, Start, End, FlexStart, FlexEnd, Center, Stretch, SpaceBetween, SpaceAround, SpaceEvenly, Baseline, LastBaseline, SelfStart, SelfEnd, Left, Right }
+pub enum OverflowAlignment { Default, Safe, Unsafe }
+pub enum Overflow { Visible, Clip, Hidden, Scroll, Auto }
+pub enum ScrollbarWidth { Auto, Thin, None }
+pub enum ScrollbarGutter { Auto, Stable, StableBothEdges }
+pub enum Position { Static, Relative, Absolute, Fixed, Sticky }
+pub enum Float { None, Left, Right }
+pub enum Clear { None, Left, Right, Both }
+pub enum Visibility { Visible, Hidden, Collapse }
+pub union LineHeight { Normal, Number { pub value: f64 }, Length { pub value: f64 } }
+impl Copy for LineHeight {}
+pub enum VerticalAlignKind { Baseline, Middle, TextTop, TextBottom, Top, Bottom, Sub, Super, Shift }
+pub struct VerticalAlign { pub kind: VerticalAlignKind, pub shift: Dimension }
+impl Copy for VerticalAlign {}
+pub enum BaselineSource { Auto, First, Last }
+pub enum TextAlign { Auto, Start, End, Left, Right, Center, Justify }
+pub enum TextJustify { Auto, None, InterWord, InterCharacter }
+pub enum TextWrap { Wrap, NoWrap }
+pub enum WhiteSpaceCollapse { Collapse, Discard, Preserve, PreserveBreaks, PreserveSpaces, BreakSpaces }
+pub union TabSize { Number { pub value: f64 }, Length { pub value: f64 } }
+impl Copy for TabSize {}
+pub struct TextIndent { pub value: Dimension, pub hanging: bool, pub eachLine: bool }
+impl Copy for TextIndent {}
+pub enum BoxDecorationBreak { Slice, Clone }
+pub enum MarginBreak { Auto, Keep, Discard }
+pub enum BreakBetween { Auto, Avoid, Always, All, AvoidPage, Page, Left, Right, Recto, Verso, AvoidColumn, Column, AvoidRegion, Region }
+pub enum BreakInside { Auto, Avoid, AvoidPage, AvoidColumn, AvoidRegion }
+pub struct Style {
+  pub display: Display,
+  pub width: Dimension, pub height: Dimension,
+  pub minWidth: Dimension, pub minHeight: Dimension,
+  pub maxWidth: Dimension, pub maxHeight: Dimension,
+  pub margin: Edges, pub padding: Edges, pub border: Edges, pub inset: Edges,
+  pub boxSizing: BoxSizing,
+  pub direction: Direction, pub unicodeBidi: UnicodeBidi, pub writingMode: WritingMode, pub textOrientation: TextOrientation,
+  pub fontKey: usize, pub lineHeight: LineHeight,
+  pub verticalAlign: VerticalAlign, pub baselineSource: BaselineSource,
+  pub textAlign: TextAlign, pub textAlignLast: TextAlign, pub textWrap: TextWrap,
+  pub textJustify: TextJustify,
+  pub textIndent: TextIndent,
+  pub whiteSpaceCollapse: WhiteSpaceCollapse, pub tabSize: TabSize,
+  pub boxDecorationBreak: BoxDecorationBreak,
+  pub marginBreak: MarginBreak,
+  pub breakBefore: BreakBetween, pub breakAfter: BreakBetween, pub breakInside: BreakInside,
+  pub orphans: usize, pub widows: usize,
+  pub flexDirection: FlexDirection, pub flexWrap: FlexWrap,
+  pub flexGrow: f64, pub flexShrink: f64, pub flexBasis: Dimension,
+  pub order: i32,
+  pub justifyContent: Align, pub alignItems: Align, pub alignSelf: Align, pub alignContent: Align,
+  pub justifySelf: Align, pub justifyItems: Align,
+  pub justifyContentSafety: OverflowAlignment, pub alignContentSafety: OverflowAlignment,
+  pub alignItemsSafety: OverflowAlignment, pub alignSelfSafety: OverflowAlignment,
+  pub justifySelfSafety: OverflowAlignment, pub justifyItemsSafety: OverflowAlignment,
+  pub rowGap: Dimension, pub columnGap: Dimension,
+  pub overflowX: Overflow, pub overflowY: Overflow,
+  pub scrollbarWidth: ScrollbarWidth, pub scrollbarGutter: ScrollbarGutter,
+  pub position: Position, pub float: Float, pub clear: Clear,
+  pub visibility: Visibility,
+  pub aspectRatio: f64, pub aspectRatioAuto: bool, pub replaced: bool,
+}
+impl Style {
+  // Upright changes used bidi direction, never the computed inherited value.
+  pub fn usedDirection(self: &Self) -> Direction {
+    if self.textOrientation == TextOrientation.Upright
+      && (self.writingMode == WritingMode.VerticalRl || self.writingMode == WritingMode.VerticalLr) {
+      return Direction.Ltr
+    }
+    return self.direction
+  }
+  pub fn usesCentralBaseline(self: &Self) -> bool {
+    return (self.writingMode == WritingMode.VerticalRl || self.writingMode == WritingMode.VerticalLr)
+      && self.textOrientation != TextOrientation.Sideways
+  }
+  pub fn make() -> Style {
+    return Style {
+      display: Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flow },
+      width: Dimension.auto(), height: Dimension.auto(),
+      minWidth: Dimension.auto(), minHeight: Dimension.auto(),
+      maxWidth: Dimension.keyword(DimensionKind.None), maxHeight: Dimension.keyword(DimensionKind.None),
+      margin: Edges.all(Dimension.px(0.0)), padding: Edges.all(Dimension.px(0.0)),
+      border: Edges.all(Dimension.px(0.0)), inset: Edges.all(Dimension.auto()),
+      boxSizing: BoxSizing.ContentBox, direction: Direction.Ltr, unicodeBidi: UnicodeBidi.Normal, writingMode: WritingMode.HorizontalTb,
+      textOrientation: TextOrientation.Mixed,
+      fontKey: 0, lineHeight: LineHeight.Normal,
+      verticalAlign: VerticalAlign { kind: VerticalAlignKind.Baseline, shift: Dimension.px(0.0) }, baselineSource: BaselineSource.Auto,
+      textAlign: TextAlign.Start, textAlignLast: TextAlign.Auto, textWrap: TextWrap.Wrap,
+      textJustify: TextJustify.Auto,
+      textIndent: TextIndent { value: Dimension.px(0.0), hanging: false, eachLine: false },
+      whiteSpaceCollapse: WhiteSpaceCollapse.Collapse, tabSize: TabSize.Number { value: 8.0 },
+      boxDecorationBreak: BoxDecorationBreak.Slice,
+      marginBreak: MarginBreak.Auto,
+      breakBefore: BreakBetween.Auto, breakAfter: BreakBetween.Auto, breakInside: BreakInside.Auto,
+      orphans: 2, widows: 2,
+      flexDirection: FlexDirection.Row, flexWrap: FlexWrap.NoWrap,
+      flexGrow: 0.0, flexShrink: 1.0, flexBasis: Dimension.auto(), order: 0,
+      justifyContent: Align.Normal, alignItems: Align.Normal, alignSelf: Align.Auto, alignContent: Align.Normal,
+      justifySelf: Align.Auto, justifyItems: Align.Normal,
+      justifyContentSafety: OverflowAlignment.Default, alignContentSafety: OverflowAlignment.Default,
+      alignItemsSafety: OverflowAlignment.Default, alignSelfSafety: OverflowAlignment.Default,
+      justifySelfSafety: OverflowAlignment.Default, justifyItemsSafety: OverflowAlignment.Default,
+      rowGap: Dimension.px(0.0), columnGap: Dimension.px(0.0),
+      overflowX: Overflow.Visible, overflowY: Overflow.Visible,
+      scrollbarWidth: ScrollbarWidth.Auto, scrollbarGutter: ScrollbarGutter.Auto,
+      position: Position.Static, float: Float.None, clear: Clear.None, visibility: Visibility.Visible,
+      aspectRatio: 0.0, aspectRatioAuto: false, replaced: false,
+    }
+  }
+}

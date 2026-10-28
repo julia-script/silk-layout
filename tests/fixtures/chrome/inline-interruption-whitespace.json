@@ -1,0 +1,64 @@
+{
+  "name": "inline-interruption-whitespace",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 300
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "position": "relative"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "block",
+          "width": 30,
+          "height": 15
+        }
+      },
+      {
+        "parent": 1,
+        "text": " \n "
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "block",
+          "width": 40,
+          "height": 20
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "position": "absolute",
+          "width": {
+            "percent": 0.5
+          },
+          "height": {
+            "percent": 0.5
+          },
+          "inset": {
+            "left": 0,
+            "top": 0
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "name": "text-justify-inter-character-halves",
+  "kind": "spec",
+  "features": [
+    "source-text",
+    "text-justify"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 50,
+          "fontKey": 1,
+          "textAlign": "justify",
+          "textAlignLast": "justify",
+          "textJustify": "inter-character"
+        }
+      },
+      {
+        "parent": 0,
+        "text": "a"
+      },
+      {
+        "parent": 0,
+        "text": "b"
+      },
+      {
+        "parent": 0,
+        "text": "cd"
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#text-justify-property",
+    "https://drafts.csswg.org/css-text-3/#expanding-text",
+    "https://drafts.csswg.org/css-text-3/#letter-spacing-property"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "height": 10
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 15,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 25,
+            "y": 0,
+            "width": 25,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

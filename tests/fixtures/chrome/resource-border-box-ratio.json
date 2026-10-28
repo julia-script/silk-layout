@@ -1,0 +1,15 @@
+{
+  "name": "resource-border-box-ratio",
+  "kind": "chrome",
+  "features": ["replaced", "aspect-ratio", "aspect-ratio-auto", "border-box"],
+  "description": "Asymmetric decorations distinguish an explicit border-box ratio from the content-box natural ratio selected by auto. The paired cases share identical natural dimensions and CSS width.",
+  "spec": ["https://www.w3.org/TR/css-sizing-4/#propdef-aspect-ratio"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flow-root", "width": 400}},
+      {"parent": 0, "style": {"width": 180, "boxSizing": "border-box", "padding": {"top": 4, "right": 12, "bottom": 8, "left": 6}, "border": 2, "aspectRatio": 3}, "natural": {"width": 120, "height": 60, "aspectRatio": 2}},
+      {"parent": 0, "style": {"width": 180, "boxSizing": "border-box", "padding": {"top": 4, "right": 12, "bottom": 8, "left": 6}, "border": 2, "aspectRatio": 3, "aspectRatioAuto": true}, "natural": {"width": 120, "height": 60, "aspectRatio": 2}}
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "empty",
+  "kind": "chrome",
+  "features": [
+    "empty",
+    "block"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {}
+      }
+    ]
+  }
+}

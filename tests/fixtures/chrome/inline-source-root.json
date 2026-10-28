@@ -1,0 +1,39 @@
+{
+  "name": "inline-source-root",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "inline",
+          "width": 99,
+          "height": 88
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 20
+        }
+      }
+    ]
+  }
+}

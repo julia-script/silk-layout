@@ -1,0 +1,70 @@
+{
+  "name": "flex-intrinsic-nested-percent-vertical",
+  "kind": "spec",
+  "features": [
+    "flex",
+    "intrinsic-sizing",
+    "cyclic-percentages"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "writingMode": "vertical-rl",
+          "height": "max-content",
+          "width": 40
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex",
+          "writingMode": "vertical-rl",
+          "height": "max-content"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "writingMode": "vertical-rl",
+          "height": 80,
+          "width": 10,
+          "flexShrink": 0,
+          "margin": {
+            "top": {
+              "percent": 0.1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-sizing-3/#cyclic-percentage-contribution",
+    "https://drafts.csswg.org/css-flexbox-1/#definite-sizes"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "width": 40,
+        "height": 80
+      },
+      {
+        "width": 40,
+        "height": 80
+      },
+      {
+        "x": 30,
+        "y": 8,
+        "width": 10,
+        "height": 80
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "fragment-position-inline-containing-block",
+  "kind": "spec",
+  "spec": ["https://drafts.csswg.org/css-position-3/#def-cb", "https://drafts.csswg.org/css-position-3/#abspos-breaking", "https://drafts.csswg.org/css-break-3/#transforms"],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "fragmentation": {"kind": "column", "frames": [{"x": 0, "y": 0, "width": 10, "height": 35}, {"x": 30, "y": 0, "width": 10, "height": 35}]},
+    "fonts": [{"fontSize": 10, "ascent": 8, "descent": 2, "lineGap": 0, "xHeight": 5, "capHeight": 7, "subscriptOffset": 2, "superscriptOffset": 3, "baselines": {"alphabetic": 8, "ideographic": 10, "central": 5, "mathematical": 5}}],
+    "nodes": [
+      {"parent": null, "style": {"fontKey": 1}},
+      {"parent": 0, "style": {"fontKey": 1, "display": "inline", "position": "relative"}},
+      {"parent": 1, "text": "aa bb cc dd"},
+      {"parent": 1, "style": {"position": "absolute", "insetBottom": 0, "insetLeft": 0, "width": 1, "height": 5}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 10, "height": 35}, {"x": 30, "y": 0, "width": 10, "height": 20}]},
+    {"rects": [{"x": 0, "y": 0, "width": 10, "height": 10}, {"x": 0, "y": 10, "width": 10, "height": 10}, {"x": 30, "y": 0, "width": 10, "height": 10}, {"x": 30, "y": 10, "width": 10, "height": 10}]},
+    {"rects": [{"x": 0, "y": 0, "width": 10, "height": 10}, {"x": 0, "y": 10, "width": 10, "height": 10}, {"x": 30, "y": 0, "width": 10, "height": 10}, {"x": 30, "y": 10, "width": 10, "height": 10}]},
+    {"rects": [{"x": 30, "y": 15, "width": 1, "height": 5}]}
+  ]}
+}

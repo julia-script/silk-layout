@@ -1,0 +1,78 @@
+{
+  "name": "margin-break-unused-height-center-discard",
+  "kind": "spec",
+  "spec": [
+    "https://drafts.csswg.org/css-break-4/#break-margins",
+    "https://drafts.csswg.org/css-align-3/#distribution-block"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 40,
+          "lineHeight": {
+            "length": 0
+          },
+          "alignContent": "center"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10,
+          "marginTop": 12,
+          "marginBottom": 7,
+          "marginBreak": "discard"
+        }
+      }
+    ],
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 40
+        }
+      ],
+      "repeatStep": {
+        "x": 100,
+        "y": 0
+      }
+    }
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 40
+          }
+        ],
+        "firstBaseline": 34.5
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 17.5,
+            "width": 20,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,1803 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.usize
+import geometry { Measure, Layout, BaselineSet, FontRequest, Size, OptionalSize, AvailableSpace, AvailableKind, ResolvedEdges, max, min, clamp, abs }
+import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, BoxSizing, Visibility, MarginBreak, BoxDecorationBreak }
+import tree { NO_NODE }
+import box_tree { BoxTree }
+import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, scrollable, overflowForAxis, UNBOUNDED }
+import engine { layoutNode }
+import layout_pass { LayoutPass }
+import text { TextMeasure, TextError }
+import fragmentation { FlowCursor, FragmentationError, BoundaryProbe }
+import breaks { BreakBoundary, ForcedBreaks, FractionalProgress, BreakRelaxation }
+import fragment_box as FragmentBox
+
+// CSS Flexbox 1 §§4.5, 9. Coordinates remain logical until final placement.
+// Flex bases may be smaller than padding/border; only hypothetical/target sizes
+// are floored. Shrink weights use the inner base, never the outer box.
+struct Axes {
+  horizontal: bool, row: bool,
+  mainReverse: bool, crossReverse: bool,
+  mainStartReverse: bool, crossStartReverse: bool,
+}
+impl Copy for Axes {}
+fn axes(style: &Style) -> Axes {
+  let row = style.flexDirection == FlexDirection.Row || style.flexDirection == FlexDirection.RowReverse
+  let vertical = style.writingMode != WritingMode.HorizontalTb
+  let mut inlineReverse = style.usedDirection() == Direction.Rtl
+  if style.writingMode == WritingMode.SidewaysLr { inlineReverse = !inlineReverse }
+  let blockReverse = style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
+  let mut mainReverse = blockReverse
+  let mut crossReverse = inlineReverse
+  if row { mainReverse = inlineReverse
+    crossReverse = blockReverse }
+  let mainStartReverse = mainReverse
+  let crossStartReverse = crossReverse
+  if style.flexDirection == FlexDirection.RowReverse || style.flexDirection == FlexDirection.ColumnReverse { mainReverse = !mainReverse }
+  if style.flexWrap == FlexWrap.WrapReverse { crossReverse = !crossReverse }
+  return Axes { horizontal: row != vertical, row: row, mainReverse: mainReverse, crossReverse: crossReverse, mainStartReverse: mainStartReverse, crossStartReverse: crossStartReverse }
+}
+fn axisSize(size: Size, horizontal: bool) -> f64 { if horizontal { return size.width }
+  return size.height }
+fn optionalSize(size: OptionalSize, horizontal: bool) -> f64 { if horizontal { return size.width }
+  return size.height }
+fn definite(size: OptionalSize, horizontal: bool) -> bool { if horizontal { return size.widthDefinite }
+  return size.heightDefinite }
+fn axisDimension(style: &Style, horizontal: bool) -> Dimension { if horizontal { return style.width }
+  return style.height }
+fn edgeStart(edges: ResolvedEdges, horizontal: bool, reverse: bool) -> f64 {
+  if horizontal { if reverse { return edges.right }
+    return edges.left }
+  if reverse { return edges.bottom }
+  return edges.top
+}
+fn edgeEnd(edges: ResolvedEdges, horizontal: bool, reverse: bool) -> f64 { return edgeStart(edges, horizontal, !reverse) }
+fn edgeTotal(edges: ResolvedEdges, horizontal: bool) -> f64 { if horizontal { return edges.horizontal() }
+  return edges.vertical() }
+fn setEdge(edges: &mut ResolvedEdges, horizontal: bool, reverse: bool, value: f64) {
+  if horizontal {
+    if reverse { edges.right = value } else { edges.left = value }
+  } else {
+    if reverse { edges.bottom = value } else { edges.top = value }
+  }
+}
+fn autoMargin(style: &Style, horizontal: bool, reverse: bool) -> bool {
+  if horizontal { if reverse { return style.margin.right.kind == DimensionKind.Auto }
+    return style.margin.left.kind == DimensionKind.Auto }
+  if reverse { return style.margin.bottom.kind == DimensionKind.Auto }
+  return style.margin.top.kind == DimensionKind.Auto
+}
+fn setKnown(input: &mut Input, horizontal: bool, value: f64) {
+  if horizontal { input.known.width = value
+    input.known.widthDefinite = true } else { input.known.height = value
+    input.known.heightDefinite = true }
+}
+fn setAvailable(input: &mut Input, horizontal: bool, value: AvailableSpace) {
+  if horizontal { input.availableWidth = value } else { input.availableHeight = value }
+}
+fn available(input: Input, horizontal: bool) -> AvailableSpace { if horizontal { return input.availableWidth }
+  return input.availableHeight }
+fn alignment(style: &Style, parent: &Style) -> Align {
+  let mut value = style.alignSelf
+  if value == Align.Auto { value = parent.alignItems }
+  if value == Align.Normal { value = Align.Stretch }
+  return value
+}
+fn transfer(cross: f64, ratio: f64, horizontal: bool, insetMain: f64, insetCross: f64, borderBox: bool) -> f64 {
+  let mut value = cross
+  if !borderBox { value = max(0.0, value - insetCross) }
+  if horizontal { value = value * ratio } else { value = value / ratio }
+  if !borderBox { value = value + insetMain }
+  return value
+}
+fn indefinite(input: Input, horizontal: bool) -> bool {
+  if horizontal { return input.indefiniteWidth }
+  return input.indefiniteHeight
+}
+fn setIndefinite(input: &mut Input, horizontal: bool, value: bool) {
+  if horizontal { input.indefiniteWidth = value } else { input.indefiniteHeight = value }
+}
+fn blockReverse(style: &Style) -> bool {
+  return style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
+}
+struct Item {
+  id: usize, base: f64, hypothetical: f64, target: f64, minimum: f64, maximum: f64, inset: f64,
+  grow: f64, shrink: f64, marginStart: f64, marginEnd: f64, crossStart: f64, crossEnd: f64,
+  autoStart: bool, autoEnd: bool, autoCrossStart: bool, autoCrossEnd: bool,
+  cross: f64, crossMin: f64, crossMax: f64, crossAuto: bool, align: Align,
+  baseline: f64, lastBaseline: f64, baselineEligible: bool, baselineSizesLine: bool, baselineEnd: bool,
+  frozen: bool, violation: f64, collapsed: bool, strut: f64,
+  minContribution: f64, maxContribution: f64, mainDefinite: bool,
+}
+impl Copy for Item {}
+impl Item {
+  fn make(id: usize) -> Item {
+    return Item { id: id, base: 0.0, hypothetical: 0.0, target: 0.0, minimum: 0.0, maximum: UNBOUNDED, inset: 0.0,
+      grow: 0.0, shrink: 0.0, marginStart: 0.0, marginEnd: 0.0, crossStart: 0.0, crossEnd: 0.0,
+      autoStart: false, autoEnd: false, autoCrossStart: false, autoCrossEnd: false,
+      cross: 0.0, crossMin: 0.0, crossMax: UNBOUNDED, crossAuto: true, align: Align.Stretch,
+      baseline: 0.0, lastBaseline: 0.0, baselineEligible: false, baselineSizesLine: false, baselineEnd: false,
+      frozen: false, violation: 0.0, collapsed: false, strut: 0.0, minContribution: 0.0, maxContribution: 0.0, mainDefinite: false }
+  }
+}
+struct Line { start: usize, end: usize, count: usize, cross: f64, baseline: f64, lastBaseline: f64, baselineCross: f64, lastBaselineCross: f64 }
+impl Copy for Line {}
+effect fn collect(nodes: &BoxTree, id: usize, items: &mut List<Item>) ! OutOfMemoryError ? &mut Allocator {
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    if !outOfFlow(nodes.style(child)) { run items.append(Item.make(child)) }
+    child = nodes.node(child).nextSibling
+  }
+}
+fn sort(items: &mut [Item], nodes: &BoxTree, count: usize) {
+  let mut index: usize = 1
+  while index < count {
+    let item = items[index]
+    let mut at = index
+    while at > 0 && nodes.style(items[at - 1].id).order > nodes.style(item.id).order {
+      items[at] = items[at - 1]
+      at = at - 1
+    }
+    items[at] = item
+    index = index + 1
+  }
+}
+fn contribution(value: f64, preferred: f64, item: Item) -> f64 {
+  let mut result = max(value, preferred)
+  if item.grow == 0.0 { result = min(result, item.base) }
+  if item.shrink == 0.0 { result = max(result, item.base) }
+  return clamp(result, item.minimum, item.maximum) + item.marginStart + item.marginEnd
+}
+effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: Input, horizontal: bool, constraint: AvailableSpace) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut input = childInput
+  input.performLayout = false
+  if horizontal { input.intrinsicWidth = true
+    input.known.widthDefinite = false } else { input.intrinsicHeight = true
+    input.known.heightDefinite = false }
+  setAvailable(&mut input, horizontal, constraint)
+  return run layoutNode(nodes, &mut output, &mut measurer, id, input)
+}
+effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: Input, axis: Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) -> Item ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let box = resolveBox(style, childInput)
+  let mut item = Item.make(id)
+  // Flex weights use allotted inner bases; used content layout deducts gutters.
+  item.inset = edgeTotal(box.inset, axis.horizontal)
+  let crossInset = edgeTotal(box.inset, !axis.horizontal)
+  item.minimum = axisSize(box.min, axis.horizontal)
+  item.maximum = axisSize(box.max, axis.horizontal)
+  item.crossMin = axisSize(box.min, !axis.horizontal)
+  item.crossMax = axisSize(box.max, !axis.horizontal)
+  item.grow = max(0.0, style.flexGrow)
+  item.shrink = max(0.0, style.flexShrink)
+  item.marginStart = edgeStart(box.margin, axis.horizontal, axis.mainReverse)
+  item.marginEnd = edgeEnd(box.margin, axis.horizontal, axis.mainReverse)
+  item.crossStart = edgeStart(box.margin, !axis.horizontal, axis.crossReverse)
+  item.crossEnd = edgeEnd(box.margin, !axis.horizontal, axis.crossReverse)
+  item.autoStart = autoMargin(style, axis.horizontal, axis.mainReverse)
+  item.autoEnd = autoMargin(style, axis.horizontal, !axis.mainReverse)
+  item.autoCrossStart = autoMargin(style, !axis.horizontal, axis.crossReverse)
+  item.autoCrossEnd = autoMargin(style, !axis.horizontal, !axis.crossReverse)
+  item.align = alignment(style, parentStyle)
+  item.crossAuto = axisDimension(style, !axis.horizontal).kind == DimensionKind.Auto
+  item.collapsed = style.visibility == Visibility.Collapse
+  item.baselineEligible = !item.autoCrossStart && !item.autoCrossEnd
+  item.baselineSizesLine = (style.writingMode == WritingMode.HorizontalTb) == axis.horizontal
+  // Grouping uses the axis-compatible mode used to synthesize baselines.
+  // Cross-size collection (§9.4) has a narrower eligibility rule than
+  // participation in baseline alignment (§8.3).
+  let baselineWritingMode = baselineMode(style, childInput.parentWritingMode, !axis.horizontal)
+  let baselineReverse = baselineWritingMode == WritingMode.VerticalRl || baselineWritingMode == WritingMode.SidewaysRl
+  item.baselineEnd = (baselineReverse != axis.crossReverse) != (item.align == Align.LastBaseline)
+  let parentMain = optionalSize(childInput.parent, axis.horizontal)
+  let parentDefinite = definite(childInput.parent, axis.horizontal)
+  let preferred = axisDimension(style, axis.horizontal)
+  let preferredDefinite = resolves(preferred, parentDefinite)
+  let mut add = item.inset
+  if style.boxSizing == BoxSizing.BorderBox { add = 0.0 }
+  let preferredSize = resolve(preferred, parentMain, parentDefinite, 0.0) + add
+  let mut basis = style.flexBasis
+  if basis.kind == DimensionKind.Auto { basis = preferred }
+  let basisDefinite = resolves(basis, parentDefinite)
+  // A resolved cyclic percentage is usable without making its flex base
+  // definite under §9.8. Keep that distinction for descendant percentages.
+  item.mainDefinite = containerMainDefinite || resolves(basis, containerMainDefinite)
+  let mut crossDefinite = definite(box.size, !axis.horizontal)
+  let mut crossSize = optionalSize(box.size, !axis.horizontal)
+  // §9.2 step 3B transfers the used cross size. Only main-axis constraints
+  // are ignored for the flex base; cross-axis min/max still apply.
+  if crossDefinite { crossSize = clamp(crossSize, item.crossMin, item.crossMax) }
+  if !crossDefinite && item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd && parentStyle.flexWrap == FlexWrap.NoWrap && definite(childInput.parent, !axis.horizontal) {
+    crossSize = clamp(optionalSize(childInput.parent, !axis.horizontal) - item.crossStart - item.crossEnd, item.crossMin, item.crossMax)
+    crossDefinite = true
+  }
+  let mut measureInput = childInput
+  if crossDefinite { setKnown(&mut measureInput, !axis.horizontal, crossSize) }
+  let mut minimumDimension = style.minHeight
+  let mut maximumDimension = style.maxHeight
+  let overflow = overflowForAxis(style, axis.horizontal)
+  if axis.horizontal { minimumDimension = style.minWidth
+    maximumDimension = style.maxWidth }
+  let autoMinimum = minimumDimension.kind == DimensionKind.Auto && !scrollable(overflow)
+  let mut ratio = style.aspectRatio
+  let mut borderRatio = style.boxSizing == BoxSizing.BorderBox && style.aspectRatio > 0.0 && !style.aspectRatioAuto
+  let mut minContent = item.inset
+  let mut minimumCross = crossSize
+  if autoMinimum || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
+    let measured = run probe(nodes, &mut output, &mut measurer, id, measureInput, axis.horizontal, AvailableSpace.minContent())
+    minContent = axisSize(measured.size, axis.horizontal)
+    minimumCross = axisSize(measured.size, !axis.horizontal)
+    ratio = measured.preferredRatio
+    borderRatio = measured.ratioBorderBox
+  }
+  let mut maxContent = minContent
+  let mut contentCross = crossSize
+  if !basisDefinite || intrinsic || minimumDimension.kind == DimensionKind.MaxContent || maximumDimension.kind == DimensionKind.MaxContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
+    let measured = run probe(nodes, &mut output, &mut measurer, id, measureInput, axis.horizontal, AvailableSpace.maxContent())
+    maxContent = axisSize(measured.size, axis.horizontal)
+    contentCross = axisSize(measured.size, !axis.horizontal)
+    ratio = measured.preferredRatio
+    borderRatio = measured.ratioBorderBox
+  }
+  if minimumDimension.kind == DimensionKind.MinContent { item.minimum = minContent }
+  if minimumDimension.kind == DimensionKind.MaxContent { item.minimum = maxContent }
+  if maximumDimension.kind == DimensionKind.MinContent { item.maximum = minContent }
+  if maximumDimension.kind == DimensionKind.MaxContent { item.maximum = maxContent }
+  let mut fitContent = maxContent
+  if mainConstraint.kind == AvailableKind.Definite { fitContent = clamp(mainConstraint.value - item.marginStart - item.marginEnd, minContent, maxContent) }
+  if minimumDimension.kind == DimensionKind.FitContent { item.minimum = fitContent }
+  if maximumDimension.kind == DimensionKind.FitContent { item.maximum = fitContent }
+  if autoMinimum {
+    let mut contentSuggestion = minContent
+    if ratio > 0.0 {
+      contentSuggestion = clamp(contentSuggestion,
+        transfer(item.crossMin, ratio, axis.horizontal, item.inset, crossInset, borderRatio),
+        transfer(item.crossMax, ratio, axis.horizontal, item.inset, crossInset, borderRatio))
+    }
+    let mut minimum = contentSuggestion
+    // The transferred suggestion uses the preferred cross size, not stretching.
+    if ratio > 0.0 && definite(box.size, !axis.horizontal) {
+      let transferred = transfer(clamp(optionalSize(box.size, !axis.horizontal), item.crossMin, item.crossMax), ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+      if style.replaced { minimum = min(minimum, transferred) } else { minimum = max(minimum, transferred) }
+    }
+    if preferredDefinite { minimum = min(minimum, preferredSize) }
+    item.minimum = max(item.inset, min(minimum, item.maximum))
+  }
+  item.base = maxContent
+  if basisDefinite { item.base = resolve(basis, parentMain, parentDefinite, 0.0) + add }
+  else if basis.kind == DimensionKind.MinContent { item.base = minContent }
+  else if basis.kind == DimensionKind.FitContent && mainConstraint.kind == AvailableKind.Definite { item.base = clamp(mainConstraint.value - item.marginStart - item.marginEnd, minContent, maxContent) }
+  else if ratio > 0.0 && crossDefinite && basis.kind != DimensionKind.MaxContent {
+    item.base = transfer(crossSize, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+  } else if mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent { item.base = minContent }
+  if !basisDefinite && basis.kind != DimensionKind.MinContent && basis.kind != DimensionKind.MaxContent && !crossDefinite && item.crossAuto && ratio > 0.0 && (style.writingMode == WritingMode.HorizontalTb) != axis.horizontal && mainConstraint.kind != AvailableKind.MinContent {
+    // An auto inline cross size is fit-content when needed to obtain the
+    // block-axis flex base through the preferred ratio (§9.2, step 3E).
+    item.base = transfer(contentCross, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+  }
+  item.hypothetical = clamp(item.base, item.minimum, item.maximum)
+  item.target = item.hypothetical
+  let mut preferredContribution = 0.0
+  if preferredDefinite { preferredContribution = preferredSize }
+  if preferred.kind == DimensionKind.MinContent { preferredContribution = minContent }
+  if preferred.kind == DimensionKind.MaxContent { preferredContribution = maxContent }
+  if preferred.kind == DimensionKind.FitContent { preferredContribution = fitContent }
+  let mut minimumContributionSize = minContent
+  let mut maximumContributionSize = maxContent
+  let automaticPreferred = preferred.kind == DimensionKind.Auto || (!preferredDefinite && (preferred.kind == DimensionKind.Percent || preferred.kind == DimensionKind.Calc))
+  if ratio > 0.0 && automaticPreferred {
+    if crossDefinite {
+      minimumContributionSize = transfer(crossSize, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+      maximumContributionSize = minimumContributionSize
+    } else if item.crossAuto && (style.writingMode == WritingMode.HorizontalTb) != axis.horizontal {
+      minimumContributionSize = transfer(minimumCross, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+      maximumContributionSize = transfer(contentCross, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+    }
+  }
+  item.minContribution = contribution(minimumContributionSize, preferredContribution, item)
+  item.maxContribution = contribution(maximumContributionSize, preferredContribution, item)
+  return item
+}
+fn active(item: Item, collapsed: bool) -> bool { return !collapsed || !item.collapsed }
+fn gaps(count: usize, gap: f64) -> f64 { if count == 0 { return 0.0 }
+  return usize.toF64(count - 1) * gap }
+effect fn collectLines(items: &[Item], count: usize, lines: &mut List<Line>, main: f64, gap: f64, wrap: bool, collapsed: bool) ! OutOfMemoryError ? &mut Allocator {
+  lines.clear()
+  let mut start: usize = 0
+  let mut index: usize = 0
+  let mut used = 0.0
+  let mut activeCount: usize = 0
+  while index < count {
+    let item = items[index]
+    let present = active(item, collapsed)
+    let mut outer = 0.0
+    let mut before = 0.0
+    if present { outer = item.hypothetical + item.marginStart + item.marginEnd
+      if activeCount > 0 { before = gap } }
+    // Collapsed items still collect as zero-sized items. Even zero does not
+    // fit after an oversized first item; its strut belongs to the next line.
+    if wrap && index > start && used + before + outer > main {
+      run lines.append(Line { start: start, end: index, count: activeCount, cross: 0.0, baseline: 0.0, lastBaseline: 0.0, baselineCross: 0.0, lastBaselineCross: 0.0 })
+      start = index
+      activeCount = 0
+      used = 0.0
+      before = 0.0
+    }
+    used = used + before + outer
+    if present { activeCount = activeCount + 1 }
+    index = index + 1
+  }
+  if start < count { run lines.append(Line { start: start, end: count, count: activeCount, cross: 0.0, baseline: 0.0, lastBaseline: 0.0, baselineCross: 0.0, lastBaselineCross: 0.0 }) }
+}
+fn resolveFlexible(items: &mut [Item], line: Line, main: f64, gap: f64, collapsed: bool) {
+  let space = main - gaps(line.count, gap)
+  let mut hypothetical = 0.0
+  let mut index = line.start
+  while index < line.end { let item = items[index]
+    if active(item, collapsed) { hypothetical = hypothetical + item.hypothetical + item.marginStart + item.marginEnd }
+    index = index + 1 }
+  let grow = hypothetical < space
+  let mut initial = space
+  index = line.start
+  while index < line.end {
+    let mut item = items[index]
+    item.frozen = !active(item, collapsed)
+    item.target = item.base
+    let mut factor = item.shrink
+    if grow { factor = item.grow }
+    if factor == 0.0 || (grow && item.base > item.hypothetical) || (!grow && item.base < item.hypothetical) {
+      item.frozen = true
+      item.target = item.hypothetical
+    }
+    if active(item, collapsed) { initial = initial - item.target - item.marginStart - item.marginEnd }
+    items[index] = item
+    index = index + 1
+  }
+  while true {
+    let mut remaining = space
+    let mut factors = 0.0
+    let mut weights = 0.0
+    let mut unfrozen: usize = 0
+    index = line.start
+    while index < line.end {
+      let item = items[index]
+      if active(item, collapsed) {
+        remaining = remaining - item.marginStart - item.marginEnd
+        if item.frozen { remaining = remaining - item.target }
+        else {
+          remaining = remaining - item.base
+          unfrozen = unfrozen + 1
+          if grow { factors = factors + item.grow
+            weights = weights + item.grow }
+          else { factors = factors + item.shrink
+            weights = weights + item.shrink * max(0.0, item.base - item.inset) }
+        }
+      }
+      index = index + 1
+    }
+    if unfrozen == 0 { break }
+    if factors < 1.0 && abs(initial * factors) < abs(remaining) { remaining = initial * factors }
+    let mut violation = 0.0
+    index = line.start
+    while index < line.end {
+      let mut item = items[index]
+      if !item.frozen {
+        let mut target = item.base
+        if weights > 0.0 {
+          if grow { target = target + remaining * item.grow / weights }
+          else { target = target - abs(remaining) * item.shrink * max(0.0, item.base - item.inset) / weights }
+        }
+        item.target = clamp(target, item.minimum, item.maximum)
+        item.violation = item.target - target
+        violation = violation + item.violation
+      }
+      items[index] = item
+      index = index + 1
+    }
+    index = line.start
+    while index < line.end {
+      let mut item = items[index]
+      if !item.frozen && (violation == 0.0 || (violation > 0.0 && item.violation > 0.0) || (violation < 0.0 && item.violation < 0.0)) { item.frozen = true }
+      items[index] = item
+      index = index + 1
+    }
+  }
+}
+fn baselineMode(style: &Style, containerMode: WritingMode, blockHorizontal: bool) -> WritingMode {
+  let mut mode = style.writingMode
+  if (mode != WritingMode.HorizontalTb) != blockHorizontal {
+    mode = containerMode
+    if (mode != WritingMode.HorizontalTb) != blockHorizontal {
+      mode = WritingMode.HorizontalTb
+      if blockHorizontal {
+        mode = WritingMode.VerticalLr
+        if style.usedDirection() == Direction.Rtl { mode = WritingMode.VerticalRl }
+      }
+    }
+  }
+  return mode
+}
+// Return every baseline in physical coordinates along the requested block axis.
+// CSS Align §9.1 uses the item's line-over/under border edges for synthesis,
+// assuming an axis-compatible writing mode when its own baseline axis differs.
+fn physicalBaselines(layout: Layout, style: &Style, containerMode: WritingMode, blockHorizontal: bool, last: bool) -> BaselineSet {
+  let extent = axisSize(layout.size, blockHorizontal)
+  let compatible = (style.writingMode != WritingMode.HorizontalTb) == blockHorizontal
+  let hasBaseline = (!last && layout.hasFirstBaseline) || (last && layout.hasLastBaseline)
+  if compatible && hasBaseline {
+    let mut baselines = layout.firstBaselines
+    if last { baselines = layout.lastBaselines }
+    if blockReverse(style) { baselines = baselines.reversed(extent) }
+    return baselines
+  }
+  let mode = baselineMode(style, containerMode, blockHorizontal)
+  // Vertical-lr's line-under is physical left, not its logical block-end.
+  if mode == WritingMode.VerticalRl || mode == WritingMode.VerticalLr || mode == WritingMode.SidewaysRl {
+    return BaselineSet.synthesized(extent, 0.0)
+  }
+  return BaselineSet.synthesized(0.0, extent)
+}
+fn baselineDistance(layout: Layout, style: &Style, containerMode: WritingMode, containerOrientation: TextOrientation, axis: Axes, last: bool) -> f64 {
+  let baselines = physicalBaselines(layout, style, containerMode, !axis.horizontal, last)
+  let value = baselines.forContext(containerMode, containerOrientation)
+  if axis.crossReverse { return axisSize(layout.size, !axis.horizontal) - value }
+  return value
+}
+fn lineOverReverse(mode: WritingMode) -> bool {
+  return mode == WritingMode.VerticalRl || mode == WritingMode.VerticalLr || mode == WritingMode.SidewaysRl
+}
+effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: Line, input: Input, axis: Axes, parentStyle: &Style, collapsed: bool) -> Line ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut result = line
+  // §9.4 floors the line size at zero, not the signed distances of its items.
+  let mut before = -UNBOUNDED
+  let mut after = -UNBOUNDED
+  let mut lastBefore = -UNBOUNDED
+  let mut lastAfter = -UNBOUNDED
+  let mut sizingBefore = -UNBOUNDED
+  let mut sizingAfter = -UNBOUNDED
+  let mut lastSizingBefore = -UNBOUNDED
+  let mut lastSizingAfter = -UNBOUNDED
+  let contextMode = baselineMode(parentStyle, parentStyle.writingMode, !axis.horizontal)
+  let mut strut = 0.0
+  let mut mirrorOffset = 0.0
+  let mut hasMirrorOffset = false
+  let mut index = line.start
+  while index < line.end {
+    let mut item = items[index]
+    if active(item, collapsed) {
+      let mut childInput = input
+      childInput.performLayout = false
+      setKnown(&mut childInput, axis.horizontal, item.target)
+      setIndefinite(&mut childInput, axis.horizontal, !item.mainDefinite)
+      let layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, childInput)
+      item.cross = axisSize(layout.size, !axis.horizontal)
+      item.baseline = baselineDistance(layout, nodes.style(item.id), input.parentWritingMode, input.parentTextOrientation, axis, false)
+      item.lastBaseline = baselineDistance(layout, nodes.style(item.id), input.parentWritingMode, input.parentTextOrientation, axis, true)
+      if item.baselineEligible && (item.align == Align.Baseline || item.align == Align.LastBaseline) {
+        // Align §9.3 overlays the font table and its central-baseline mirror.
+        // Normalize opposite line orientations to the unmirrored group origin.
+        if lineOverReverse(baselineMode(nodes.style(item.id), parentStyle.writingMode, !axis.horizontal)) != lineOverReverse(contextMode) {
+          if !hasMirrorOffset {
+            let font = Measure.font(&mut measurer, FontRequest { key: parentStyle.fontKey, writingMode: parentStyle.writingMode, textOrientation: parentStyle.textOrientation, direction: parentStyle.usedDirection() })
+            mirrorOffset = 2.0 * (font.baselines.central - font.baselines.forContext(parentStyle.writingMode, parentStyle.textOrientation))
+            if axis.crossReverse != lineOverReverse(contextMode) { mirrorOffset = -mirrorOffset }
+            hasMirrorOffset = true
+          }
+          item.baseline = item.baseline - mirrorOffset
+          item.lastBaseline = item.lastBaseline - mirrorOffset
+        }
+        let mut distance = item.baseline
+        if item.align == Align.LastBaseline { distance = item.lastBaseline }
+        if item.baselineEnd {
+          lastBefore = max(lastBefore, distance + item.crossStart)
+          lastAfter = max(lastAfter, item.cross - distance + item.crossEnd)
+        } else {
+          before = max(before, distance + item.crossStart)
+          after = max(after, item.cross - distance + item.crossEnd)
+        }
+        if item.baselineSizesLine {
+          if item.baselineEnd {
+            lastSizingBefore = max(lastSizingBefore, distance + item.crossStart)
+            lastSizingAfter = max(lastSizingAfter, item.cross - distance + item.crossEnd)
+          } else {
+            sizingBefore = max(sizingBefore, distance + item.crossStart)
+            sizingAfter = max(sizingAfter, item.cross - distance + item.crossEnd)
+          }
+        } else { result.cross = max(result.cross, item.cross + item.crossStart + item.crossEnd) }
+      } else { result.cross = max(result.cross, item.cross + item.crossStart + item.crossEnd) }
+    } else { strut = max(strut, item.strut) }
+    items[index] = item
+    index = index + 1
+  }
+  result.cross = max(strut, max(result.cross, max(sizingBefore + sizingAfter, lastSizingBefore + lastSizingAfter)))
+  result.baseline = before
+  result.lastBaseline = lastAfter
+  result.baselineCross = max(0.0, before + after)
+  result.lastBaselineCross = max(0.0, lastBefore + lastAfter)
+  return result
+}
+struct Distribution { offset: f64, between: f64 }
+impl Copy for Distribution {}
+fn distribute(value: Align, free: f64, count: usize, safe: bool, reverse: bool, startReverse: bool, horizontal: bool) -> Distribution {
+  let mut align = value
+  // Baseline content alignment outside a shared context falls back to safe
+  // start/end (Align §4.2), including when wrap-reverse flips cross-start.
+  if align == Align.Baseline { align = Align.Start }
+  if align == Align.LastBaseline { align = Align.End }
+  if free < 0.0 && (safe || value == Align.Baseline || value == Align.LastBaseline) { align = Align.Start }
+  if align == Align.SpaceBetween && (free < 0.0 || count <= 1) { align = Align.FlexStart }
+  if (align == Align.SpaceAround || align == Align.SpaceEvenly) && (free < 0.0 || count == 0) { align = Align.Center
+    if free < 0.0 { align = Align.Start } }
+  let mut offset = 0.0
+  let mut between = 0.0
+  if align == Align.Center { offset = free / 2.0 }
+  else if align == Align.FlexEnd { offset = free }
+  else if (align == Align.Start || align == Align.SelfStart) && reverse != startReverse { offset = free }
+  else if (align == Align.End || align == Align.SelfEnd) && reverse == startReverse { offset = free }
+  else if align == Align.Left && horizontal && reverse { offset = free }
+  else if align == Align.Right && horizontal && !reverse { offset = free }
+  else if align == Align.SpaceBetween && count > 1 { between = free / usize.toF64(count - 1) }
+  else if align == Align.SpaceAround && count > 0 { between = free / usize.toF64(count)
+    offset = between / 2.0 }
+  else if align == Align.SpaceEvenly { between = free / usize.toF64(count + 1)
+    offset = between }
+  return Distribution { offset: offset, between: between }
+}
+fn selfStartReverse(style: &Style, horizontal: bool) -> bool {
+  let vertical = style.writingMode != WritingMode.HorizontalTb
+  if horizontal == !vertical {
+    let mut reverse = style.usedDirection() == Direction.Rtl
+    if style.writingMode == WritingMode.SidewaysLr { reverse = !reverse }
+    return reverse
+  }
+  return style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
+}
+effect fn zeroSubtree(nodes: &BoxTree, output: &mut LayoutPass, id: usize) ! OutOfMemoryError ? &mut Allocator {
+  run output.store(id, Layout.zero(), false)
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE { run zeroSubtree(nodes, &mut output, child)
+    child = nodes.node(child).nextSibling }
+}
+// Layout baselines use each node's logical block axis, not physical y.
+fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer: &mut M, items: &[Item], lines: &[Line], lineCount: usize, style: &Style, axis: Axes, fragmented: bool, result: &mut Layout) {
+  if lineCount == 0 { return }
+  let mut firstLine: usize = 0
+  let mut lastLine = lineCount - 1
+  if fragmented && axis.row {
+    firstLine = NO_NODE
+    lastLine = 0
+    let fragments = output.fragments.values.asSlice()
+    let mut fragment = fragments[output.fragmentParent].firstChild
+    while fragment != NO_NODE {
+      let box = fragments[fragment].box
+      if box != NO_NODE && nodes.style(box).visibility != Visibility.Collapse {
+        let line = output.resumes.get(box).flexLine
+        if line < lineCount {
+          if line < firstLine { firstLine = line }
+          if line > lastLine { lastLine = line }
+        }
+      }
+      fragment = fragments[fragment].nextSibling
+    }
+    if firstLine == NO_NODE { return }
+  }
+  let blockHorizontal = style.writingMode != WritingMode.HorizontalTb
+  let reverseBlock = blockReverse(style)
+  let mut fontBaselines = BaselineSet.zero()
+  let mut hasFontBaselines = false
+  let mut pass: usize = 0
+  while pass < 2 {
+    let last = pass == 1
+    let mut lineIndex = firstLine
+    if last != (axis.crossReverse != axis.crossStartReverse) { lineIndex = lastLine }
+    let line = lines[lineIndex]
+    let mut start = line.start
+    let mut end = line.end
+    if !axis.row { start = lines[0].start
+      end = lines[lineCount - 1].end }
+    let mut chosen = NO_NODE
+    let mut chosenRank: usize = 0
+    let mut chosenLast = last
+    let mut chosenPosition = 0.0
+    let mut index = start
+    while index < end {
+      let item = items[index]
+      if !item.collapsed && (!fragmented || output.publication(item.id) != NO_NODE) {
+        let child = output.boxes[item.id]
+        let childStyle = nodes.style(item.id)
+        let compatible = (childStyle.writingMode != WritingMode.HorizontalTb) == blockHorizontal
+        let mut rank: usize = 1
+        let mut useLast = last
+        if axis.row {
+          if compatible && ((!last && child.hasFirstBaseline) || (last && child.hasLastBaseline)) { rank = 2 }
+          if item.baselineEligible && (item.align == Align.Baseline || item.align == Align.LastBaseline) {
+            rank = 3
+            useLast = item.align == Align.LastBaseline
+            let groupLast = item.baselineEnd != (axis.crossReverse != axis.crossStartReverse)
+            if groupLast == last { rank = 4 }
+          }
+        }
+        let mut position = child.location.y
+        if axis.horizontal { position = child.location.x }
+        if axis.mainStartReverse { position = -position - axisSize(child.size, axis.horizontal) }
+        let mut replace = chosen == NO_NODE || rank > chosenRank
+        if rank == chosenRank {
+          if rank == 1 { replace = (!last && position < chosenPosition) || (last && position > chosenPosition) }
+          else if last { replace = true }
+        }
+        if replace { chosen = item.id
+          chosenRank = rank
+          chosenPosition = position
+          chosenLast = useLast }
+      }
+      index = index + 1
+    }
+    if chosen != NO_NODE {
+      let child = output.boxes[chosen]
+      let childStyle = nodes.style(chosen)
+      let mut baselines = physicalBaselines(child, childStyle, style.writingMode, blockHorizontal, chosenLast)
+      if blockHorizontal { baselines = baselines.translated(child.location.x) }
+      else { baselines = baselines.translated(child.location.y) }
+      if reverseBlock { baselines = baselines.reversed(axisSize(result.size, blockHorizontal)) }
+      // §8.5 generates tables from the container's first available font for
+      // sharing groups and column exports. Only the non-sharing row fallback
+      // copies an item's complete table.
+      if !axis.row || chosenRank >= 3 {
+        if !hasFontBaselines {
+          let font = Measure.font(&mut measurer, FontRequest { key: style.fontKey, writingMode: style.writingMode, textOrientation: style.textOrientation, direction: style.usedDirection() })
+          fontBaselines = font.baselines
+          if style.writingMode == WritingMode.VerticalLr { fontBaselines = fontBaselines.reversed(font.ascent + font.descent) }
+          hasFontBaselines = true
+        }
+        let mut alignmentBaseline = baselines.forContext(style.writingMode, style.textOrientation)
+        let fontBaseline = fontBaselines.forContext(style.writingMode, style.textOrientation)
+        if axis.row && lineOverReverse(baselineMode(childStyle, style.writingMode, blockHorizontal)) != lineOverReverse(style.writingMode) {
+          alignmentBaseline = alignmentBaseline - 2.0 * (fontBaselines.central - fontBaseline)
+        }
+        baselines = fontBaselines.translated(alignmentBaseline - fontBaseline)
+      }
+      if last {
+        result.lastBaselines = baselines
+        result.hasLastBaseline = true
+      } else {
+        result.firstBaselines = baselines
+        result.hasFirstBaseline = true
+      }
+    }
+    pass = pass + 1
+  }
+}
+
+pub effect fn layoutFlex<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut items = List<Item>.make()
+  let mut lines = List<Line>.make()
+  return run layoutFlexPass(nodes, &mut output, &mut measurer, id, input, box, false, &mut items, &mut lines)
+}
+effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, resolvedIntrinsicInline: bool, items: &mut List<Item>, lines: &mut List<Line>) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let axis = axes(style)
+  let inlineHorizontal = style.writingMode == WritingMode.HorizontalTb
+  let mut intrinsicInline = input.intrinsicHeight
+  if inlineHorizontal { intrinsicInline = input.intrinsicWidth }
+  let mainInset = edgeTotal(box.inset, axis.horizontal)
+  let crossInset = edgeTotal(box.inset, !axis.horizontal)
+  let mainKnown = definite(box.size, axis.horizontal)
+  let crossKnown = definite(box.size, !axis.horizontal)
+  let mainDefinite = mainKnown && !indefinite(input, axis.horizontal) && !(resolvedIntrinsicInline && axis.row)
+  let crossDefinite = crossKnown && !indefinite(input, !axis.horizontal)
+  let mut mainConstraint = available(input, axis.horizontal)
+  let crossConstraint = available(input, !axis.horizontal)
+  let mut main = max(0.0, optionalSize(box.size, axis.horizontal) - mainInset)
+  let mut cross = max(0.0, optionalSize(box.size, !axis.horizontal) - crossInset)
+  // §9.2 step 3C still uses an intrinsic main-axis constraint for content
+  // bases; establishing the used inline extent must not erase that input.
+  if mainKnown && !(resolvedIntrinsicInline && axis.row && mainConstraint.kind != AvailableKind.Definite) { mainConstraint = AvailableSpace.definite(main) }
+  let mut parent = OptionalSize.none()
+  if box.size.widthDefinite { parent.width = max(0.0, box.size.width - box.inset.horizontal())
+    parent.widthDefinite = inlineHorizontal || !input.indefiniteWidth }
+  if box.size.heightDefinite { parent.height = max(0.0, box.size.height - box.inset.vertical())
+    parent.heightDefinite = !inlineHorizontal || !input.indefiniteHeight }
+  let mut childInput = childrenInput(input, style, box, parent)
+  childInput.blockRoot = true
+  childInput.blockify = true
+  childInput.shrinkToFit = true
+  if crossKnown { setAvailable(&mut childInput, !axis.horizontal, AvailableSpace.definite(cross)) }
+  else { setAvailable(&mut childInput, !axis.horizontal, crossConstraint) }
+  let mut mainGapDimension = style.rowGap
+  let mut crossGapDimension = style.columnGap
+  if axis.row { mainGapDimension = style.columnGap
+    crossGapDimension = style.rowGap }
+  // Gaps §2.3 resolves cyclic percentages against zero, not the entire
+  // length-percentage expression: a calc() gap retains its length term.
+  let mainGap = max(0.0, resolve(mainGapDimension, main, mainDefinite, mainGapDimension.value))
+  let crossGap = max(0.0, resolve(crossGapDimension, cross, crossDefinite && !(resolvedIntrinsicInline && !axis.row), crossGapDimension.value))
+  items.clear()
+  run collect(nodes, id, &mut items)
+  let count = items.length()
+  sort(items.asMutSlice(), nodes, count)
+  // §9.9.2: wrapped columns use the largest item contribution as their
+  // intrinsic cross constraint, rather than an unconstrained width per line.
+  let columnIntrinsic = !axis.row && style.flexWrap != FlexWrap.NoWrap && !crossKnown && crossConstraint.kind != AvailableKind.Definite
+  let mut intrinsicCross = 0.0
+  if columnIntrinsic {
+    let mut crossIndex: usize = 0
+    while crossIndex < count {
+      let child = items.get(crossIndex).id
+      let childBox = resolveBox(nodes.style(child), childInput)
+      // §9.9.2 uses ordinary cross-size contributions (Sizing §5.2),
+      // not §9.9.3's main-axis maximum of content and preferred sizes.
+      let mut contributionSize = optionalSize(childBox.size, !axis.horizontal)
+      if !definite(childBox.size, !axis.horizontal) {
+        let measured = run probe(nodes, &mut output, &mut measurer, child, childInput, !axis.horizontal, crossConstraint)
+        contributionSize = axisSize(measured.size, !axis.horizontal)
+      }
+      contributionSize = clamp(contributionSize, axisSize(childBox.min, !axis.horizontal), axisSize(childBox.max, !axis.horizontal))
+      intrinsicCross = max(intrinsicCross, contributionSize + edgeTotal(childBox.margin, !axis.horizontal))
+      crossIndex = crossIndex + 1
+    }
+    if crossConstraint.kind == AvailableKind.MaxContent { setAvailable(&mut childInput, !axis.horizontal, AvailableSpace.definite(intrinsicCross)) }
+  }
+  let mut index: usize = 0
+  let mut hasCollapsed = false
+  while index < count {
+    let item = run prepare(nodes, &mut output, &mut measurer, items.get(index).id, childInput, axis, style, mainConstraint, !mainKnown, mainDefinite)
+    hasCollapsed = hasCollapsed || item.collapsed
+    items.set(index, item)
+    index = index + 1
+  }
+  if !mainKnown {
+    let mut contributionSum = 0.0
+    let mut largest = 0.0
+    let mut minimumSum = 0.0
+    let mut minimumLargest = 0.0
+    let mut activeCount: usize = 0
+    index = 0
+    while index < count {
+      let item = items.get(index)
+      if !item.collapsed {
+        let mut contributionSize = item.maxContribution
+        if mainConstraint.kind == AvailableKind.MinContent { contributionSize = item.minContribution }
+        contributionSum = contributionSum + contributionSize
+        largest = max(largest, contributionSize)
+        minimumSum = minimumSum + item.minContribution
+        minimumLargest = max(minimumLargest, item.minContribution)
+        activeCount = activeCount + 1
+      }
+      index = index + 1
+    }
+    main = contributionSum + gaps(activeCount, mainGap)
+    if mainConstraint.kind == AvailableKind.MinContent && style.flexWrap != FlexWrap.NoWrap { main = largest }
+    if mainConstraint.kind == AvailableKind.Definite && axis.row {
+      let mut minimum = minimumSum + gaps(activeCount, mainGap)
+      if style.flexWrap != FlexWrap.NoWrap { minimum = minimumLargest }
+      main = max(minimum, min(main, max(0.0, mainConstraint.value - mainInset)))
+    }
+    main = max(0.0, clamp(main + mainInset, axisSize(box.min, axis.horizontal), axisSize(box.max, axis.horizontal)) - mainInset)
+  }
+  // A row's inline extent is already known; avoid measuring cross sizes
+  // that the percentage-resolution pass would immediately discard.
+  let resolveInlineBeforeCross = axis.row && !mainKnown && !intrinsicInline
+  lines.clear()
+  let mut collapsed = false
+  while !resolveInlineBeforeCross {
+    if input.fragmentation.active && input.performLayout && count > 0 && output.resumes.get(items.get(0).id).flexLine != NO_NODE {
+      run collectOwnedLines(items.asSlice(), &output, &mut lines, collapsed)
+    } else {
+      run collectLines(items.asSlice(), count, &mut lines, main, mainGap, style.flexWrap != FlexWrap.NoWrap && !(columnIntrinsic && crossConstraint.kind == AvailableKind.MinContent), collapsed)
+    }
+    let mut lineIndex: usize = 0
+    let mut totalCross = gaps(lines.length(), crossGap)
+    while lineIndex < lines.length() {
+      let line = lines.get(lineIndex)
+      resolveFlexible(items.asMutSlice(), line, main, mainGap, collapsed)
+      let mut measuredLine = run crossSizes(nodes, &mut output, &mut measurer, items.asMutSlice(), line, childInput, axis, style, collapsed)
+      if style.flexWrap == FlexWrap.NoWrap {
+        if crossKnown { measuredLine.cross = cross }
+        else { measuredLine.cross = max(0.0, clamp(measuredLine.cross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
+      }
+      totalCross = totalCross + measuredLine.cross
+      lines.set(lineIndex, measuredLine)
+      lineIndex = lineIndex + 1
+    }
+    if !crossKnown { cross = max(0.0, clamp(totalCross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
+    if columnIntrinsic && crossConstraint.kind == AvailableKind.MinContent {
+      cross = max(0.0, clamp(intrinsicCross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset)
+    }
+    if (style.alignContent == Align.Stretch || style.alignContent == Align.Normal) && cross > totalCross && lines.length() > 0 {
+      let extra = (cross - totalCross) / usize.toF64(lines.length())
+      lineIndex = 0
+      while lineIndex < lines.length() { let mut line = lines.get(lineIndex)
+        line.cross = line.cross + extra
+        lines.set(lineIndex, line)
+        lineIndex = lineIndex + 1 }
+    }
+    if !hasCollapsed || collapsed { break }
+    lineIndex = 0
+    while lineIndex < lines.length() {
+      let line = lines.get(lineIndex)
+      index = line.start
+      while index < line.end { let mut item = items.get(index)
+        if item.collapsed { item.strut = line.cross }
+        items.set(index, item)
+        index = index + 1 }
+      lineIndex = lineIndex + 1
+    }
+    collapsed = true
+  }
+  // Sizing §5.2.1: intrinsic contributions ignore cyclic percentages, but
+  // final contents resolve them against the established inline size.
+  // Keep auto block sizes indefinite, and do not resolve cycles during probes.
+  // This is before placement: the measuring pass publishes no fragments.
+  if !definite(box.size, inlineHorizontal) && !intrinsicInline {
+    let mut resolvedBox = box
+    let mut inlineSize = cross + crossInset
+    if axis.row { inlineSize = main + mainInset }
+    if inlineHorizontal {
+      resolvedBox.size.width = inlineSize
+      resolvedBox.size.widthDefinite = true
+    } else {
+      resolvedBox.size.height = inlineSize
+      resolvedBox.size.heightDefinite = true
+    }
+    return run layoutFlexPass(nodes, &mut output, &mut measurer, id, input, resolvedBox, true, &mut items, &mut lines)
+  }
+  if input.fragmentation.active && input.performLayout {
+    return run layoutFlexFragment(nodes, &mut output, &mut measurer, id, input, box, childInput, axis, items.asSlice(), lines.asSlice(), main, cross, mainGap, crossGap, collapsed)
+  }
+  let mut totalCross = gaps(lines.length(), crossGap)
+  let mut lineIndex: usize = 0
+  while lineIndex < lines.length() { totalCross = totalCross + lines.get(lineIndex).cross
+    lineIndex = lineIndex + 1 }
+  let mut lineDistribution = distribute(style.alignContent, cross - totalCross, lines.length(), style.alignContentSafety == OverflowAlignment.Safe, axis.crossReverse, axis.crossStartReverse, !axis.horizontal)
+  if style.flexWrap == FlexWrap.NoWrap { lineDistribution = Distribution { offset: 0.0, between: 0.0 } }
+  let mut crossCursor = lineDistribution.offset
+  let mut result = Layout.zero()
+  if axis.horizontal { result.size = Size { width: main + mainInset, height: cross + crossInset } }
+  else { result.size = Size { width: cross + crossInset, height: main + mainInset } }
+  // A host can report a gutter wider than the allotted area. The content
+  // floor is zero; it must not turn that gutter into a larger CSS outer box.
+  if box.gutter.horizontal() > 0.0 {
+    result.size.width = clamp(result.size.width, box.min.width, box.max.width)
+    if box.size.widthDefinite { result.size.width = box.size.width }
+  }
+  if box.gutter.vertical() > 0.0 {
+    result.size.height = clamp(result.size.height, box.min.height, box.max.height)
+    if box.size.heightDefinite { result.size.height = box.size.height }
+  }
+  lineIndex = 0
+  while lineIndex < lines.length() {
+    let line = lines.get(lineIndex)
+    let mut used = gaps(line.count, mainGap)
+    let mut autoCount: usize = 0
+    index = line.start
+    while index < line.end { let item = items.get(index)
+      if active(item, collapsed) {
+        used = used + item.target + item.marginStart + item.marginEnd
+        if item.autoStart { autoCount = autoCount + 1 }
+        if item.autoEnd { autoCount = autoCount + 1 }
+      }
+      index = index + 1 }
+    let mut free = main - used
+    let mut autoShare = 0.0
+    if free > 0.0 && autoCount > 0 { autoShare = free / usize.toF64(autoCount)
+      free = 0.0 }
+    let distribution = distribute(style.justifyContent, free, line.count, style.justifyContentSafety == OverflowAlignment.Safe, axis.mainReverse, axis.mainStartReverse, axis.horizontal)
+    let mut cursor = distribution.offset
+    index = line.start
+    while index < line.end {
+      let item = items.get(index)
+      if !active(item, collapsed) { run zeroSubtree(nodes, &mut output, item.id) }
+      else {
+        let mut childCross = item.cross
+        let mut finalInput = childInput
+        setKnown(&mut finalInput, axis.horizontal, item.target)
+        setIndefinite(&mut finalInput, axis.horizontal, !item.mainDefinite)
+        if item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd {
+          childCross = clamp(line.cross - item.crossStart - item.crossEnd, item.crossMin, item.crossMax)
+          setKnown(&mut finalInput, !axis.horizontal, childCross)
+        } else if axisDimension(nodes.style(item.id), !axis.horizontal).kind == DimensionKind.FitContent {
+          setAvailable(&mut finalInput, !axis.horizontal, AvailableSpace.definite(line.cross))
+        }
+        // Hypothetical cross sizing needs only metrics. Materialize descendants
+        // once, with the final cross constraint and percentage definiteness.
+        let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, finalInput)
+        childCross = axisSize(childLayout.size, !axis.horizontal)
+        let crossOffset = fragmentCrossOffset(nodes, item, line, style, axis, childCross)
+        if item.autoStart { setEdge(&mut childLayout.usedMargin, axis.horizontal, axis.mainReverse, autoShare) }
+        if item.autoEnd { setEdge(&mut childLayout.usedMargin, axis.horizontal, !axis.mainReverse, autoShare) }
+        if item.autoCrossStart || item.autoCrossEnd {
+          // Auto cross margins absorb all remaining space, including the
+          // end-side overflow required by Flexbox §9.6.
+          setEdge(&mut childLayout.usedMargin, !axis.horizontal, axis.crossReverse, crossOffset)
+          setEdge(&mut childLayout.usedMargin, !axis.horizontal, !axis.crossReverse, line.cross - childCross - crossOffset)
+        }
+        cursor = cursor + item.marginStart
+        if item.autoStart { cursor = cursor + autoShare }
+        let mut mainPosition = cursor
+        let mut crossPosition = crossCursor + crossOffset
+        if axis.mainReverse { mainPosition = main - mainPosition - item.target }
+        if axis.crossReverse { crossPosition = cross - crossPosition - childCross }
+        if axis.horizontal { childLayout.location.x = box.inset.left + mainPosition
+          childLayout.location.y = box.inset.top + crossPosition }
+        else { childLayout.location.x = box.inset.left + crossPosition
+          childLayout.location.y = box.inset.top + mainPosition }
+        run output.store(item.id, childLayout, input.performLayout)
+        cursor = cursor + item.target + item.marginEnd + mainGap + distribution.between
+        if item.autoEnd { cursor = cursor + autoShare }
+      }
+      index = index + 1
+    }
+    crossCursor = crossCursor + line.cross + crossGap + lineDistribution.between
+    lineIndex = lineIndex + 1
+  }
+  containerBaselines(nodes, &output, &mut measurer, items.asSlice(), lines.asSlice(), lines.length(), style, axis, false, &mut result)
+  if input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After && nodes.node(id).dynamicAfter {
+    let mut state = output.resumes.get(id)
+    state.after = FragmentBox.boundary(nodes, id, false, input.fragmentation.kind, input.fragmentation.rectoOnRight)
+    if lines.length() > 0 {
+      let row = axis.horizontal == (output.frames.writingMode == WritingMode.HorizontalTb)
+      if row {
+        state.after.merge(lineBoundary(nodes, &output, items.asSlice(), lines.get(lines.length() - 1), false, input.fragmentation.rectoOnRight, collapsed))
+      } else {
+        let last = boundaryItemIndex(items.asSlice(), collapsed, false)
+        if last < items.length() { state.after.merge(itemBoundary(nodes, &output, items.get(last), false, input.fragmentation.rectoOnRight)) }
+      }
+    }
+    run output.resumes.set(id, state)
+  }
+  return result
+}
+
+// Flexbox §10 keeps a continuing item's line and main-axis slot stable.
+// Only final fragment layout assigns ownership; intrinsic probes never do.
+effect fn collectOwnedLines(items: &[Item], output: &LayoutPass, lines: &mut List<Line>, collapsed: bool) ! OutOfMemoryError ? &mut Allocator {
+  lines.clear()
+  let mut start: usize = 0
+  while start < items.length {
+    let owner = output.resumes.get(items[start].id).flexLine
+    let mut end = start
+    let mut count: usize = 0
+    while end < items.length && output.resumes.get(items[end].id).flexLine == owner {
+      if active(items[end], collapsed) { count = count + 1 }
+      end = end + 1
+    }
+    run lines.append(Line { start: start, end: end, count: count, cross: 0.0, baseline: 0.0, lastBaseline: 0.0, baselineCross: 0.0, lastBaselineCross: 0.0 })
+    start = end
+  }
+}
+
+fn itemBoundary(nodes: &BoxTree, output: &LayoutPass, item: Item, before: bool, rectoOnRight: bool) -> BreakBoundary {
+  let state = output.resumes.get(item.id)
+  let mut boundary = FragmentBox.boundary(nodes, item.id, before, output.frames.kind, rectoOnRight)
+  if before { boundary.merge(state.before) }
+  else { boundary.merge(state.after) }
+  return boundary
+}
+
+// The second collapse round ignores collapsed items except for their struts
+// (Flexbox §9.4). They cannot own a column's propagated outer boundary.
+fn boundaryItemIndex(items: &[Item], collapsed: bool, before: bool) -> usize {
+  let mut ordinal: usize = 0
+  while ordinal < items.length {
+    let mut index = ordinal
+    if !before { index = items.length - ordinal - 1 }
+    if active(items[index], collapsed) { return index }
+    ordinal = ordinal + 1
+  }
+  return items.length
+}
+
+fn lineBoundary(nodes: &BoxTree, output: &LayoutPass, items: &[Item], line: Line, before: bool, rectoOnRight: bool, collapsed: bool) -> BreakBoundary {
+  let mut boundary = BreakBoundary.none()
+  let mut index = line.start
+  while index < line.end {
+    if active(items[index], collapsed) { boundary.merge(itemBoundary(nodes, output, items[index], before, rectoOnRight)) }
+    index = index + 1
+  }
+  return boundary
+}
+
+fn fragmentItemInput(nodes: &BoxTree, item: Item, line: Line, childInput: Input, axis: Axes) -> Input {
+  let mut result = childInput
+  setKnown(&mut result, axis.horizontal, item.target)
+  setIndefinite(&mut result, axis.horizontal, !item.mainDefinite)
+  if item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd {
+    setKnown(&mut result, !axis.horizontal, clamp(line.cross - item.crossStart - item.crossEnd, item.crossMin, item.crossMax))
+  } else if axisDimension(nodes.style(item.id), !axis.horizontal).kind == DimensionKind.FitContent {
+    setAvailable(&mut result, !axis.horizontal, AvailableSpace.definite(line.cross))
+  }
+  return result
+}
+
+// Shared with continuous layout so fragmentation retains auto-margin,
+// self-alignment, and first/last-baseline sharing-group placement.
+fn fragmentCrossOffset(nodes: &BoxTree, item: Item, line: Line, style: &Style, axis: Axes, childCross: f64) -> f64 {
+  let free = line.cross - childCross - item.crossStart - item.crossEnd
+  let mut offset = item.crossStart
+  if item.autoCrossStart || item.autoCrossEnd {
+    if free > 0.0 {
+      if item.autoCrossStart && item.autoCrossEnd { offset = offset + free / 2.0 }
+      else if item.autoCrossStart { offset = offset + free }
+    } else if axis.crossReverse != axis.crossStartReverse { offset = offset + free }
+  } else if item.baselineEligible && (item.align == Align.Baseline || item.align == Align.LastBaseline) {
+    let mut distance = item.baseline
+    if item.align == Align.LastBaseline { distance = item.lastBaseline }
+    offset = line.baseline - distance
+    if item.baselineEnd { offset = line.cross - line.lastBaseline - distance }
+    let mut groupCross = line.baselineCross
+    if item.baselineEnd { groupCross = line.lastBaselineCross }
+    if groupCross > line.cross {
+      let free = line.cross - groupCross
+      if axis.crossReverse != axis.crossStartReverse { offset = offset + free }
+      if item.baselineEnd { offset = offset - free }
+    }
+  } else {
+    let mut startReverse = axis.crossStartReverse
+    if item.align == Align.SelfStart || item.align == Align.SelfEnd { startReverse = selfStartReverse(nodes.style(item.id), !axis.horizontal) }
+    let mut align = item.align
+    if align == Align.Baseline { align = Align.Start }
+    if align == Align.LastBaseline { align = Align.End }
+    let mut safety = nodes.style(item.id).alignSelfSafety
+    if nodes.style(item.id).alignSelf == Align.Auto { safety = style.alignItemsSafety }
+    offset = offset + distribute(align, free, 1, safety == OverflowAlignment.Safe, axis.crossReverse, startReverse, !axis.horizontal).offset
+  }
+  return offset
+}
+
+struct FragmentDistribution { alignment: Distribution, autoShare: f64 }
+impl Copy for FragmentDistribution {}
+fn fragmentDistribution(items: &[Item], line: Line, style: &Style, axis: Axes, main: f64, gap: f64, collapsed: bool) -> FragmentDistribution {
+  let mut used = gaps(line.count, gap)
+  let mut autoCount: usize = 0
+  let mut index = line.start
+  while index < line.end {
+    let item = items[index]
+    if active(item, collapsed) {
+      used = used + item.target + item.marginStart + item.marginEnd
+      if item.autoStart { autoCount = autoCount + 1 }
+      if item.autoEnd { autoCount = autoCount + 1 }
+    }
+    index = index + 1
+  }
+  let free = main - used
+  if free > 0.0 && autoCount > 0 { return FragmentDistribution { alignment: Distribution { offset: 0.0, between: 0.0 }, autoShare: free / usize.toF64(autoCount) } }
+  return FragmentDistribution { alignment: distribute(style.justifyContent, free, line.count, style.justifyContentSafety == OverflowAlignment.Safe, axis.mainReverse, axis.mainStartReverse, axis.horizontal), autoShare: 0.0 }
+}
+
+// Record positive logical block offsets; the caller mirrors accepted fragments
+// after the current container fragment's extent is known.
+fn placeFragment(layout: &mut Layout, blockHorizontal: bool, position: f64, inlinePosition: f64) {
+  if blockHorizontal {
+    layout.location.x = position
+    layout.location.y = inlinePosition
+  } else {
+    layout.location.x = inlinePosition
+    layout.location.y = position
+  }
+}
+
+// Only a boundary-bearing nested flex scope needs this discovery pass. It
+// resolves its first logical line, not its physically earlier reverse lines.
+effect fn discoverItemBefore<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: Item, line: Line, childInput: Input, axis: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if !nodes.node(item.id).dynamicBefore { return }
+  let checkpoint = output.checkpoint()
+  let mut request = fragmentItemInput(nodes, item, line, childInput, axis)
+  request.performLayout = true
+  request.fragmentation.active = true
+  request.fragmentation.boundaryProbe = BoundaryProbe.Before
+  request.fragmentation.offset = 0.0
+  request.fragmentation.limit = UNBOUNDED
+  request.fragmentation.canBreakBefore = false
+  request.fragmentation.forcedStart = false
+  request.fragmentation.relaxation = BreakRelaxation.Avoidance
+  drop run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+  let before = output.resumes.get(item.id).before
+  output.restoreCheckpoint(checkpoint)
+  output.closeCheckpoint(checkpoint)
+  let mut state = output.resumes.get(item.id)
+  state.before.merge(before)
+  run output.resumes.set(item.id, state)
+}
+
+effect fn layoutFlexFragment<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, childInput: Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let blockHorizontal = output.frames.writingMode != WritingMode.HorizontalTb
+  let reverse = blockReverseMode(output.frames.writingMode)
+  let row = axis.horizontal != blockHorizontal
+  let mut state = output.resumes.get(id)
+  let mut lineIndex: usize = 0
+  while lineIndex < lines.length {
+    let line = lines[lineIndex]
+    let mut index = line.start
+    while index < line.end {
+      let mut itemState = output.resumes.get(items[index].id)
+      itemState.flexLine = lineIndex
+      if !active(items[index], collapsed) {
+        run zeroSubtree(nodes, &mut output, items[index].id)
+        itemState.normalComplete = true
+        itemState.contentComplete = true
+        itemState.normalContentComplete = true
+        itemState.descendantsComplete = true
+      }
+      run output.resumes.set(items[index].id, itemState)
+      index = index + 1
+    }
+    lineIndex = lineIndex + 1
+  }
+  if lines.length > 0 {
+    if row {
+      if !state.started && !state.beforeHandled {
+        let first = lines[0]
+        let mut index = first.start
+        while index < first.end {
+          if active(items[index], collapsed) { run discoverItemBefore(nodes, &mut output, &mut measurer, items[index], first, childInput, axis) }
+          index = index + 1
+        }
+      }
+      state.before.merge(lineBoundary(nodes, &output, items, lines[0], true, input.fragmentation.rectoOnRight, collapsed))
+      state.after.merge(lineBoundary(nodes, &output, items, lines[lines.length - 1], false, input.fragmentation.rectoOnRight, collapsed))
+    } else {
+      let first = boundaryItemIndex(items, collapsed, true)
+      let last = boundaryItemIndex(items, collapsed, false)
+      if first < items.length {
+        if !state.started && !state.beforeHandled {
+          let firstLine = output.resumes.get(items[first].id).flexLine
+          run discoverItemBefore(nodes, &mut output, &mut measurer, items[first], lines[firstLine], childInput, axis)
+        }
+        state.before.merge(itemBoundary(nodes, &output, items[first], true, input.fragmentation.rectoOnRight))
+        state.after.merge(itemBoundary(nodes, &output, items[last], false, input.fragmentation.rectoOnRight))
+      }
+    }
+  }
+  if input.fragmentation.boundaryProbe == BoundaryProbe.Before {
+    state.normalContentComplete = true
+    state.descendantsComplete = true
+    run output.resumes.set(id, state)
+    return Layout.zero()
+  }
+  // Propagation uses order-modified order, not the physical traversal order
+  // of wrap-reverse lines. Honor the container boundary before placing either.
+  let propagated = state.before.forced.active(input.fragmentation.activeKinds())
+  if !state.started && !state.beforeHandled && input.fragmentation.canBreakBefore && propagated.kinds.any() {
+    state.blocked = true
+    state.requested = propagated
+    run output.resumes.set(id, state)
+    return Layout.zero()
+  }
+  run output.resumes.set(id, state)
+  let mut result = Layout.zero()
+  if axis.horizontal { result.size = Size { width: main + box.inset.horizontal(), height: cross + box.inset.vertical() } }
+  else { result.size = Size { width: cross + box.inset.horizontal(), height: main + box.inset.vertical() } }
+  if row {
+    run fragmentRows(nodes, &mut output, &mut measurer, id, input, box, childInput, axis, items, lines, main, cross, mainGap, crossGap, collapsed, blockHorizontal, reverse, &mut result)
+  } else {
+    run fragmentColumns(nodes, &mut output, &mut measurer, id, input, box, childInput, axis, items, lines, main, cross, mainGap, crossGap, collapsed, blockHorizontal, reverse, &mut result)
+  }
+  containerBaselines(nodes, &output, &mut measurer, items, lines, lines.length, style, axis, true, &mut result)
+  return result
+}
+
+fn blockReverseMode(mode: WritingMode) -> bool {
+  return mode == WritingMode.VerticalRl || mode == WritingMode.SidewaysRl
+}
+
+effect fn handleLineBefore(output: &mut LayoutPass, items: &[Item], line: Line) ! OutOfMemoryError ? &mut Allocator {
+  let mut index = line.start
+  while index < line.end {
+    let mut state = output.resumes.get(items[index].id)
+    state.beforeHandled = true
+    run output.resumes.set(items[index].id, state)
+    index = index + 1
+  }
+}
+
+effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, childInput: Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let initial = output.resumes.get(id)
+  let mut before = initial.before
+  let mut nextLine: usize = 0
+  let mut progress = FractionalProgress.make()
+  let mut gap = FractionalProgress.make()
+  // CSSWG #6812: align the whole flex container before fragmenting. The
+  // informative §10.1 start-alignment shortcut is deliberately not used.
+  let mut totalCross = gaps(lines.length, crossGap)
+  let mut crossIndex: usize = 0
+  while crossIndex < lines.length { totalCross = totalCross + lines[crossIndex].cross
+    crossIndex = crossIndex + 1 }
+  let mut lineDistribution = distribute(style.alignContent, cross - totalCross, lines.length, style.alignContentSafety == OverflowAlignment.Safe, axis.crossReverse, axis.crossStartReverse, !axis.horizontal)
+  if style.flexWrap == FlexWrap.NoWrap { lineDistribution = Distribution { offset: 0.0, between: 0.0 } }
+  let mut leading = lineDistribution.offset
+  if axis.crossReverse != reverse { leading = cross - totalCross - leading - gaps(lines.length, lineDistribution.between) }
+  match initial.cursor {
+    FlowCursor.Flex { line, progress: savedProgress, gap: savedGap } => {
+      nextLine = line
+      progress = savedProgress
+      gap = savedGap
+    }
+    _ => {}
+  }
+  let opening = edgeStart(box.inset, blockHorizontal, reverse)
+  let ending = edgeEnd(box.inset, blockHorizontal, reverse)
+  let capacity = max(0.0, input.fragmentation.limit - input.fragmentation.offset - opening - ending)
+  let inlineInset = edgeStart(box.inset, !blockHorizontal, false)
+  let avoidedInside = input.fragmentation.avoidInside || input.fragmentation.avoidsInside(style.breakInside)
+  let mut cursor = 0.0
+  let mut requested = ForcedBreaks.none()
+  let mut blocked = false
+  let mut placed = false
+  let mut waiting = false
+  let mut fallback = output.checkpoint()
+  let mut fallbackCursor = 0.0
+  let mut fallbackLine = nextLine
+  let mut fallbackProgress = progress
+  let mut fallbackGap = gap
+  let mut ordinal: usize = 0
+  while ordinal < lines.length {
+    let mut lineIndex = ordinal
+    if axis.crossReverse != reverse { lineIndex = lines.length - ordinal - 1 }
+    let line = lines[lineIndex]
+    let overflowOnly = ordinal < nextLine
+    if ordinal > nextLine { break }
+    let mut rowStart = cursor
+    let mut boundary = lineBoundary(nodes, &output, items, line, true, input.fragmentation.rectoOnRight, collapsed)
+    if ordinal > 0 {
+      let mut previousIndex = ordinal - 1
+      if axis.crossReverse != reverse { previousIndex = lines.length - ordinal }
+      let mut previous = lineBoundary(nodes, &output, items, lines[previousIndex], false, input.fragmentation.rectoOnRight, collapsed)
+      previous.merge(boundary)
+      boundary = previous
+    }
+    let forced = boundary.forced.active(input.fragmentation.activeKinds())
+    let handled = line.start == line.end || output.resumes.get(items[line.start].id).beforeHandled || lineIndex == 0 && (initial.beforeHandled || !input.fragmentation.canBreakBefore)
+    if !overflowOnly && !handled && forced.kinds.any() {
+      if ordinal == 0 {
+        let mut state = output.resumes.get(id)
+        state.before.merge(boundary)
+        run output.resumes.set(id, state)
+        if input.fragmentation.canBreakBefore && !initial.beforeHandled {
+          blocked = true
+          break
+        }
+      } else {
+        run handleLineBefore(&mut output, items, line)
+        requested = forced
+        break
+      }
+    }
+    let mut boundaryAllowed = !avoidedInside && !boundary.avoided.intersects(input.fragmentation.boundaryKinds) || input.fragmentation.relaxation == BreakRelaxation.Avoidance || forced.kinds.any()
+    let savedGap = gap
+    if !overflowOnly {
+      let mut spacing = lineDistribution.between
+      let mut gutter = 0.0
+      if ordinal == 0 { spacing = leading }
+      else if cursor > 0.0 && gap.remaining == 1.0 {
+        // Gutters disappear at a fragmentation break; distributed alignment
+        // space and margins are separate and retain their global allocation.
+        gutter = min(crossGap, max(0.0, capacity - cursor))
+      }
+      rowStart = cursor + gutter
+      rowStart = rowStart + gap.consume(spacing, max(0.0, capacity - rowStart))
+      if gap.remaining > 0.0 {
+        cursor = rowStart
+        if !boundaryAllowed { blocked = true }
+        break
+      }
+    } else { rowStart = 0.0 }
+    if !overflowOnly && capacity > 0.0 && rowStart >= capacity && line.cross > 0.0 {
+      cursor = capacity
+      break
+    }
+    let checkpoint = output.checkpoint()
+    let mut retainedCheckpoint = false
+    let distribution = fragmentDistribution(items, line, style, axis, main, mainGap, collapsed)
+    let mut mainCursor = distribution.alignment.offset
+    let between = distribution.alignment.between
+    let autoShare = distribution.autoShare
+    let mut rowExtent = 0.0
+    let mut originalMarginExtent = 0.0
+    let mut explicitMarginExtent = 0.0
+    let mut explicitRowMargins = false
+    let mut anyFit = false
+    let mut anyReady = false
+    let mut allNormal = true
+    let mut index = line.start
+    while index < line.end {
+      let item = items[index]
+      if active(item, collapsed) {
+        let outer = item.cross + item.crossStart + item.crossEnd
+        originalMarginExtent = max(originalMarginExtent, outer)
+        let mut reserved = outer
+        if nodes.style(item.id).marginBreak != MarginBreak.Auto && FragmentBox.applies(nodes.style(item.id), output.frames.writingMode) { reserved = item.cross
+          explicitRowMargins = true }
+        explicitMarginExtent = max(explicitMarginExtent, reserved)
+        mainCursor = mainCursor + item.marginStart
+        if item.autoStart { mainCursor = mainCursor + autoShare }
+        let mut mainPosition = mainCursor
+        if axis.mainReverse { mainPosition = main - mainCursor - item.target }
+        let mut old = output.resumes.get(item.id)
+        if !old.contentComplete {
+          anyReady = anyReady || old.notBeforeFrame <= output.frame
+          let mut finalInput = fragmentItemInput(nodes, item, line, childInput, axis)
+          let mut childCross = item.cross
+          if definite(finalInput.known, !axis.horizontal) { childCross = optionalSize(finalInput.known, !axis.horizontal) }
+          let mut aligned = fragmentCrossOffset(nodes, item, line, style, axis, childCross)
+          if axis.crossReverse != reverse { aligned = line.cross - aligned - childCross }
+          let itemStyle = nodes.style(item.id)
+          let explicitMargins = itemStyle.marginBreak != MarginBreak.Auto && FragmentBox.applies(itemStyle, output.frames.writingMode)
+          let mut marginInput = input.fragmentation
+          marginInput.marginStart = input.fragmentation.marginStart && opening == 0.0 && rowStart == 0.0
+          marginInput.marginEnd = input.fragmentation.marginEnd && ending == 0.0 && ordinal + 1 == lines.length
+          marginInput.forcedStart = input.fragmentation.forcedStart || initial.requested.kinds.any() || old.requested.kinds.any()
+          let mut authoredStart = item.crossStart
+          if axis.crossReverse != reverse { authoredStart = item.crossEnd }
+          if explicitMargins { aligned = aligned - authoredStart }
+          let mut blockMargin = 0.0
+          if !old.started && !overflowOnly && old.notBeforeFrame <= output.frame {
+            blockMargin = old.flexLeading.consume(aligned, max(0.0, capacity - rowStart))
+            if explicitMargins && old.flexLeading.remaining == 0.0 {
+              blockMargin = blockMargin + FragmentBox.startMargin(itemStyle, authoredStart, old, marginInput, output.frames.writingMode)
+            }
+            run output.resumes.set(item.id, old)
+            rowExtent = max(rowExtent, blockMargin)
+            anyFit = anyFit || blockMargin > 0.0
+          }
+          if !old.started && !overflowOnly && (old.flexLeading.remaining > 0.0 || capacity > 0.0 && rowStart + blockMargin >= capacity && childCross > 0.0 && (!explicitMargins || rowStart > 0.0 || input.fragmentation.canBreakBefore)) {
+            allNormal = false
+            mainCursor = mainCursor + item.target + item.marginEnd + mainGap + between
+            if item.autoEnd { mainCursor = mainCursor + autoShare }
+            index = index + 1
+            continue
+          }
+          if old.started && !overflowOnly && explicitMargins {
+            blockMargin = FragmentBox.startMargin(itemStyle, authoredStart, old, marginInput, output.frames.writingMode)
+          }
+          finalInput.fragmentation = input.fragmentation
+          finalInput.fragmentation.marginStart = marginInput.marginStart
+          finalInput.fragmentation.marginEnd = marginInput.marginEnd
+          finalInput.fragmentation.forcedStart = marginInput.forcedStart
+          finalInput.fragmentation.flexAutoExtent = axisDimension(nodes.style(item.id), blockHorizontal).kind == DimensionKind.Auto
+          finalInput.fragmentation.offset = input.fragmentation.offset + opening + rowStart + blockMargin
+          finalInput.fragmentation.limit = input.fragmentation.limit - ending
+          finalInput.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || rowStart > 0.0
+          finalInput.fragmentation.avoidInside = avoidedInside
+          if lineIndex == 0 && (initial.beforeHandled || !input.fragmentation.canBreakBefore) {
+            old.beforeHandled = true
+            run output.resumes.set(item.id, old)
+          }
+          let childCheckpoint = output.checkpoint()
+          let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, finalInput)
+          let child = output.resumes.get(item.id)
+          if child.blocked {
+            output.restoreCheckpoint(childCheckpoint)
+            let mut deferred = output.resumes.get(item.id)
+            deferred.before.merge(child.before)
+            run output.resumes.set(item.id, deferred)
+            if !child.before.forced.active(input.fragmentation.activeKinds()).kinds.any() {
+              run output.defer(item.id, ForcedBreaks.none())
+            }
+            allNormal = false
+          } else if !child.skipped {
+            placed = true
+            let extent = axisSize(childLayout.size, blockHorizontal)
+            anyFit = anyFit || extent > 0.0 || child.normalComplete
+            if !overflowOnly && !old.normalComplete {
+              let mut trailing = 0.0
+              if child.normalComplete { trailing = item.crossEnd
+                if axis.crossReverse != reverse { trailing = item.crossStart } }
+              if explicitMargins && itemStyle.marginBreak == MarginBreak.Discard && (marginInput.marginEnd || rowStart + blockMargin + extent + trailing >= capacity) { trailing = 0.0 }
+              if explicitMargins && !child.normalComplete && itemStyle.marginBreak == MarginBreak.Keep && itemStyle.boxDecorationBreak == BoxDecorationBreak.Clone {
+                trailing = item.crossEnd
+                if axis.crossReverse != reverse { trailing = item.crossStart }
+              }
+              rowExtent = max(rowExtent, blockMargin + extent + trailing)
+            }
+            if item.autoStart { setEdge(&mut childLayout.usedMargin, axis.horizontal, axis.mainReverse, autoShare) }
+            if item.autoEnd { setEdge(&mut childLayout.usedMargin, axis.horizontal, !axis.mainReverse, autoShare) }
+            if item.autoCrossStart || item.autoCrossEnd {
+              let crossOffset = fragmentCrossOffset(nodes, item, line, style, axis, childCross)
+              setEdge(&mut childLayout.usedMargin, !axis.horizontal, axis.crossReverse, crossOffset)
+              setEdge(&mut childLayout.usedMargin, !axis.horizontal, !axis.crossReverse, line.cross - childCross - crossOffset)
+            }
+            placeFragment(&mut childLayout, blockHorizontal, opening + rowStart + blockMargin, inlineInset + mainPosition)
+            run output.store(item.id, childLayout, true)
+            allNormal = allNormal && child.normalComplete
+          } else { allNormal = allNormal && old.normalComplete }
+          output.closeCheckpoint(childCheckpoint)
+        }
+        allNormal = allNormal && output.resumes.get(item.id).normalComplete
+        mainCursor = mainCursor + item.target + item.marginEnd + mainGap + between
+        if item.autoEnd { mainCursor = mainCursor + autoShare }
+      }
+      index = index + 1
+    }
+    // Leading descendant values can only be known after fitting the items.
+    let discovered = lineBoundary(nodes, &output, items, line, true, input.fragmentation.rectoOnRight, collapsed)
+    if lineIndex == 0 { before.merge(discovered) }
+    boundary.merge(discovered)
+    boundaryAllowed = !avoidedInside && !boundary.avoided.intersects(input.fragmentation.boundaryKinds) || input.fragmentation.relaxation == BreakRelaxation.Avoidance || boundary.forced.active(input.fragmentation.activeKinds()).kinds.any()
+    let discoveredForced = discovered.forced.active(input.fragmentation.activeKinds())
+    if !overflowOnly && !handled && discoveredForced.kinds.any() && (ordinal > 0 || input.fragmentation.canBreakBefore && !initial.beforeHandled) {
+      output.restoreCheckpoint(checkpoint)
+      if lineIndex == 0 || ordinal == 0 {
+        let mut state = output.resumes.get(id)
+        state.before.merge(discovered)
+        run output.resumes.set(id, state)
+        blocked = true
+      } else {
+        run handleLineBefore(&mut output, items, line)
+        requested = discoveredForced
+      }
+      output.closeCheckpoint(checkpoint)
+      break
+    }
+    // A descendant can prohibit this boundary only after its fitting trial.
+    // Retain the preceding legal fallback until those values are available.
+    if !overflowOnly && boundaryAllowed && cursor > 0.0 {
+      fallback = output.replaceCheckpoint(fallback, checkpoint)
+      fallbackCursor = cursor
+      fallbackLine = nextLine
+      fallbackProgress = progress
+      fallbackGap = savedGap
+      retainedCheckpoint = true
+    }
+    if !overflowOnly && !anyReady && !allNormal {
+      if !retainedCheckpoint { output.closeCheckpoint(checkpoint) }
+      gap = savedGap
+      waiting = true
+      break
+    }
+    if !overflowOnly && !anyFit && !allNormal && (input.fragmentation.canBreakBefore || rowStart > 0.0) {
+      output.restoreCheckpoint(checkpoint)
+      if !retainedCheckpoint { output.closeCheckpoint(checkpoint) }
+      if rowStart == 0.0 || !boundaryAllowed { blocked = true }
+      break
+    }
+    run handleLineBefore(&mut output, items, line)
+    if !retainedCheckpoint { output.closeCheckpoint(checkpoint) }
+    if !overflowOnly {
+      // Authored policies consume their margins with the item, not with the
+      // row's global size progress. Alignment and percentage bases above still
+      // use the full CSS line; an explicit discard must not create blank pages.
+      let mut reservation = line.cross
+      if explicitRowMargins { reservation = max(0.0, line.cross - originalMarginExtent + explicitMarginExtent) }
+      let reserved = progress.consume(reservation, max(0.0, capacity - rowStart))
+      rowExtent = max(rowExtent, reserved)
+      cursor = rowStart + rowExtent
+      if !allNormal || progress.remaining > 0.0 { break }
+      nextLine = nextLine + 1
+      progress = FractionalProgress.make()
+      gap = FractionalProgress.make()
+    }
+    ordinal = ordinal + 1
+  }
+  // Prefer an earlier legal line boundary before asking the root to relax
+  // avoidance. Restoring also retracts descendant publication and cursors.
+  let forcedBefore = before.forced.active(input.fragmentation.activeKinds()).kinds.any() && !initial.beforeHandled && !initial.started
+  if blocked && fallbackCursor > 0.0 && !forcedBefore {
+    output.restoreCheckpoint(fallback)
+    cursor = fallbackCursor
+    nextLine = fallbackLine
+    progress = fallbackProgress
+    gap = fallbackGap
+    blocked = false
+  }
+  output.closeCheckpoint(fallback)
+  let mut state = output.resumes.get(id)
+  state.before.merge(before)
+  state.cursor = FlowCursor.Flex { line: nextLine, progress: progress, gap: gap }
+  state.normalContentComplete = nextLine >= lines.length
+  state.descendantsComplete = true
+  let mut index: usize = 0
+  while index < items.length {
+    state.descendantsComplete = state.descendantsComplete && output.resumes.get(items[index].id).contentComplete
+    index = index + 1
+  }
+  if lines.length > 0 { state.after.merge(lineBoundary(nodes, &output, items, lines[lines.length - 1], false, input.fragmentation.rectoOnRight, collapsed)) }
+  state.blocked = blocked
+  state.skipped = waiting && !placed && cursor == 0.0
+  if !blocked && !state.normalContentComplete && cursor > 0.0 { cursor = max(cursor, capacity) }
+  run output.resumes.set(id, state)
+  if requested.kinds.any() { run output.defer(id, requested) }
+  let extent = opening + cursor + ending
+  if blockHorizontal { result.size.width = extent } else { result.size.height = extent }
+  // Child offsets were recorded in the positive logical block direction.
+  // Mirror only the fragments emitted by this invocation.
+  if reverse {
+    index = 0
+    while index < items.length {
+      let child = output.resumes.get(items[index].id)
+      if child.fragmentainer == output.frame && child.fragment != NO_NODE && !child.skipped {
+        let mut layout = output.boxes[items[index].id]
+        if blockHorizontal { layout.location.x = extent - layout.location.x - layout.size.width }
+        else { layout.location.y = extent - layout.location.y - layout.size.height }
+        run output.store(items[index].id, layout, true)
+      }
+      index = index + 1
+    }
+  }
+}
+
+effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, childInput: Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let initial = output.resumes.get(id)
+  let firstItem = boundaryItemIndex(items, collapsed, true)
+  let lastItem = boundaryItemIndex(items, collapsed, false)
+  let opening = edgeStart(box.inset, blockHorizontal, reverse)
+  let ending = edgeEnd(box.inset, blockHorizontal, reverse)
+  let inlineInset = edgeStart(box.inset, !blockHorizontal, false)
+  let capacity = max(0.0, input.fragmentation.limit - input.fragmentation.offset - opening - ending)
+  let avoidedInside = input.fragmentation.avoidInside || input.fragmentation.avoidsInside(style.breakInside)
+  let checkpoint = output.checkpoint()
+  let mut totalCross = gaps(lines.length, crossGap)
+  let mut lineIndex: usize = 0
+  while lineIndex < lines.length { totalCross = totalCross + lines[lineIndex].cross
+    lineIndex = lineIndex + 1 }
+  let lineDistribution = distribute(style.alignContent, cross - totalCross, lines.length, style.alignContentSafety == OverflowAlignment.Safe, axis.crossReverse, axis.crossStartReverse, !axis.horizontal)
+  let mut crossCursor = lineDistribution.offset
+  let mut extent = 0.0
+  let mut anyFit = false
+  let mut blocked = false
+  let mut waiting = false
+  let mut before = initial.before
+  lineIndex = 0
+  while lineIndex < lines.length {
+    let line = lines[lineIndex]
+    let distribution = fragmentDistribution(items, line, style, axis, main, mainGap, collapsed)
+    let mut leading = distribution.alignment.offset
+    if axis.mainReverse != reverse {
+      let mut occupied = gaps(line.count, mainGap + distribution.alignment.between)
+      let mut itemIndex = line.start
+      while itemIndex < line.end {
+        let item = items[itemIndex]
+        if active(item, collapsed) {
+          occupied = occupied + item.target + item.marginStart + item.marginEnd
+          if item.autoStart { occupied = occupied + distribution.autoShare }
+          if item.autoEnd { occupied = occupied + distribution.autoShare }
+        }
+        itemIndex = itemIndex + 1
+      }
+      leading = main - occupied - leading
+    }
+    let mut activeOrdinal: usize = 0
+    let mut cursor = 0.0
+    let mut previous = BreakBoundary.none()
+    let mut needsGap = false
+    let mut fallback = output.checkpoint()
+    let mut fallbackCursor = 0.0
+    let previousExtent = extent
+    let mut ordinal: usize = 0
+    while ordinal < line.end - line.start {
+      let mut index = line.start + ordinal
+      if axis.mainReverse != reverse { index = line.end - ordinal - 1 }
+      let item = items[index]
+      if active(item, collapsed) {
+        let mut old = output.resumes.get(item.id)
+        let itemBefore = itemBoundary(nodes, &output, item, true, input.fragmentation.rectoOnRight)
+        let mut boundary = previous
+        boundary.merge(itemBefore)
+        let forced = boundary.forced.active(input.fragmentation.activeKinds())
+        let mut boundaryAllowed = !avoidedInside && !boundary.avoided.intersects(input.fragmentation.boundaryKinds) || input.fragmentation.relaxation == BreakRelaxation.Avoidance || forced.kinds.any()
+        if !old.normalComplete && !old.started && !old.beforeHandled && forced.kinds.any() {
+          if index == firstItem {
+            before.merge(boundary)
+            if input.fragmentation.canBreakBefore && !initial.beforeHandled { blocked = true
+              break }
+          } else {
+            run output.defer(item.id, forced)
+            extent = max(extent, capacity)
+            break
+          }
+        }
+        if !old.contentComplete {
+          let boundaryCheckpoint = output.checkpoint()
+          let boundaryCursor = cursor
+          let mut retainedCheckpoint = false
+          waiting = waiting || old.notBeforeFrame > output.frame
+          let overflowOnly = old.normalComplete
+          let mut position = cursor
+          if overflowOnly { position = 0.0 }
+          else if needsGap { position = position + mainGap }
+          let itemStyle = nodes.style(item.id)
+          let explicitMargins = itemStyle.marginBreak != MarginBreak.Auto && FragmentBox.applies(itemStyle, output.frames.writingMode)
+          let mut marginInput = input.fragmentation
+          marginInput.marginStart = input.fragmentation.marginStart && opening == 0.0 && position == 0.0
+          marginInput.marginEnd = input.fragmentation.marginEnd && ending == 0.0 && index == lastItem
+          marginInput.forcedStart = input.fragmentation.forcedStart || old.requested.kinds.any()
+          // Alignment and margins retain their unfragmented allocation, but
+          // can be consumed before the border box fits (CSSWG #6812).
+          if !old.started && !overflowOnly && old.notBeforeFrame <= output.frame {
+            let mut startMargin = item.marginStart
+            let mut autoStart = item.autoStart
+            if axis.mainReverse != reverse { startMargin = item.marginEnd
+              autoStart = item.autoEnd }
+            let authoredMargin = startMargin
+            if explicitMargins { startMargin = 0.0 }
+            if autoStart { startMargin = startMargin + distribution.autoShare }
+            if activeOrdinal == 0 { startMargin = startMargin + leading }
+            else { startMargin = startMargin + distribution.alignment.between }
+            let consumed = old.flexLeading.consume(startMargin, max(0.0, capacity - position))
+            position = position + consumed
+            if explicitMargins && old.flexLeading.remaining == 0.0 {
+              position = position + FragmentBox.startMargin(itemStyle, authoredMargin, old, marginInput, output.frames.writingMode)
+            }
+            cursor = max(cursor, position)
+            extent = max(extent, cursor)
+            anyFit = anyFit || consumed > 0.0
+            run output.resumes.set(item.id, old)
+            if old.flexLeading.remaining > 0.0 {
+              output.closeCheckpoint(boundaryCheckpoint)
+              break
+            }
+          }
+          if !old.started && !overflowOnly && capacity > 0.0 && position >= capacity && item.target > 0.0 && (!explicitMargins || boundaryCursor > 0.0 || input.fragmentation.canBreakBefore) {
+            extent = max(extent, capacity)
+            output.closeCheckpoint(boundaryCheckpoint)
+            break
+          }
+          if old.started && !overflowOnly && explicitMargins {
+            let mut authoredMargin = item.marginStart
+            if axis.mainReverse != reverse { authoredMargin = item.marginEnd }
+            position = position + FragmentBox.startMargin(itemStyle, authoredMargin, old, marginInput, output.frames.writingMode)
+          }
+          let mut finalInput = fragmentItemInput(nodes, item, line, childInput, axis)
+          finalInput.fragmentation = input.fragmentation
+          finalInput.fragmentation.marginStart = marginInput.marginStart
+          finalInput.fragmentation.marginEnd = marginInput.marginEnd
+          finalInput.fragmentation.forcedStart = marginInput.forcedStart
+          finalInput.fragmentation.flexAutoExtent = axisDimension(nodes.style(item.id), blockHorizontal).kind == DimensionKind.Auto
+          finalInput.fragmentation.offset = input.fragmentation.offset + opening + position
+          finalInput.fragmentation.limit = input.fragmentation.limit - ending
+          finalInput.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || position > 0.0
+          if explicitMargins { finalInput.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || boundaryCursor > 0.0 }
+          finalInput.fragmentation.avoidInside = avoidedInside
+          let childCheckpoint = output.checkpoint()
+          let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, finalInput)
+          let child = output.resumes.get(item.id)
+          let mut discovered = boundary
+          discovered.merge(child.before)
+          if index == firstItem { before.merge(child.before) }
+          boundaryAllowed = !avoidedInside && !discovered.avoided.intersects(input.fragmentation.boundaryKinds) || input.fragmentation.relaxation == BreakRelaxation.Avoidance || discovered.forced.active(input.fragmentation.activeKinds()).kinds.any()
+          let discoveredForced = discovered.forced.active(input.fragmentation.activeKinds())
+          if !old.started && !old.beforeHandled && discoveredForced.kinds.any() && (index != firstItem || input.fragmentation.canBreakBefore && !initial.beforeHandled) {
+            output.restoreCheckpoint(childCheckpoint)
+            if index == firstItem {
+              before.merge(discovered)
+              blocked = true
+            } else {
+              run output.defer(item.id, discoveredForced)
+              extent = max(extent, capacity)
+            }
+            output.closeCheckpoint(childCheckpoint)
+            output.closeCheckpoint(boundaryCheckpoint)
+            break
+          }
+          if !overflowOnly && boundaryAllowed && boundaryCursor > 0.0 {
+            fallback = output.replaceCheckpoint(fallback, boundaryCheckpoint)
+            fallbackCursor = boundaryCursor
+            retainedCheckpoint = true
+          }
+          if child.blocked {
+            output.restoreCheckpoint(childCheckpoint)
+            output.closeCheckpoint(childCheckpoint)
+            if !retainedCheckpoint { output.closeCheckpoint(boundaryCheckpoint) }
+            if !overflowOnly && cursor > 0.0 && !boundaryAllowed {
+              if fallbackCursor > 0.0 {
+                output.restoreCheckpoint(fallback)
+                cursor = fallbackCursor
+                extent = max(previousExtent, cursor)
+              } else { blocked = true }
+            }
+            if !overflowOnly { break }
+          } else {
+            if !child.skipped {
+              let childExtent = axisSize(childLayout.size, blockHorizontal)
+              anyFit = anyFit || childExtent > 0.0 || child.normalComplete
+              let childCross = axisSize(childLayout.size, !blockHorizontal)
+              let crossOffset = fragmentCrossOffset(nodes, item, line, style, axis, childCross)
+              if item.autoCrossStart || item.autoCrossEnd {
+                setEdge(&mut childLayout.usedMargin, !axis.horizontal, axis.crossReverse, crossOffset)
+                setEdge(&mut childLayout.usedMargin, !axis.horizontal, !axis.crossReverse, line.cross - childCross - crossOffset)
+              }
+              if item.autoStart { setEdge(&mut childLayout.usedMargin, axis.horizontal, axis.mainReverse, distribution.autoShare) }
+              if item.autoEnd { setEdge(&mut childLayout.usedMargin, axis.horizontal, !axis.mainReverse, distribution.autoShare) }
+              let mut crossPosition = crossCursor + crossOffset
+              if axis.crossReverse { crossPosition = cross - crossPosition - childCross }
+              placeFragment(&mut childLayout, blockHorizontal, opening + position, inlineInset + crossPosition)
+              run output.store(item.id, childLayout, true)
+              if !overflowOnly {
+                cursor = position + childExtent
+                extent = max(extent, cursor)
+                if explicitMargins && !child.normalComplete && itemStyle.marginBreak == MarginBreak.Keep && itemStyle.boxDecorationBreak == BoxDecorationBreak.Clone {
+                  let mut endMargin = item.marginEnd
+                  if axis.mainReverse != reverse { endMargin = item.marginStart }
+                  cursor = cursor + endMargin
+                  extent = max(extent, cursor)
+                }
+              }
+            }
+            let mut accepted = output.resumes.get(item.id)
+            accepted.beforeHandled = true
+            run output.resumes.set(item.id, accepted)
+            output.closeCheckpoint(childCheckpoint)
+            if !retainedCheckpoint { output.closeCheckpoint(boundaryCheckpoint) }
+            if !child.normalComplete && !overflowOnly {
+              if !child.skipped { extent = max(extent, capacity) }
+              break
+            }
+          }
+          if !overflowOnly { needsGap = true }
+        }
+        let mut accepted = output.resumes.get(item.id)
+        if accepted.normalComplete && accepted.flexTrailing.remaining > 0.0 {
+          let mut endMargin = item.marginEnd
+          let mut autoEnd = item.autoEnd
+          if axis.mainReverse != reverse { endMargin = item.marginStart
+            autoEnd = item.autoStart }
+          if autoEnd { endMargin = endMargin + distribution.autoShare }
+          // Apply the global-margin resolution symmetrically: the trailing
+          // margin may finish on a later page without replaying its border box.
+          let mut policy = nodes.style(item.id).marginBreak
+          if !FragmentBox.applies(nodes.style(item.id), output.frames.writingMode) { policy = MarginBreak.Auto }
+          let contextEnd = input.fragmentation.marginEnd && ending == 0.0 && index == lastItem
+          if policy == MarginBreak.Discard && (contextEnd || cursor + endMargin >= capacity || accepted.fragmentainer != output.frame) { endMargin = 0.0 }
+          let mut marginCapacity = max(0.0, capacity - cursor)
+          if policy == MarginBreak.Keep { marginCapacity = max(marginCapacity, endMargin) }
+          let consumed = accepted.flexTrailing.consume(endMargin, marginCapacity)
+          cursor = cursor + consumed
+          anyFit = anyFit || consumed > 0.0
+          extent = max(extent, cursor)
+          run output.resumes.set(item.id, accepted)
+          if accepted.flexTrailing.remaining > 0.0 { break }
+        }
+        activeOrdinal = activeOrdinal + 1
+        previous = itemBoundary(nodes, &output, item, false, input.fragmentation.rectoOnRight)
+      }
+      ordinal = ordinal + 1
+    }
+    output.closeCheckpoint(fallback)
+    if blocked { break }
+    crossCursor = crossCursor + line.cross + crossGap + lineDistribution.between
+    lineIndex = lineIndex + 1
+  }
+  let mut allNormal = true
+  let mut descendantsComplete = true
+  let mut index: usize = 0
+  while index < items.length {
+    let state = output.resumes.get(items[index].id)
+    if active(items[index], collapsed) {
+      allNormal = allNormal && state.normalComplete && state.flexTrailing.remaining == 0.0
+      descendantsComplete = descendantsComplete && state.contentComplete && state.flexTrailing.remaining == 0.0
+    }
+    index = index + 1
+  }
+  if !anyFit && !allNormal && !waiting && input.fragmentation.canBreakBefore { blocked = true }
+  if blocked { output.restoreCheckpoint(checkpoint) }
+  output.closeCheckpoint(checkpoint)
+  let mut state = output.resumes.get(id)
+  state.before.merge(before)
+  if lastItem < items.length { state.after.merge(itemBoundary(nodes, &output, items[lastItem], false, input.fragmentation.rectoOnRight)) }
+  state.normalContentComplete = allNormal && !blocked
+  state.descendantsComplete = descendantsComplete && !blocked
+  state.blocked = blocked
+  state.skipped = waiting && !anyFit && extent == 0.0
+  if !blocked && !allNormal && extent > 0.0 { extent = max(extent, capacity) }
+  run output.resumes.set(id, state)
+  let size = opening + extent + ending
+  if blockHorizontal { result.size.width = size } else { result.size.height = size }
+  if reverse && !blocked {
+    index = 0
+    while index < items.length {
+      let child = output.resumes.get(items[index].id)
+      if child.fragmentainer == output.frame && child.fragment != NO_NODE && !child.skipped {
+        let mut layout = output.boxes[items[index].id]
+        if blockHorizontal { layout.location.x = size - layout.location.x - layout.size.width }
+        else { layout.location.y = size - layout.location.y - layout.size.height }
+        run output.store(items[index].id, layout, true)
+      }
+      index = index + 1
+    }
+  }
+}

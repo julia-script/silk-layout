@@ -1,0 +1,19 @@
+{
+  "name": "resource-flex-auto-minimum",
+  "kind": "chrome",
+  "features": ["flex", "replaced", "automatic-minimum", "transferred-size-suggestion"],
+  "description": "A 160 by 80 resource with definite cross-size 30 has a smaller transferred size suggestion than its content size. Compare visible-overflow automatic minimum, explicit zero minimum, and scrollable overflow in otherwise identical narrow rows.",
+  "spec": ["https://www.w3.org/TR/css-flexbox-1/#min-size-auto"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flow-root", "width": 400}},
+      {"parent": 0, "style": {"display": "flex", "width": 40, "alignItems": "flex-start"}},
+      {"parent": 1, "style": {"height": 30}, "natural": {"width": 160, "height": 80, "aspectRatio": 2}},
+      {"parent": 0, "style": {"display": "flex", "width": 40, "alignItems": "flex-start"}},
+      {"parent": 3, "style": {"height": 30, "minWidth": 0}, "natural": {"width": 160, "height": 80, "aspectRatio": 2}},
+      {"parent": 0, "style": {"display": "flex", "width": 40, "alignItems": "flex-start"}},
+      {"parent": 5, "style": {"height": 30, "overflowX": "hidden", "overflowY": "hidden"}, "natural": {"width": 160, "height": 80, "aspectRatio": 2}}
+    ]
+  }
+}

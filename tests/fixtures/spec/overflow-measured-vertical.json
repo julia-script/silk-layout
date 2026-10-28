@@ -1,0 +1,67 @@
+{
+  "name": "overflow-measured-vertical",
+  "kind": "spec",
+  "features": [
+    "scrollable-overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollable-overflow-calculation",
+    "https://drafts.csswg.org/css-overflow-3/#scroll-origin",
+    "https://drafts.csswg.org/css-position-3/#relative-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 50,
+          "writingMode": "vertical-rl"
+        },
+        "measure": {
+          "minWidth": 200,
+          "maxWidth": 200,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "scrollableOverflowX": -100,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 200,
+        "scrollableOverflowHeight": 100
+      },
+      {
+        "x": 80,
+        "y": 0,
+        "scrollableOverflowX": -180,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 200,
+        "scrollableOverflowHeight": 50
+      }
+    ],
+    "viewportOverflow": {
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 100
+    }
+  }
+}

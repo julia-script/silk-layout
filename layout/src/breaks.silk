@@ -1,0 +1,202 @@
+import silk.ownership { Copy }
+import style { BreakBetween, BreakInside }
+
+// CSS Break 3/4 §§3–4. Callers supply applicable break points and fragmentation
+// contexts; these policies do not discover break points or fragment boxes.
+pub enum FragmentainerKind { Page, Column, Region }
+pub enum PageSide { Any, Left, Right }
+pub enum BreakRelaxation { Strict, Lines, Avoidance }
+
+pub struct BreakKinds { pub page: bool, pub column: bool, pub region: bool }
+impl Copy for BreakKinds {}
+impl BreakKinds {
+  pub fn none() -> BreakKinds { return BreakKinds { page: false, column: false, region: false } }
+  pub fn contains(self: &Self, kind: FragmentainerKind) -> bool {
+    return match kind {
+      FragmentainerKind.Page => self.page
+      FragmentainerKind.Column => self.column
+      FragmentainerKind.Region => self.region
+    }
+  }
+  pub fn intersects(self: &Self, other: BreakKinds) -> bool {
+    return (self.page && other.page) || (self.column && other.column) || (self.region && other.region)
+  }
+  pub fn add(self: &mut Self, kind: FragmentainerKind) {
+    if kind == FragmentainerKind.Page { self.page = true }
+    if kind == FragmentainerKind.Column { self.column = true }
+    if kind == FragmentainerKind.Region { self.region = true }
+  }
+  pub fn any(self: &Self) -> bool { return self.page || self.column || self.region }
+}
+
+// Boundary values are accumulated in flow order, including values propagated
+// by leading/trailing children. Avoidance is independent of forced precedence.
+pub struct BreakBoundary { pub forced: ForcedBreaks, pub avoided: BreakKinds }
+impl Copy for BreakBoundary {}
+impl BreakBoundary {
+  pub fn none() -> BreakBoundary {
+    return BreakBoundary { forced: ForcedBreaks.none(), avoided: BreakKinds.none() }
+  }
+  pub fn make(value: BreakBetween, innermost: FragmentainerKind, rectoOnRight: bool) -> BreakBoundary {
+    let mut result = BreakBoundary.none()
+    result.forced.add(value, innermost, rectoOnRight)
+    result.avoided = BreakKinds {
+      page: avoidsBetween(value, FragmentainerKind.Page),
+      column: avoidsBetween(value, FragmentainerKind.Column),
+      region: avoidsBetween(value, FragmentainerKind.Region),
+    }
+    return result
+  }
+  pub fn merge(self: &mut Self, later: BreakBoundary) {
+    self.forced.kinds.page = self.forced.kinds.page || later.forced.kinds.page
+    self.forced.kinds.column = self.forced.kinds.column || later.forced.kinds.column
+    self.forced.kinds.region = self.forced.kinds.region || later.forced.kinds.region
+    self.forced.all = self.forced.all || later.forced.all
+    if later.forced.side != PageSide.Any { self.forced.side = later.forced.side }
+    self.avoided.page = self.avoided.page || later.avoided.page
+    self.avoided.column = self.avoided.column || later.avoided.column
+    self.avoided.region = self.avoided.region || later.avoided.region
+  }
+}
+
+// A kind mask cannot distinguish All from typed breaks in same-kind nesting.
+// Keep its depth-wide meaning until the host ancestry selects a destination.
+pub struct ForcedBreaks { pub kinds: BreakKinds, pub side: PageSide, pub all: bool }
+impl Copy for ForcedBreaks {}
+impl ForcedBreaks {
+  pub fn none() -> ForcedBreaks { return ForcedBreaks { kinds: BreakKinds.none(), side: PageSide.Any, all: false } }
+
+  // Add specified/propagated values in flow order, earlier first. §4.3 keeps
+  // every requested kind, but only the latest side-specific page requirement.
+  // Generic page requests must not erase a previously requested page side.
+  pub fn add(self: &mut Self, value: BreakBetween, innermost: FragmentainerKind, rectoOnRight: bool) {
+    if value == BreakBetween.All {
+      self.all = true
+      self.kinds = BreakKinds { page: true, column: true, region: true }
+    }
+    if value == BreakBetween.Always {
+      if innermost == FragmentainerKind.Page { self.kinds.page = true }
+      if innermost == FragmentainerKind.Column { self.kinds.column = true }
+      if innermost == FragmentainerKind.Region { self.kinds.region = true }
+    }
+    if value == BreakBetween.Column { self.kinds.column = true }
+    if value == BreakBetween.Region { self.kinds.region = true }
+    if value == BreakBetween.Page { self.kinds.page = true }
+    if value == BreakBetween.Left {
+      self.kinds.page = true
+      self.side = PageSide.Left
+    }
+    if value == BreakBetween.Right {
+      self.kinds.page = true
+      self.side = PageSide.Right
+    }
+    if value == BreakBetween.Recto {
+      self.kinds.page = true
+      self.side = PageSide.Left
+      if rectoOnRight { self.side = PageSide.Right }
+    }
+    if value == BreakBetween.Verso {
+      self.kinds.page = true
+      self.side = PageSide.Right
+      if rectoOnRight { self.side = PageSide.Left }
+    }
+  }
+
+  // Active includes enclosing contexts, not just the innermost fragmentainer:
+  // a forced break can cross nested contexts to satisfy all requested kinds.
+  pub fn active(self: &Self, active: BreakKinds) -> ForcedBreaks {
+    let kinds = BreakKinds {
+      page: self.kinds.page && active.page,
+      column: self.kinds.column && active.column,
+      region: self.kinds.region && active.region,
+    }
+    let mut side = PageSide.Any
+    if kinds.page { side = self.side }
+    return ForcedBreaks { kinds: kinds, side: side, all: self.all && active.any() }
+  }
+}
+
+pub fn avoidsBetween(value: BreakBetween, kind: FragmentainerKind) -> bool {
+  return value == BreakBetween.Avoid
+    || (value == BreakBetween.AvoidPage && kind == FragmentainerKind.Page)
+    || (value == BreakBetween.AvoidColumn && kind == FragmentainerKind.Column)
+    || (value == BreakBetween.AvoidRegion && kind == FragmentainerKind.Region)
+}
+
+pub fn avoidsInside(value: BreakInside, kind: FragmentainerKind) -> bool {
+  return value == BreakInside.Avoid
+    || (value == BreakInside.AvoidPage && kind == FragmentainerKind.Page)
+    || (value == BreakInside.AvoidColumn && kind == FragmentainerKind.Column)
+    || (value == BreakInside.AvoidRegion && kind == FragmentainerKind.Region)
+}
+
+// At a class A point, avoided combines applicable boundary values and common
+// ancestor break-inside constraints for kind. Class C callers use no forces
+// and combine the ancestors' break-inside constraints. This answers eligibility,
+// not which contexts must advance: use forced.active(active) for that decision.
+pub fn allowsBoundary(forced: ForcedBreaks, active: BreakKinds, kind: FragmentainerKind, avoided: bool, relaxation: BreakRelaxation) -> bool {
+  if !active.contains(kind) { return false }
+  let effective = forced.active(active)
+  if effective.kinds.any() { return true }
+  return !avoided || relaxation == BreakRelaxation.Avoidance
+}
+
+// Class B only: before/after count line boxes on either side of this candidate
+// within the enclosing block; avoided combines matching ancestor constraints.
+// Relaxing widows/orphans does not create a point before/after all line boxes.
+pub fn allowsLineBreak(before: usize, after: usize, orphans: usize, widows: usize, avoided: bool, relaxation: BreakRelaxation) -> bool {
+  if before == 0 || after == 0 { return false }
+  if avoided && relaxation != BreakRelaxation.Avoidance { return false }
+  if relaxation == BreakRelaxation.Strict { return before >= orphans && after >= widows }
+  return true
+}
+
+// §4.4 drops rule 3 before dropping rules 1, 2, and 4. Avoidance is the final
+// policy stage, not permission to invent a break point inside monolithic data.
+pub fn nextRelaxation(relaxation: BreakRelaxation) -> BreakRelaxation {
+  return match relaxation {
+    BreakRelaxation.Strict => BreakRelaxation.Lines
+    BreakRelaxation.Lines => BreakRelaxation.Avoidance
+    BreakRelaxation.Avoidance => BreakRelaxation.Avoidance
+  }
+}
+
+// §5.1 carries percentage progress, not remaining pixels, across fragmentainers.
+// extent is the freshly resolved FULL extent of the same size/offset on this
+// fragmentainer, not its height or the previous fragment's remaining length.
+// Inputs are finite nonnegative layout extents. Track offsets and sizes with
+// separate progress values; completing one must not consume the other's share.
+pub struct FractionalProgress { pub remaining: f64, correction: f64 }
+impl Copy for FractionalProgress {}
+impl FractionalProgress {
+  pub fn make() -> FractionalProgress { return FractionalProgress { remaining: 1.0, correction: 0.0 } }
+  pub fn resolve(self: &Self, extent: f64) -> f64 { return self.remaining * extent }
+
+  // Returns used space (at most available). A zero resolved extent completes
+  // even when no space remains; it never divides by zero or skips a page.
+  pub fn consume(self: &mut Self, extent: f64, available: f64) -> f64 {
+    if extent == 0.0 || self.remaining == 0.0 {
+      self.remaining = 0.0
+      self.correction = 0.0
+      return 0.0
+    }
+    let needed = self.resolve(extent)
+    if available >= needed {
+      self.remaining = 0.0
+      self.correction = 0.0
+      return needed
+    }
+    if available == 0.0 { return 0.0 }
+    // Compensate subtraction error without discarding genuine tiny extents.
+    // Repeated exact page divisions must not create a phantom final page.
+    let fraction = available / extent - self.correction
+    let remaining = self.remaining - fraction
+    self.correction = (self.remaining - remaining) - fraction
+    self.remaining = remaining
+    if self.remaining <= 0.0 {
+      self.remaining = 0.0
+      self.correction = 0.0
+    }
+    return available
+  }
+}

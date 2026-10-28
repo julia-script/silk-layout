@@ -1,0 +1,42 @@
+{
+  "name": "flex-max-freeze",
+  "kind": "chrome",
+  "features": [
+    "flex",
+    "max-size",
+    "freeze"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 300,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 1,
+          "maxWidth": 80,
+          "minWidth": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 1,
+          "minWidth": 0
+        }
+      }
+    ]
+  }
+}

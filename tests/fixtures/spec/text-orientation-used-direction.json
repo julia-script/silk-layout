@@ -1,0 +1,217 @@
+{
+  "name": "text-orientation-used-direction",
+  "kind": "spec",
+  "features": [
+    "text-orientation",
+    "direction",
+    "writing-mode",
+    "flex",
+    "positioned"
+  ],
+  "spec": ["https://drafts.csswg.org/css-writing-modes-4/#text-orientation"],
+  "expected": {
+    "sources": [
+      {"height": 600}, {"y": 0}, {"y": 0}, {"y": 20}, {"y": 100}, {"y": 0}, {"y": 20},
+      {"y": 200}, {"y": 80}, {"y": 60}, {"y": 300}, {"y": 0}, {"y": 20},
+      {"y": 400}, {"y": 0}, {"x": 40}, {"y": 500}, {"y": 10}
+    ]
+  },
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 800
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 60,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "textOrientation": "upright",
+          "direction": "rtl",
+          "display": "block"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 20,
+          "writingMode": "vertical-rl",
+          "textOrientation": "upright",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 4,
+          "height": 20,
+          "writingMode": "vertical-rl",
+          "textOrientation": "upright",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 60,
+          "height": 100,
+          "writingMode": "vertical-lr",
+          "textOrientation": "upright",
+          "direction": "rtl",
+          "display": "flex"
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 20,
+          "writingMode": "vertical-lr",
+          "textOrientation": "upright",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "display": "inline-block",
+          "width": 4,
+          "height": 20,
+          "writingMode": "vertical-lr",
+          "textOrientation": "upright",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 60,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "textOrientation": "sideways",
+          "direction": "rtl",
+          "display": "flex"
+        }
+      },
+      {
+        "parent": 7,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 20,
+          "writingMode": "vertical-rl",
+          "textOrientation": "sideways",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 7,
+        "style": {
+          "display": "inline-block",
+          "width": 4,
+          "height": 20,
+          "writingMode": "vertical-rl",
+          "textOrientation": "sideways",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 60,
+          "height": 100,
+          "writingMode": "sideways-lr",
+          "textOrientation": "upright",
+          "direction": "rtl",
+          "display": "flex"
+        }
+      },
+      {
+        "parent": 10,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 20,
+          "writingMode": "sideways-lr",
+          "textOrientation": "upright",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 10,
+        "style": {
+          "display": "inline-block",
+          "width": 4,
+          "height": 20,
+          "writingMode": "sideways-lr",
+          "textOrientation": "upright",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 60,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "textOrientation": "upright",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 13,
+        "style": {
+          "width": 50,
+          "height": 40,
+          "writingMode": "horizontal-tb",
+          "textOrientation": "upright",
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 14,
+        "style": {
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 60,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "textOrientation": "upright",
+          "direction": "rtl",
+          "position": "relative"
+        }
+      },
+      {
+        "parent": 16,
+        "style": {
+          "position": "absolute",
+          "width": 10,
+          "height": 20,
+          "inset": {
+            "top": 10,
+            "bottom": 30
+          },
+          "writingMode": "vertical-rl",
+          "direction": "rtl"
+        }
+      }
+    ]
+  }
+}

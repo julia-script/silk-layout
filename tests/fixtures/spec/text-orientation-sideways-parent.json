@@ -1,0 +1,86 @@
+{
+  "name": "text-orientation-sideways-parent",
+  "kind": "spec",
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 50,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "textOrientation": "sideways",
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "writingMode": "vertical-rl",
+          "textOrientation": "mixed",
+          "fontKey": 1,
+          "padding": {
+            "top": 1
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 5,
+          "height": 20,
+          "writingMode": "vertical-rl"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "firstBaseline": 8,
+        "lastBaseline": 8
+      },
+      {
+        "x": 40,
+        "width": 10,
+        "height": 1
+      },
+      {
+        "x": 35
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-writing-modes-4/#text-orientation",
+    "https://drafts.csswg.org/css-writing-modes-4/#dominant-baseline",
+    "https://drafts.csswg.org/css-inline-3/#alignment-baseline-property"
+  ],
+  "features": [
+    "text-orientation",
+    "baselines",
+    "font-metrics"
+  ]
+}

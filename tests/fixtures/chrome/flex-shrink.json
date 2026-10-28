@@ -1,0 +1,38 @@
+{
+  "name": "flex-shrink",
+  "kind": "chrome",
+  "features": [
+    "flex",
+    "shrink"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 150,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 100,
+          "minWidth": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 200,
+          "minWidth": 0
+        }
+      }
+    ]
+  }
+}

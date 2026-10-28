@@ -1,0 +1,60 @@
+{
+  "name": "inline-content-edge-containing-block",
+  "kind": "spec",
+  "features": [
+    "inline-fragments",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-position-3/#def-cb"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "position": "relative",
+          "padding": 2
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "position": "absolute",
+          "insetLeft": 0,
+          "insetTop": 0,
+          "width": 5,
+          "height": 7
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "height": 0
+      },
+      {
+        "x": 0,
+        "y": -2,
+        "width": 4,
+        "height": 4
+      },
+      {
+        "x": 2,
+        "y": 2
+      }
+    ]
+  }
+}

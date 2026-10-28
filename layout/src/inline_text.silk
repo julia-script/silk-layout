@@ -1,0 +1,204 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.string { String }
+import text { TextToken, TextTokenKind, TextCursor, TextError }
+import style { WhiteSpaceCollapse }
+import tree { Node, NO_NODE }
+
+pub struct NormalizedText<'a> {
+  pub tokens: List<TextToken<'a>>, pub origins: List<usize>,
+}
+
+fn whitespace(byte: u8) -> bool {
+  // DOM CR is a space, not an authored segment break. Other controls (including
+  // form feed) remain content; CSS Text requires visible control glyphs.
+  return byte == 9 || byte == 10 || byte == 13 || byte == 32
+}
+
+pub fn isCollapsibleWhitespace(value: string, mode: WhiteSpaceCollapse) -> bool {
+  let bytes = String.utf8Bytes(value)
+  let mut at: usize = 0
+  while at < bytes.length {
+    if !whitespace(bytes[at]) { return false }
+    if mode != WhiteSpaceCollapse.Collapse && mode != WhiteSpaceCollapse.Discard
+      && !(mode == WhiteSpaceCollapse.PreserveBreaks && bytes[at] != 10) { return false }
+    at = at + 1
+  }
+  return true
+}
+
+fn controlLength(bytes: &[u8], at: usize) -> usize {
+  // UAX #9 §2: ALM, LRM/RLM, embeddings/overrides/PDF, and isolates/PDI.
+  if bytes[at] < 0x80 { return 0 }
+  if at + 1 < bytes.length && bytes[at] == 0xd8 && bytes[at + 1] == 0x9c { return 2 }
+  if at + 2 >= bytes.length || bytes[at] != 0xe2 { return 0 }
+  let second = bytes[at + 1]
+  let third = bytes[at + 2]
+  if second == 0x80 && (third == 0x8e || third == 0x8f || (third >= 0xaa && third <= 0xae)) { return 3 }
+  if second == 0x81 && third >= 0xa6 && third <= 0xa9 { return 3 }
+  return 0
+}
+
+pub effect fn normalize<'a>(input: &[TextToken<'a>], sources: &[Node]) -> NormalizedText<'a> ! OutOfMemoryError ? &mut Allocator {
+  let mut result = NormalizedText { tokens: List<TextToken<'a>>.make(), origins: List<usize>.make() }
+  let mut pending = NO_NODE
+  let mut segment = false
+  let mut localPending = false
+  let mut localBreak = false
+  let mut sourceParent = NO_NODE
+  let mut index: usize = 0
+  while index < input.length {
+    let original = input[index]
+    if original.kind != TextTokenKind.Text {
+      // Phase I's segment-break trimming is local to each inline/text
+      // sequence. Only the later space-collapse step crosses its boundaries.
+      localPending = false
+      localBreak = false
+      run result.tokens.append(original)
+      run result.origins.append(index)
+      if original.kind == TextTokenKind.Atomic { pending = NO_NODE
+        segment = false }
+    } else {
+      let parent = sources[original.source].parent
+      if parent != sourceParent {
+        localPending = false
+        localBreak = false
+      }
+      sourceParent = parent
+      let bytes = String.utf8Bytes(original.text)
+      let mode = original.whiteSpaceCollapse
+      let collapse = mode == WhiteSpaceCollapse.Collapse || mode == WhiteSpaceCollapse.PreserveBreaks
+      let mut at: usize = 0
+      while at < bytes.length {
+        if whitespace(bytes[at]) {
+          let newline = bytes[at] == 10
+          if mode == WhiteSpaceCollapse.Discard {
+            // Discarded characters do not separate the surviving text or its
+            // collapsible spaces. Bidi controls are retained by the text path.
+            at = at + 1
+            continue
+          }
+          let preservedBreak = newline && mode != WhiteSpaceCollapse.Collapse && mode != WhiteSpaceCollapse.PreserveSpaces
+          if newline && mode != WhiteSpaceCollapse.PreserveSpaces && !segment && pending != NO_NODE && localPending {
+            // Text 3 §4.1.1 removes these spaces before transforming the LF.
+            // Display 3 §1 groups adjacent sibling text sources into one
+            // sequence: the surviving space therefore keeps the LF's real
+            // source/offset, not the removed preceding space's. Chrome Range
+            // attribution also favors the preceding space in a single DOM
+            // Text node; that is not a reason to change normalized ownership.
+            let values = result.tokens.asMutSlice()
+            values[pending].kind = TextTokenKind.Text
+            values[pending].text = ""
+            values[pending].sourceEnd = values[pending].sourceStart
+            pending = NO_NODE
+          }
+          if preservedBreak || !collapse {
+            let mut token = original
+            token.kind = TextTokenKind.PreservedSpace
+            token.text = " "
+            if preservedBreak {
+              token.kind = TextTokenKind.SegmentBreak
+              token.text = "\n"
+            } else if bytes[at] == 9 && mode != WhiteSpaceCollapse.PreserveSpaces {
+              token.kind = TextTokenKind.Tab
+              token.text = "\t"
+            }
+            let mut end = at + 1
+            if bytes[at] == 32 && mode != WhiteSpaceCollapse.BreakSpaces {
+              while end < bytes.length && bytes[end] == 32 { end = end + 1 }
+              token.text = String.slice(original.text, at, end - at)
+            }
+            token.sourceStart = original.sourceStart + at
+            token.sourceEnd = original.sourceStart + end
+            run result.tokens.append(token)
+            run result.origins.append(index)
+            // Preserved characters are never collapse partners. In particular,
+            // a collapsed space on either side of a preserved space survives.
+            pending = NO_NODE
+            segment = false
+            localPending = false
+            localBreak = preservedBreak
+            at = end - 1
+          } else if newline || !localBreak {
+            if pending == NO_NODE {
+              let mut token = original
+              token.kind = TextTokenKind.Space
+              token.text = " "
+              token.sourceStart = original.sourceStart + at
+              token.sourceEnd = token.sourceStart + 1
+              pending = result.tokens.length()
+              localPending = true
+              run result.tokens.append(token)
+              run result.origins.append(index)
+            }
+            if newline { segment = true }
+            localBreak = false
+          }
+          at = at + 1
+        } else {
+          let start = at
+          let controls = controlLength(bytes, at) != 0
+          if controls {
+            while at < bytes.length {
+              let count = controlLength(bytes, at)
+              if count == 0 { break }
+              at = at + count
+            }
+          } else {
+            while at < bytes.length && !whitespace(bytes[at]) && controlLength(bytes, at) == 0 { at = at + 1 }
+          }
+          let mut token = original
+          token.text = String.slice(original.text, start, at - start)
+          token.sourceStart = original.sourceStart + start
+          token.sourceEnd = original.sourceStart + at
+          run result.tokens.append(token)
+          run result.origins.append(index)
+          if !controls {
+            pending = NO_NODE
+            segment = false
+            localBreak = false
+          }
+        }
+      }
+    }
+    index = index + 1
+  }
+  return move result
+}
+
+pub fn length(token: &TextToken) -> usize {
+  if token.kind == TextTokenKind.Text || token.kind == TextTokenKind.PreservedSpace { return String.byteLength(token.text) }
+  if token.kind == TextTokenKind.Space || token.kind == TextTokenKind.Tab || token.kind == TextTokenKind.SegmentBreak || token.kind == TextTokenKind.Atomic { return 1 }
+  return 0
+}
+pub effect fn checked(tokens: &[TextToken], at: TextCursor) -> TextCursor ! TextError {
+  if at.unit > tokens.length || (at.unit == tokens.length && at.offset != 0) {
+    fail TextError { source: NO_NODE, message: "Text service returned a cursor outside the paragraph" }
+  }
+  if at.unit == tokens.length { return at }
+  let token = &tokens[at.unit]
+  let count = length(token)
+  if at.offset > count {
+    fail TextError { source: token.source, message: "Text service returned a cursor outside its token" }
+  }
+  if token.kind == TextTokenKind.Text && !String.isCharBoundary(token.text, at.offset) {
+    fail TextError { source: token.source, message: "Text service split a UTF-8 scalar" }
+  }
+  if count != 0 && at.offset == count { return TextCursor { unit: at.unit + 1, offset: 0 } }
+  return at
+}
+
+pub fn breakBoundary(tokens: &[TextToken], at: TextCursor) -> TextCursor {
+  let mut result = at
+  if result.offset != 0 { return result }
+  while result.unit < tokens.length {
+    let kind = tokens[result.unit].kind
+    if kind != TextTokenKind.Close && kind != TextTokenKind.Float && kind != TextTokenKind.Anchor { break }
+    result.unit = result.unit + 1
+  }
+  // Do not detach an inline's opening decoration from its first content.
+  while result.unit > 0 && tokens[result.unit - 1].kind == TextTokenKind.Open {
+    result.unit = result.unit - 1
+  }
+  return result
+}

@@ -1,0 +1,26 @@
+{
+  "name": "flex-audit-collapse-overfull-line",
+  "kind": "spec",
+  "features": ["flex", "collapse", "wrap"],
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#algo-line-break",
+    "https://drafts.csswg.org/css-flexbox-1/#algo-visibility"
+  ],
+  "input": {
+    "viewport": {"width": 400, "height": 300},
+    "nodes": [
+      {"parent": null, "style": {"display": "flex", "width": 100, "flexWrap": "wrap", "alignItems": "flex-start", "alignContent": "flex-start"}},
+      {"parent": 0, "style": {"width": 150, "height": 10, "flexShrink": 0}},
+      {"parent": 0, "style": {"width": 20, "height": 50, "visibility": "collapse"}},
+      {"parent": 0, "style": {"width": 20, "height": 10}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 100, "height": 60},
+      {"x": 0, "y": 0, "width": 150, "height": 10},
+      {"width": 0, "height": 0},
+      {"x": 0, "y": 10, "width": 20, "height": 10}
+    ]
+  }
+}

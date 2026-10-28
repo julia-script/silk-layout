@@ -1,0 +1,18 @@
+{
+  "name": "resource-zero-versus-absent",
+  "kind": "chrome",
+  "features": ["replaced", "zero-natural-dimension", "absent-natural-dimension"],
+  "description": "Zero is encoded as an absolute SVG length, never omitted. Width-only and height-only resources without ratios contrast with explicit zero dimensions; borders keep zero-area resource boxes observable. A zero natural ratio is degenerate and is encoded without a viewBox.",
+  "spec": ["https://www.w3.org/TR/css-images-3/#natural-dimensions", "https://www.w3.org/TR/SVG2/coords.html#IntrinsicSizing"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flow-root", "width": 400}},
+      {"parent": 0, "style": {"border": 1}, "natural": {"width": 120}},
+      {"parent": 0, "style": {"border": 1}, "natural": {"width": 0}},
+      {"parent": 0, "style": {"border": 1}, "natural": {"height": 30}},
+      {"parent": 0, "style": {"border": 1}, "natural": {"height": 0}},
+      {"parent": 0, "style": {"border": 1}, "natural": {"width": 0, "height": 0, "aspectRatio": 0}}
+    ]
+  }
+}

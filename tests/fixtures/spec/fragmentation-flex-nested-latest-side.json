@@ -1,0 +1,165 @@
+{
+  "name": "fragmentation-flex-nested-latest-side",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "flex",
+    "break-propagation",
+    "page-side-precedence"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-break-3/#forced-breaks",
+    "https://drafts.csswg.org/css-flexbox-1/#pagination"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 100
+    },
+    "fragmentation": {
+      "kind": "page",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 100,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 200,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 300,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 10,
+          "breakAfter": "left"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "width": 50
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "display": "flex",
+          "width": 50
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "width": 50,
+          "height": 20,
+          "breakBefore": "right"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "x": 100,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "x": 200,
+            "y": 0,
+            "width": 100,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 200,
+            "y": 0,
+            "width": 100,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 200,
+            "y": 0,
+            "width": 50,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 200,
+            "y": 0,
+            "width": 50,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 200,
+            "y": 0,
+            "width": 50,
+            "height": 20
+          }
+        ]
+      }
+    ]
+  }
+}

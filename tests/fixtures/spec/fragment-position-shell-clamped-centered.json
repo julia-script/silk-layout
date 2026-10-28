@@ -1,0 +1,145 @@
+{
+  "name": "fragment-position-shell-clamped-centered",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "position",
+    "sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-break-3/#varying-size-boxes",
+    "https://drafts.csswg.org/css-position-3/#abspos-breaking"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 400
+    },
+    "fragmentation": {
+      "kind": "page",
+      "writingMode": "horizontal-tb",
+      "frames": [
+        {
+          "x": 10,
+          "y": 20,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 200,
+          "y": 150,
+          "width": 160,
+          "height": 50
+        },
+        {
+          "x": 400,
+          "y": 300,
+          "width": 120,
+          "height": 50
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "height": 1,
+          "position": "relative",
+          "width": {
+            "percent": 0.5
+          },
+          "maxWidth": 70,
+          "marginLeft": "auto",
+          "marginRight": "auto"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "position": "absolute",
+          "insetTop": 40,
+          "insetLeft": 3,
+          "width": {
+            "percent": 0.5
+          },
+          "height": 70
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "position": "absolute",
+          "insetTop": 5,
+          "insetLeft": {
+            "percent": 0.5
+          },
+          "width": {
+            "percent": 0.5
+          },
+          "height": 65
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 35,
+            "y": 20,
+            "width": 50,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 38,
+            "y": 60,
+            "width": 25.0,
+            "height": 10
+          },
+          {
+            "x": 248,
+            "y": 150,
+            "width": 35.0,
+            "height": 50
+          },
+          {
+            "x": 433,
+            "y": 300,
+            "width": 30.0,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 50.5,
+            "y": 65,
+            "width": 12.5,
+            "height": 5
+          },
+          {
+            "x": 265.5,
+            "y": 150,
+            "width": 17.5,
+            "height": 50
+          },
+          {
+            "x": 448.0,
+            "y": 300,
+            "width": 15.0,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

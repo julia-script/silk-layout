@@ -1,0 +1,21 @@
+{
+  "name": "fragment-position-fixed-positioned-pages",
+  "kind": "spec",
+  "spec": ["https://drafts.csswg.org/css-position-3/#abspos-breaking", "https://drafts.csswg.org/css-position-3/#def-cb"],
+  "input": {
+    "viewport": {"width": 300, "height": 300},
+    "fragmentation": {"kind": "page", "frames": [{"x": 10, "y": 20, "width": 100, "height": 50}, {"x": 150, "y": 200, "width": 100, "height": 50}]},
+    "nodes": [
+      {"parent": null, "style": {"position": "relative", "height": 1}},
+      {"parent": 0, "style": {"position": "absolute", "insetTop": 60, "insetLeft": 3, "width": 10, "height": 5}},
+      {"parent": 0, "style": {"position": "fixed", "insetTop": 2, "insetLeft": 4, "width": 20, "height": 80}},
+      {"parent": 2, "style": {"position": "absolute", "insetTop": 7, "insetLeft": 1, "width": 5, "height": 5}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 10, "y": 20, "width": 100, "height": 1}]},
+    {"rects": [{"x": 153, "y": 210, "width": 10, "height": 5}]},
+    {"rects": [{"x": 14, "y": 22, "width": 20, "height": 80}, {"x": 154, "y": 202, "width": 20, "height": 80}]},
+    {"rects": [{"x": 15, "y": 29, "width": 5, "height": 5}, {"x": 155, "y": 209, "width": 5, "height": 5}]}
+  ]}
+}

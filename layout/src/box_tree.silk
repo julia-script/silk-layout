@@ -1,0 +1,463 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.option { Option }
+import silk.string { String }
+import geometry { Point }
+import style { Style, Display, DisplayOutside, DisplayInside, WritingMode, Direction, Align, Float, Position, BreakBetween, Visibility, DimensionKind, Overflow }
+import tree { Node, Measurement, NO_NODE }
+import context { outOfFlow, scrollable, overflowForAxis }
+
+pub enum BoxKind { Block, Flex, Inline, InlineFormatting, Text }
+pub struct BoxNode {
+  pub source: usize, pub styleOwner: usize, pub anonymousStyle: usize,
+  pub kind: BoxKind,
+  pub parent: usize, pub firstChild: usize, pub lastChild: usize, pub nextSibling: usize,
+  pub previousContinuation: usize, pub nextContinuation: usize,
+  pub firstForSource: bool, pub lastForSource: bool,
+  // Lifted in-flow blocks consumed between this inline piece and its successor.
+  pub interruptionFirst: usize, pub interruptionLast: usize,
+  pub anonymousBlock: bool, pub blockify: bool, pub independentRoot: bool,
+  pub firstFormattedRun: bool,
+  pub needsFragmentGeometry: bool,
+  pub fragmentMonolithic: bool,
+  // Propagation can depend on a descendant's computed flex lines.
+  pub beforeControl: bool, pub dynamicBefore: bool,
+  pub afterControl: bool, pub dynamicAfter: bool,
+  pub measureKey: usize, pub measurement: Measurement,
+  pub scrollOffset: Point,
+}
+impl Copy for BoxNode {}
+
+pub struct BoxTree<'a> {
+  pub boxes: List<BoxNode>,
+  pub anonymousStyles: List<Style>,
+  pub firstBySource: List<usize>, pub lastBySource: List<usize>,
+  pub sources: &'a [Node],
+  pub styles: &'a [Style],
+  textStyles: List<usize>,
+}
+impl BoxTree {
+  pub fn node(self: &Self, id: usize) -> &BoxNode { return &self.boxes.asSlice()[id] }
+  pub fn style(self: &Self, id: usize) -> &Style {
+    let node = self.node(id)
+    if node.anonymousStyle != NO_NODE { return &self.anonymousStyles.asSlice()[node.anonymousStyle] }
+    return &self.styles[self.sources[node.styleOwner].styleIndex]
+  }
+
+  // Generated parents precede their children. Resolve continuation ancestry
+  // and boundary dependencies once, not on each speculative fragment.
+  pub fn prepareFragmentation(self: &mut Self, frameMode: WritingMode) {
+    let mut index = self.boxes.length()
+    while index > 0 {
+      index = index - 1
+      let node = self.boxes.get(index)
+      let needed = index == 0 || node.needsFragmentGeometry || self.style(index).position != Position.Static
+      let style = self.style(index)
+      // Break3 §4.1 suppresses internal break points and propagation through
+      // monolithic content. Classification is stable across fragmentainers.
+      let inlineLevel = style.display.outsideIs(DisplayOutside.Inline) && !node.blockify
+      let orthogonal = node.kind != BoxKind.Flex && (style.writingMode == WritingMode.HorizontalTb) != (frameMode == WritingMode.HorizontalTb)
+      let x = overflowForAxis(style, true)
+      let y = overflowForAxis(style, false)
+      let mut dimension = style.height
+      let mut maximum = style.maxHeight
+      let mut overflow = y
+      if style.writingMode != WritingMode.HorizontalTb { dimension = style.width
+        maximum = style.maxWidth
+        overflow = x }
+      let scrolling = x == Overflow.Auto || x == Overflow.Scroll || y == Overflow.Auto || y == Overflow.Scroll
+      let clipped = overflow == Overflow.Hidden && dimension.kind != DimensionKind.Auto && maximum.kind == DimensionKind.None
+      let monolithic = style.replaced || node.measurement != Measurement.None || inlineLevel || orthogonal || scrolling || clipped
+      let applicable = !outOfFlow(style) && (node.kind == BoxKind.Block || node.kind == BoxKind.Flex)
+      let mut before = applicable && style.breakBefore != BreakBetween.Auto
+      let mut dynamicBefore = false
+      let ownAfter = applicable && style.breakAfter != BreakBetween.Auto
+      let mut after = ownAfter
+      let mut dynamicAfter = false
+      if applicable && !monolithic {
+        let mut child = node.firstChild
+        let mut first = true
+        while child != NO_NODE {
+          let item = self.node(child)
+          let childStyle = self.style(child)
+          let eligible = !outOfFlow(childStyle) && (node.kind == BoxKind.Flex && childStyle.visibility != Visibility.Collapse || node.kind == BoxKind.Block && childStyle.float == Float.None)
+          if eligible {
+            if node.kind == BoxKind.Flex {
+              before = before || item.beforeControl
+              dynamicBefore = dynamicBefore || item.beforeControl
+              after = after || item.afterControl
+              dynamicAfter = dynamicAfter || item.afterControl
+            } else {
+              if first {
+                before = before || item.beforeControl
+                dynamicBefore = item.dynamicBefore
+                first = false
+              }
+              after = ownAfter || item.afterControl
+              dynamicAfter = item.dynamicAfter
+            }
+          }
+          child = item.nextSibling
+        }
+      }
+      let boxes = self.boxes.asMutSlice()
+      boxes[index].needsFragmentGeometry = needed
+      boxes[index].fragmentMonolithic = monolithic
+      boxes[index].beforeControl = before
+      boxes[index].dynamicBefore = dynamicBefore
+      boxes[index].afterControl = after
+      boxes[index].dynamicAfter = dynamicAfter
+      if node.parent != NO_NODE && needed {
+        boxes[node.parent].needsFragmentGeometry = true
+      }
+    }
+  }
+
+  effect fn append(self: &mut Self, node: BoxNode, parent: usize) -> usize ! OutOfMemoryError ? &mut Allocator {
+    let id = self.boxes.length()
+    let mut value = move node
+    value.parent = parent
+    let source = value.source
+    run self.boxes.append(move value)
+    if parent != NO_NODE {
+      let last = self.node(parent).lastChild
+      let boxes = self.boxes.asMutSlice()
+      if last == NO_NODE { boxes[parent].firstChild = id } else { boxes[last].nextSibling = id }
+      boxes[parent].lastChild = id
+    }
+    if source != NO_NODE {
+      let previous = self.lastBySource.get(source)
+      if previous == NO_NODE {
+        self.firstBySource.set(source, id)
+      } else {
+        let boxes = self.boxes.asMutSlice()
+        boxes[previous].nextContinuation = id
+        boxes[previous].lastForSource = false
+        boxes[id].previousContinuation = previous
+        boxes[id].firstForSource = false
+      }
+      self.lastBySource.set(source, id)
+    }
+    return id
+  }
+
+  // Anonymous boxes inherit text properties, never element geometry or layout.
+  effect fn ensureAnonymousStyle(self: &mut Self, flow: &mut Flow) -> usize ! OutOfMemoryError ? &mut Allocator {
+    if flow.anonymousStyle == NO_NODE {
+      let style = inherited(self.style(flow.container))
+      let slot = self.anonymousStyles.length()
+      run self.anonymousStyles.append(move style)
+      flow.anonymousStyle = slot
+    }
+    return flow.anonymousStyle
+  }
+
+  // Each flow container shares one immutable anonymous style between its runs.
+  // CSS2 9.2.1.1: inherit from the enclosing box, not a split inline ancestor.
+  effect fn ensureRun(self: &mut Self, flow: &mut Flow) -> usize ! OutOfMemoryError ? &mut Allocator {
+    if flow.inlineRun != NO_NODE { return flow.inlineRun }
+    let owner = self.node(flow.container).styleOwner
+    drop run self.ensureAnonymousStyle(&mut flow)
+    let mut node = anonymous(BoxKind.InlineFormatting, owner, flow.anonymousStyle)
+    node.anonymousBlock = flow.hasBlock
+    node.firstFormattedRun = !flow.hasBlock
+    let id = run self.append(node, flow.container)
+    flow.inlineRun = id
+    return id
+  }
+
+  effect fn appendText(self: &mut Self, source: usize, parent: usize) ! OutOfMemoryError ? &mut Allocator {
+    let styleIndex = self.sources[source].styleIndex
+    let mut slot = self.textStyles.get(styleIndex)
+    if slot == NO_NODE {
+      let mut style = inherited(&self.styles[styleIndex])
+      style.display = Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Flow }
+      slot = self.anonymousStyles.length()
+      run self.anonymousStyles.append(move style)
+      self.textStyles.set(styleIndex, slot)
+    }
+    let mut node = anonymous(BoxKind.Text, source, slot)
+    node.source = source
+    node.firstForSource = true
+    node.lastForSource = true
+    drop run self.append(node, parent)
+  }
+
+  // Contents descendants stay in the same pending sequence. Delay generation
+  // until the full sequence is known so whitespace-only flex items vanish.
+  effect fn flushFlexText(self: &mut Self, flow: &mut Flow) ! OutOfMemoryError ? &mut Allocator {
+    if flow.flexText.length() == 0 { return }
+    if flow.flexTextVisible {
+      let slot = run self.ensureAnonymousStyle(&mut flow)
+      let owner = self.node(flow.container).styleOwner
+      let mut item = anonymous(BoxKind.Block, owner, slot)
+      item.anonymousBlock = true
+      item.blockify = true
+      item.independentRoot = true
+      let itemId = run self.append(item, flow.container)
+      let runId = run self.append(anonymous(BoxKind.InlineFormatting, owner, slot), itemId)
+      let mut index: usize = 0
+      while index < flow.flexText.length() {
+        run self.appendText(flow.flexText.get(index), runId)
+        index = index + 1
+      }
+    }
+    flow.flexText.clear()
+    flow.flexTextVisible = false
+  }
+
+  // The original generated ancestry is a persistent stack of inline scopes.
+  // New runs have increasing arena IDs, so a source's latest piece is current
+  // iff it was allocated after this run. Only interrupted scopes need walking.
+  effect fn inlineParent(self: &mut Self, flow: &mut Flow, inline: usize) -> usize ! OutOfMemoryError ? &mut Allocator {
+    let runId = run self.ensureRun(&mut flow)
+    if inline == NO_NODE { return runId }
+    let source = self.node(inline).source
+    let latest = self.lastBySource.get(source)
+    if latest > runId { return latest }
+    let oldParent = self.node(inline).parent
+    let mut ancestor = NO_NODE
+    if self.node(oldParent).kind == BoxKind.Inline { ancestor = oldParent }
+    let parent = run self.inlineParent(&mut flow, ancestor)
+    let mut piece = self.boxes.get(latest)
+    piece.parent = NO_NODE
+    piece.firstChild = NO_NODE
+    piece.lastChild = NO_NODE
+    piece.nextSibling = NO_NODE
+    piece.previousContinuation = NO_NODE
+    piece.nextContinuation = NO_NODE
+    piece.firstForSource = false
+    piece.lastForSource = true
+    piece.interruptionFirst = NO_NODE
+    piece.interruptionLast = NO_NODE
+    return run self.append(piece, parent)
+  }
+
+  effect fn children(self: &mut Self, source: usize, flow: &mut Flow, inline: usize, parentWritingMode: WritingMode) ! OutOfMemoryError ? &mut Allocator {
+    let mut child = self.sources[source].firstChild
+    while child != NO_NODE {
+      let next = self.sources[child].nextSibling
+      run self.construct(child, &mut flow, inline, parentWritingMode)
+      child = next
+    }
+  }
+
+  effect fn construct(self: &mut Self, source: usize, flow: &mut Flow, inline: usize, parentWritingMode: WritingMode) ! OutOfMemoryError ? &mut Allocator {
+    if self.sources[source].isText() {
+      if self.node(flow.container).kind == BoxKind.Flex {
+        run flow.flexText.append(source)
+        match self.sources[source].text() {
+          Option<string>.Some { value } => {
+            if !documentWhitespace(value) { flow.flexTextVisible = true }
+          }
+          Option<string>.None => {}
+        }
+      } else {
+        let parent = run self.inlineParent(&mut flow, inline)
+        run self.appendText(source, parent)
+      }
+      return
+    }
+    let sourceStyle = &self.styles[self.sources[source].styleIndex]
+    if sourceStyle.display.isNone() { return }
+    if sourceStyle.display.isContents() {
+      // Display 4 2.5 / Appendix B: replaced contents computes to none.
+      if !sourceStyle.replaced {
+        run self.children(source, &mut flow, inline, parentWritingMode)
+      }
+      return
+    }
+
+    run self.flushFlexText(&mut flow)
+    let flexChild = self.node(flow.container).kind == BoxKind.Flex
+    let style = &self.styles[self.sources[source].styleIndex]
+    let positioned = outOfFlow(style)
+    let floating = style.float != Float.None && !flexChild && !positioned
+    let blockify = flexChild || positioned || floating
+    let mut display = style.display
+    if blockify { display = display.blockified() }
+    let inlineLevel = display.outsideIs(DisplayOutside.Inline)
+    let differentWritingMode = style.writingMode != parentWritingMode
+    let writingMode = style.writingMode
+    let replaced = style.replaced
+    let measured = self.sources[source].measurement != Measurement.None
+    let mut kind = BoxKind.Block
+    if !replaced {
+      if display.insideIs(DisplayInside.Flex) { kind = BoxKind.Flex }
+      if inlineLevel && display.insideIs(DisplayInside.Flow) && !differentWritingMode { kind = BoxKind.Inline }
+    }
+    // Writing Modes 4 3.2 compares against the nearest box-generating parent;
+    // contents and generated wrappers do not substitute a source parent here.
+    let independent = kind != BoxKind.Inline && (replaced || flexChild || positioned || floating || differentWritingMode || display.insideIs(DisplayInside.FlowRoot) || kind == BoxKind.Flex || style.alignContent != Align.Normal || scrollable(style.overflowX) || scrollable(style.overflowY) || source == 0)
+    let node = BoxNode {
+      source: source, styleOwner: source, anonymousStyle: NO_NODE, kind: kind,
+      parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE,
+      previousContinuation: NO_NODE, nextContinuation: NO_NODE,
+      firstForSource: true, lastForSource: true,
+      interruptionFirst: NO_NODE, interruptionLast: NO_NODE,
+      anonymousBlock: false, blockify: blockify, independentRoot: independent,
+      firstFormattedRun: false,
+      needsFragmentGeometry: false,
+      fragmentMonolithic: false,
+      beforeControl: false, dynamicBefore: false,
+      afterControl: false, dynamicAfter: false,
+      measureKey: self.sources[source].measureKey, measurement: self.sources[source].measurement,
+      scrollOffset: self.sources[source].scrollOffset,
+    }
+
+    if kind == BoxKind.Inline {
+      let parent = run self.inlineParent(&mut flow, inline)
+      let id = run self.append(node, parent)
+      if !measured { run self.children(source, &mut flow, id, writingMode) }
+      // Even a trailing block requires an empty closing continuation.
+      drop run self.inlineParent(&mut flow, id)
+      return
+    }
+
+    let mut parent = flow.container
+    if positioned || floating {
+      // A hypothetical inline-level positioned box needs an inline anchor
+      // even before real content. It does not give the resulting line height.
+      // Flex static positions remain owned by the flex formatting context.
+      if flow.inlineRun != NO_NODE || (floating && inline != NO_NODE)
+        || (positioned && !flexChild && style.display.outsideIs(DisplayOutside.Inline)) {
+        parent = run self.inlineParent(&mut flow, inline)
+      }
+    } else if inlineLevel {
+      parent = run self.inlineParent(&mut flow, inline)
+    } else if !flexChild {
+      flow.hasBlock = true
+      flow.inlineRun = NO_NODE
+    }
+    let id = run self.append(node, parent)
+    if !positioned && !floating && !inlineLevel && !flexChild {
+      let mut ancestor = inline
+      while ancestor != NO_NODE {
+        let piece = self.lastBySource.get(self.node(ancestor).source)
+        let boxes = self.boxes.asMutSlice()
+        if boxes[piece].interruptionFirst == NO_NODE { boxes[piece].interruptionFirst = id }
+        boxes[piece].interruptionLast = id
+        ancestor = self.node(ancestor).parent
+        if self.node(ancestor).kind != BoxKind.Inline { ancestor = NO_NODE }
+      }
+    }
+    // Replaced content is opaque even if the source API contains descendants.
+    // Measured leaves retain their provider key; construction invents no text.
+    if !replaced && !measured {
+      let mut nested = Flow.make(id)
+      run self.children(source, &mut nested, NO_NODE, writingMode)
+      run self.finishFlow(&mut nested)
+    }
+  }
+
+  effect fn finishFlow(self: &mut Self, flow: &mut Flow) ! OutOfMemoryError ? &mut Allocator {
+    run self.flushFlexText(&mut flow)
+    if !flow.hasBlock { return }
+    let mut child = self.node(flow.container).firstChild
+    while child != NO_NODE {
+      let next = self.node(child).nextSibling
+      if self.node(child).kind == BoxKind.InlineFormatting {
+        let boxes = self.boxes.asMutSlice()
+        boxes[child].anonymousBlock = true
+      }
+      child = next
+    }
+  }
+}
+
+struct Flow {
+  container: usize, inlineRun: usize, anonymousStyle: usize, hasBlock: bool,
+  flexText: List<usize>, flexTextVisible: bool,
+}
+impl Flow {
+  fn make(container: usize) -> Flow {
+    return Flow { container: container, inlineRun: NO_NODE, anonymousStyle: NO_NODE, hasBlock: false, flexText: List<usize>.make(), flexTextVisible: false }
+  }
+}
+
+fn inherited(parent: &Style) -> Style {
+  let mut style = Style.make()
+  style.direction = parent.direction
+  style.writingMode = parent.writingMode
+  style.textOrientation = parent.textOrientation
+  style.visibility = parent.visibility
+  style.fontKey = parent.fontKey
+  style.lineHeight = parent.lineHeight
+  style.orphans = parent.orphans
+  style.widows = parent.widows
+  style.textAlign = parent.textAlign
+  style.textAlignLast = parent.textAlignLast
+  style.textJustify = parent.textJustify
+  style.textIndent = parent.textIndent
+  style.textWrap = parent.textWrap
+  style.whiteSpaceCollapse = parent.whiteSpaceCollapse
+  style.tabSize = parent.tabSize
+  return move style
+}
+
+fn documentWhitespace(value: string) -> bool {
+  let bytes = String.utf8Bytes(value)
+  let mut index: usize = 0
+  while index < bytes.length {
+    let byte = bytes[index]
+    if byte != 9 && byte != 10 && byte != 13 && byte != 32 { return false }
+    index = index + 1
+  }
+  return true
+}
+
+fn anonymous(kind: BoxKind, owner: usize, slot: usize) -> BoxNode {
+  return BoxNode {
+    source: NO_NODE, styleOwner: owner, anonymousStyle: slot, kind: kind,
+    parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE,
+    previousContinuation: NO_NODE, nextContinuation: NO_NODE,
+    firstForSource: false, lastForSource: false,
+    interruptionFirst: NO_NODE, interruptionLast: NO_NODE,
+    anonymousBlock: false, blockify: false, independentRoot: false,
+    firstFormattedRun: kind == BoxKind.InlineFormatting,
+    needsFragmentGeometry: false,
+    fragmentMonolithic: false,
+    beforeControl: false, dynamicBefore: false,
+    afterControl: false, dynamicAfter: false,
+    measureKey: NO_NODE, measurement: Measurement.None,
+    scrollOffset: Point { x: 0.0, y: 0.0 },
+  }
+}
+
+pub effect fn build<'a>(sources: &'a [Node], styles: &'a [Style], writingMode: WritingMode, direction: Direction) -> BoxTree<'a> ! OutOfMemoryError ? &mut Allocator {
+  let mut result = BoxTree {
+    boxes: List<BoxNode>.make(), anonymousStyles: List<Style>.make(),
+    firstBySource: List<usize>.make(), lastBySource: List<usize>.make(), sources: sources,
+    styles: styles, textStyles: List<usize>.make(),
+  }
+  run result.boxes.reserveExact(sources.length + 1)
+  run result.firstBySource.reserveExact(sources.length)
+  run result.lastBySource.reserveExact(sources.length)
+  let mut index: usize = 0
+  while index < sources.length {
+    run result.firstBySource.append(NO_NODE)
+    run result.lastBySource.append(NO_NODE)
+    index = index + 1
+  }
+  run result.textStyles.reserveExact(styles.length)
+  index = 0
+  while index < styles.length {
+    run result.textStyles.append(NO_NODE)
+    index = index + 1
+  }
+  // Source zero is an embeddable subtree, not an HTML root element. The
+  // synthetic viewport owns the host's initial flow-root boundary.
+  let mut viewportStyle = Style.make()
+  viewportStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  viewportStyle.writingMode = writingMode
+  viewportStyle.direction = direction
+  run result.anonymousStyles.append(move viewportStyle)
+  let mut viewport = anonymous(BoxKind.Block, NO_NODE, 0)
+  viewport.independentRoot = true
+  let viewportId = run result.append(viewport, NO_NODE)
+  let mut flow = Flow.make(viewportId)
+  if sources.length != 0 { run result.construct(0, &mut flow, NO_NODE, writingMode) }
+  run result.finishFlow(&mut flow)
+  return move result
+}

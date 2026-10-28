@@ -1,0 +1,46 @@
+{
+  "name": "inline-static-anchor",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 5,
+          "height": 7,
+          "position": "absolute"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 20
+        }
+      }
+    ]
+  }
+}

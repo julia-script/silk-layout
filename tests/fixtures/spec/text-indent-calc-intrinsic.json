@@ -1,0 +1,77 @@
+{
+  "name": "text-indent-calc-intrinsic",
+  "kind": "spec",
+  "features": [
+    "text-indent"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": "max-content",
+          "fontKey": 1,
+          "textIndent": {
+            "length": 10,
+            "percent": 0.2
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "text": "ab "
+      },
+      {
+        "parent": 0,
+        "text": "cd"
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#text-indent-property",
+    "https://drafts.csswg.org/css-sizing-3/#intrinsic-sizes",
+    "https://drafts.csswg.org/css-pseudo-4/#first-formatted-line"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "width": 35,
+        "height": 20
+      },
+      {
+        "x": 17,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

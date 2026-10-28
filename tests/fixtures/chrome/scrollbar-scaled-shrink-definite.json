@@ -1,0 +1,58 @@
+{
+  "name": "scrollbar-scaled-shrink-definite-chrome",
+  "kind": "chrome",
+  "features": [
+    "scrollbars",
+    "flex-shrink"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "scrollbars": {
+      "auto": {
+        "horizontal": 12,
+        "vertical": 15,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      },
+      "thin": {
+        "horizontal": 6,
+        "vertical": 8,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 150,
+          "height": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 100,
+          "minWidth": 0,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "scroll"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 100,
+          "minWidth": 0,
+          "height": 100
+        }
+      }
+    ]
+  }
+}

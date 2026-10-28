@@ -1,0 +1,137 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.option { Option }
+import silk.list { List }
+import geometry { Measure, OptionalSize, Rect }
+import text { TextMeasure, TextError }
+import tree { Tree, LayoutTree, NO_NODE }
+import box_tree as Boxes
+import box_tree { BoxTree }
+import layout_pass { LayoutPass }
+import context { Input }
+import fragmentation { Fragmentainers, Fragmentainer, FragmentAncestor, FragmentationError }
+import breaks { BreakRelaxation, nextRelaxation }
+import engine { layoutNode }
+import positioned { positionFragmentedTree }
+import fragment_fit { WidowCheck, collectWidows, validateWidows }
+
+fn rootInput(output: &LayoutPass, frame: Fragmentainer, first: Fragmentainer) -> Input {
+  let size = OptionalSize.definite(frame.rect.width, frame.rect.height)
+  let mut input = Input.make(size)
+  input.initialContainingBlock = OptionalSize.definite(first.rect.width, first.rect.height)
+  match output.frames.page(0) {
+    Option<FragmentAncestor>.Some { value } => { input.initialContainingBlock = OptionalSize.definite(value.rect.width, value.rect.height) }
+    Option<FragmentAncestor>.None => {}
+  }
+  input.known = size
+  input.blockRoot = true
+  input.parentWritingMode = output.frames.writingMode
+  input.fragmentation.active = true
+  input.fragmentation.offset = 0.0
+  input.fragmentation.limit = frame.blockExtent
+  input.fragmentation.kind = output.frames.kind
+  input.fragmentation.contextKinds = output.frames.activeKinds()
+  input.fragmentation.boundaryKinds = output.frames.boundaryKinds(frame.index)
+  input.fragmentation.contextStart = frame.index == 0
+  input.fragmentation.marginStart = true
+  input.fragmentation.marginEnd = true
+  input.fragmentation.rectoOnRight = output.frames.rectoOnRight
+  let state = output.resumes.get(0)
+  input.fragmentation.forcedStart = state.beforeHandled && state.requested.kinds.any() && !state.started
+  return input
+}
+
+// Search legal points before relaxing rules. Descendant algorithms backtrack
+// to their latest eligible boundary; only exhaustion of the entire frame drops
+// line-count constraints, then avoidance, then permits emergency progress.
+effect fn fitRoot<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, input: Input) -> BreakRelaxation ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let checkpoint = output.checkpoint()
+  let mut request = input
+  while true {
+    drop run layoutNode(nodes, &mut output, &mut measurer, 0, request)
+    let state = output.resumes.get(0)
+    if !state.blocked {
+      output.closeCheckpoint(checkpoint)
+      return request.fragmentation.relaxation
+    }
+    let forced = state.before.forced.active(request.fragmentation.activeKinds())
+    output.restoreCheckpoint(checkpoint)
+    if forced.kinds.any() && !state.started && !state.beforeHandled {
+      run output.defer(0, forced)
+      output.closeCheckpoint(checkpoint)
+      return request.fragmentation.relaxation
+    }
+    if request.fragmentation.relaxation == BreakRelaxation.Avoidance {
+      output.closeCheckpoint(checkpoint)
+      fail FragmentationError { frame: output.frame, message: "Content could not advance after fragmentation constraints were relaxed" }
+    }
+    request.fragmentation.relaxation = nextRelaxation(request.fragmentation.relaxation)
+  }
+}
+
+effect fn fitWithWidows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, first: Fragmentainer, checks: &mut List<WidowCheck>) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let frame = run output.requiredFrame(output.frame)
+  let checkpoint = output.checkpoint()
+  let start = output.fragments.values.length()
+  while true {
+    let input = rootInput(&output, frame, first)
+    let relaxation = run fitRoot(nodes, &mut output, &mut measurer, input)
+    run collectWidows(nodes, &output, start, relaxation, &mut checks)
+    if checks.length() == 0 { break }
+    let preview = output.checkpoint()
+    let mut future = frame.index + 1
+    let mut failed = NO_NODE
+    let mut limit = NO_NODE
+    while true {
+      run output.beginFrame(future)
+      drop run output.ensureFrameRoot(future)
+      let geometry = run output.requiredFrame(future)
+      let futureInput = rootInput(&output, geometry, first)
+      drop run fitRoot(nodes, &mut output, &mut measurer, futureInput)
+      let decision = validateWidows(&output, checks.asMutSlice())
+      failed = decision.failed
+      limit = decision.limit
+      if failed != NO_NODE || !decision.pending { break }
+      future = future + 1
+    }
+    output.restoreCheckpoint(preview)
+    output.closeCheckpoint(preview)
+    if failed == NO_NODE { break }
+    output.restoreCheckpoint(checkpoint)
+    run output.limitLines(failed, limit)
+  }
+  output.closeCheckpoint(checkpoint)
+}
+
+pub effect fn computeFragmented<'frames, 'source, M: Measure + TextMeasure>(tree: &'source Tree, output: &'frames mut LayoutTree, measurer: &mut M, viewport: OptionalSize, frames: Fragmentainers<'frames>) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  run frames.validate()
+  TextMeasure.beginTextLayout(&mut measurer)
+  let mut nodes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), frames.writingMode, frames.direction)
+  nodes.prepareFragmentation(frames.writingMode)
+  run output.prepare(nodes.boxes.length())
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
+  pass.frames = move frames
+  run pass.beginFrame(0)
+  let first = run pass.requiredFrame(0)
+  let mut checks = List<WidowCheck>.make()
+  while true {
+    let mut index: usize = 0
+    while true {
+      run pass.beginFrame(index)
+      drop run pass.ensureFrameRoot(index)
+      run fitWithWidows(&nodes, &mut pass, &mut measurer, first, &mut checks)
+      let complete = pass.resumes.get(0).contentComplete
+      pass.resumes.acceptFrame()
+      if complete { break }
+      index = index + 1
+    }
+    let overflow = run positionFragmentedTree(&nodes, &mut pass, &mut measurer, viewport, tree.viewportScrollOffset)
+    if !pass.needsRelayout {
+      drop pass
+      output.fragments.resolveLocations()
+      output.viewportOverflow = overflow
+      output.adopt(move nodes)
+      return
+    }
+    pass.restart()
+  }
+}

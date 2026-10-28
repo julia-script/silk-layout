@@ -1,0 +1,60 @@
+{
+  "name": "inline-interruption-phantom-empty-inline",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 300
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "position": "relative",
+          "boxDecorationBreak": "clone",
+          "border": 2,
+          "lineHeight": {
+            "length": 10
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "block",
+          "width": 30,
+          "height": 15
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "block",
+          "width": 40,
+          "height": 20
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visuren.html#anonymous-block-level",
+    "https://github.com/w3c/csswg-drafts/issues/13711",
+    "https://github.com/w3c/csswg-drafts/issues/14104"
+  ]
+}

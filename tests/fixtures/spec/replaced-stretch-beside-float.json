@@ -1,0 +1,63 @@
+{
+  "name": "replaced-stretch-beside-float",
+  "kind": "spec",
+  "features": [
+    "replaced",
+    "float",
+    "justify-self"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#justify-block"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "float": "left",
+          "width": 50,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "replaced": true,
+          "justifySelf": "stretch"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 150
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 20
+      },
+      {
+        "x": 50,
+        "y": 0,
+        "width": 150,
+        "height": 150
+      }
+    ]
+  }
+}

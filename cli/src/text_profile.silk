@@ -1,0 +1,973 @@
+import layout.lib { FontMetrics, WritingMode, Direction, UnicodeBidi, WhiteSpaceCollapse, TextJustify, TextError, TextContext, TextToken, TextTokenKind, TextCursor, TextBreak, TextBreakKind, TextAnalysis, TextParagraph, TextLevel, TextShapeRequest, TextRun }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.string { String }
+import silk.usize
+import protocol as P
+
+// Bounded fixture repertoire, not a Unicode database or a font fallback. Rules
+// below follow UAX #9 §§3.3–3.4 and CSS Writing Modes 4 §2.4. Source offsets
+// always address UTF-8; generated CSS controls have no source interval.
+enum Bidi { L, R, AL, EN, AN, WS, S, B, ON, LRE, RLE, LRO, RLO, PDF, LRI, RLI, FSI, PDI }
+struct Decoded { kind: Bidi, length: usize, visible: bool }
+impl Copy for Decoded {}
+struct Profile { simple: bool, hasStrong: bool }
+impl Copy for Profile {}
+struct Character {
+  original: Bidi, kind: Bidi, embedding: u8, level: u8, unwrapped: u8,
+  unit: usize, start: usize, end: usize,
+  matching: usize, outer: usize,
+  previous: usize, following: usize, next: usize, incoming: bool,
+}
+impl Copy for Character {}
+struct Status { level: u8, overrideKind: Bidi, isolate: bool }
+impl Copy for Status {}
+
+fn isolate(kind: Bidi) -> bool {
+  return kind == Bidi.LRI || kind == Bidi.RLI || kind == Bidi.FSI
+}
+fn removed(kind: Bidi) -> bool {
+  return kind == Bidi.LRE || kind == Bidi.RLE || kind == Bidi.LRO || kind == Bidi.RLO || kind == Bidi.PDF
+}
+fn strong(kind: Bidi) -> bool { return kind == Bidi.L || kind == Bidi.R || kind == Bidi.AL }
+fn neutral(kind: Bidi) -> bool { return kind == Bidi.WS || kind == Bidi.S || kind == Bidi.B || kind == Bidi.ON || isolate(kind) || kind == Bidi.PDI }
+fn resettable(kind: Bidi) -> bool { return kind == Bidi.WS || kind == Bidi.S || kind == Bidi.B || isolate(kind) || kind == Bidi.PDI || removed(kind) }
+fn directionKind(direction: Direction) -> Bidi {
+  if direction == Direction.Rtl { return Bidi.R }
+  return Bidi.L
+}
+fn levelKind(level: u8) -> Bidi {
+  if level % 2 == 1 { return Bidi.R }
+  return Bidi.L
+}
+fn surrounding(kind: Bidi) -> Bidi {
+  if kind == Bidi.EN || kind == Bidi.AN { return Bidi.R }
+  return kind
+}
+fn higher(a: u8, b: u8) -> u8 { if a > b { return a } return b }
+fn tokenLength(token: TextToken) -> usize {
+  if token.kind == TextTokenKind.Text || token.kind == TextTokenKind.PreservedSpace { return String.byteLength(token.text) }
+  if token.kind == TextTokenKind.Space || token.kind == TextTokenKind.Tab || token.kind == TextTokenKind.SegmentBreak || token.kind == TextTokenKind.Atomic { return 1 }
+  return 0
+}
+fn textToken(kind: TextTokenKind) -> bool {
+  return kind == TextTokenKind.Text || kind == TextTokenKind.Space || kind == TextTokenKind.PreservedSpace
+    || kind == TextTokenKind.Tab || kind == TextTokenKind.SegmentBreak
+}
+fn preserved(kind: TextTokenKind) -> bool {
+  return kind == TextTokenKind.PreservedSpace || kind == TextTokenKind.Tab
+}
+effect fn validateWhitespace(token: TextToken) ! TextError {
+  if token.kind == TextTokenKind.Text { return }
+  let bytes = String.utf8Bytes(token.text)
+  if token.kind == TextTokenKind.PreservedSpace {
+    if bytes.length == 0 { fail P.invalidText(token.source, "fixture preserved-space runs must not be empty") }
+    let mut index: usize = 0
+    while index < bytes.length {
+      if bytes[index] != 32 { fail P.invalidText(token.source, "fixture preserved-space runs must contain normalized spaces") }
+      index = index + 1
+    }
+    return
+  }
+  let mut expected: u8 = 32
+  if token.kind == TextTokenKind.Tab { expected = 9 }
+  if token.kind == TextTokenKind.SegmentBreak { expected = 10 }
+  if bytes.length != 1 || bytes[0] != expected {
+    fail P.invalidText(token.source, "fixture whitespace tokens must contain their single normalized character")
+  }
+}
+
+effect fn decode(bytes: &[u8], at: usize, source: usize) -> Decoded ! TextError {
+  let byte = bytes[at]
+  if (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) {
+    return Decoded { kind: Bidi.L, length: 1, visible: true }
+  }
+  if byte >= 48 && byte <= 57 { return Decoded { kind: Bidi.EN, length: 1, visible: true } }
+  if byte == 32 { return Decoded { kind: Bidi.WS, length: 1, visible: true } }
+  if byte == 9 { return Decoded { kind: Bidi.S, length: 1, visible: false } }
+  if byte == 10 { return Decoded { kind: Bidi.B, length: 1, visible: false } }
+  if byte == 0xd8 && at + 1 < bytes.length && bytes[at + 1] == 0x9c {
+    return Decoded { kind: Bidi.AL, length: 2, visible: false }
+  }
+  if byte == 0xe2 && at + 2 < bytes.length {
+    let middle = bytes[at + 1]
+    let last = bytes[at + 2]
+    if middle == 0x80 {
+      if last == 0x8e { return Decoded { kind: Bidi.L, length: 3, visible: false } }
+      if last == 0x8f { return Decoded { kind: Bidi.R, length: 3, visible: false } }
+      if last == 0xaa { return Decoded { kind: Bidi.LRE, length: 3, visible: false } }
+      if last == 0xab { return Decoded { kind: Bidi.RLE, length: 3, visible: false } }
+      if last == 0xac { return Decoded { kind: Bidi.PDF, length: 3, visible: false } }
+      if last == 0xad { return Decoded { kind: Bidi.LRO, length: 3, visible: false } }
+      if last == 0xae { return Decoded { kind: Bidi.RLO, length: 3, visible: false } }
+    }
+    if middle == 0x81 {
+      if last == 0xa6 { return Decoded { kind: Bidi.LRI, length: 3, visible: false } }
+      if last == 0xa7 { return Decoded { kind: Bidi.RLI, length: 3, visible: false } }
+      if last == 0xa8 { return Decoded { kind: Bidi.FSI, length: 3, visible: false } }
+      if last == 0xa9 { return Decoded { kind: Bidi.PDI, length: 3, visible: false } }
+    }
+  }
+  fail P.invalidText(source, "fixture text supports only ASCII letters, digits, normalized spaces, and Bidi_Control characters")
+}
+
+// Validate even on the allocation-free path. LRM is L and therefore harmless
+// to that path; every other control requires the complete paragraph algorithm.
+effect fn uniformProfile(context: TextContext, fonts: &[FontMetrics]) -> Profile ! TextError {
+  let mut simple = context.direction == Direction.Ltr || context.unicodeBidi == UnicodeBidi.Plaintext
+  let mut hasStrong = false
+  if context.unicodeBidi == UnicodeBidi.BidiOverride || context.unicodeBidi == UnicodeBidi.IsolateOverride { simple = false }
+  if context.writingMode != WritingMode.HorizontalTb {
+    fail P.invalidText(usize.MAX, "fixture text supports only horizontal-tb writing mode")
+  }
+  let mut unit: usize = 0
+  while unit < context.tokens.length {
+    let token = context.tokens[unit]
+    if token.kind == TextTokenKind.Open || token.kind == TextTokenKind.Close {
+      if token.unicodeBidi != UnicodeBidi.Normal { simple = false }
+    }
+    if token.kind == TextTokenKind.Atomic && token.replacedInline
+      && (token.unicodeBidi == UnicodeBidi.Embed || token.unicodeBidi == UnicodeBidi.BidiOverride)
+      && token.direction == Direction.Rtl { simple = false }
+    if token.kind == TextTokenKind.Atomic && strong(atomicKind(token)) { hasStrong = true }
+    if textToken(token.kind) {
+      if token.writingMode != WritingMode.HorizontalTb {
+        fail P.invalidText(token.source, "fixture text supports only horizontal-tb writing mode")
+      }
+      if token.fontKey >= fonts.length {
+        fail P.invalidText(token.source, "fixture text fontKey does not identify a supplied font")
+      }
+      let size = fonts[token.fontKey].fontSize
+      if size < 0.0 || size - size != 0.0 { fail P.invalidText(token.source, "fixture text requires a finite nonnegative font size") }
+      let bytes = String.utf8Bytes(token.text)
+      run validateWhitespace(token)
+      if token.kind == TextTokenKind.SegmentBreak { simple = false }
+      let mut at: usize = 0
+      while at < bytes.length {
+        let decoded = run decode(bytes, at, token.source)
+        if token.kind == TextTokenKind.Text && (decoded.kind == Bidi.S || decoded.kind == Bidi.B) {
+          fail P.invalidText(token.source, "fixture tabs and segment breaks require dedicated normalized tokens")
+        }
+        if decoded.kind != Bidi.L && decoded.kind != Bidi.EN && decoded.kind != Bidi.WS && decoded.kind != Bidi.S { simple = false }
+        if strong(decoded.kind) { hasStrong = true }
+        at = at + decoded.length
+      }
+    }
+    unit = unit + 1
+  }
+  return Profile { simple: simple, hasStrong: hasStrong }
+}
+
+effect fn appendBreak(output: &mut List<TextBreak>, unit: usize, kind: TextBreakKind) ! OutOfMemoryError ? &mut Allocator {
+  if output.length() > 0 {
+    let lastIndex = output.length() - 1
+    let last = output.get(lastIndex)
+    if last.at.unit == unit && last.at.offset == 0 {
+      if kind == TextBreakKind.Forced { output.set(lastIndex, TextBreak { at: last.at, kind: kind }) }
+      return
+    }
+  }
+  run output.append(TextBreak { at: TextCursor { unit: unit, offset: 0 }, kind: kind })
+}
+effect fn appendCharacter(chars: &mut List<Character>, kind: Bidi, unit: usize, start: usize, end: usize)
+  ! OutOfMemoryError ? &mut Allocator {
+  run chars.append(Character {
+    original: kind, kind: kind, embedding: 0, level: 0, unwrapped: 0,
+    unit: unit, start: start, end: end,
+    matching: usize.MAX, outer: usize.MAX, previous: usize.MAX, following: usize.MAX,
+    next: usize.MAX, incoming: false,
+  })
+}
+effect fn control(chars: &mut List<Character>, kind: Bidi) ! OutOfMemoryError ? &mut Allocator {
+  run appendCharacter(&mut chars, kind, usize.MAX, 0, 0)
+}
+effect fn scope(chars: &mut List<Character>, policy: UnicodeBidi, direction: Direction, open: bool)
+  ! OutOfMemoryError ? &mut Allocator {
+  if policy == UnicodeBidi.Normal { return }
+  if !open {
+    if policy == UnicodeBidi.Embed || policy == UnicodeBidi.BidiOverride || policy == UnicodeBidi.IsolateOverride {
+      run control(&mut chars, Bidi.PDF)
+    }
+    if policy == UnicodeBidi.Isolate || policy == UnicodeBidi.Plaintext || policy == UnicodeBidi.IsolateOverride {
+      run control(&mut chars, Bidi.PDI)
+    }
+    return
+  }
+  if policy == UnicodeBidi.Plaintext || policy == UnicodeBidi.IsolateOverride { run control(&mut chars, Bidi.FSI) }
+  if policy == UnicodeBidi.Isolate {
+    let mut kind = Bidi.LRI
+    if direction == Direction.Rtl { kind = Bidi.RLI }
+    run control(&mut chars, kind)
+  }
+  if policy == UnicodeBidi.Embed {
+    let mut kind = Bidi.LRE
+    if direction == Direction.Rtl { kind = Bidi.RLE }
+    run control(&mut chars, kind)
+  }
+  if policy == UnicodeBidi.BidiOverride || policy == UnicodeBidi.IsolateOverride {
+    let mut kind = Bidi.LRO
+    if direction == Direction.Rtl { kind = Bidi.RLO }
+    run control(&mut chars, kind)
+  }
+}
+fn atomicKind(token: TextToken) -> Bidi {
+  if token.replacedInline && (token.unicodeBidi == UnicodeBidi.Embed || token.unicodeBidi == UnicodeBidi.BidiOverride) {
+    return directionKind(token.direction)
+  }
+  return Bidi.ON
+}
+
+// Pair original isolate controls before applying any overrides. A linked
+// opener stack in the records also handles arbitrary overflow nesting.
+fn pairIsolates(chars: &mut List<Character>) {
+  let mut top = usize.MAX
+  let mut index: usize = 0
+  while index < chars.length() {
+    let mut item = chars.get(index)
+    if isolate(item.original) {
+      item.outer = top
+      top = index
+    } else if item.original == Bidi.PDI && top != usize.MAX {
+      let mut opener = chars.get(top)
+      opener.matching = index
+      item.matching = top
+      chars.set(top, opener)
+      top = opener.outer
+    }
+    chars.set(index, item)
+    index = index + 1
+  }
+}
+fn firstStrong(chars: &List<Character>, start: usize, end: usize) -> Bidi {
+  let mut index = start
+  while index < end {
+    let item = chars.get(index)
+    if isolate(item.original) {
+      if item.matching == usize.MAX || item.matching >= end { return Bidi.ON }
+      index = item.matching + 1
+    } else {
+      if strong(item.original) { return item.original }
+      index = index + 1
+    }
+  }
+  return Bidi.ON
+}
+
+fn explicitLevels(chars: &mut List<Character>, base: u8) {
+  // Every valid push raises the level, so 126 slots suffice for max_depth=125.
+  let mut stack: [Status; 126] = [Status { level: 0, overrideKind: Bidi.ON, isolate: false }; 126]
+  stack[0].level = base
+  let mut top: usize = 0
+  let mut overflowIsolate: usize = 0
+  let mut overflowEmbedding: usize = 0
+  let mut validIsolate: usize = 0
+  let mut index: usize = 0
+  while index < chars.length() {
+    let mut item = chars.get(index)
+    let kind = item.original
+    item.embedding = stack[top].level
+    if kind == Bidi.B {
+      // X8: B is outside all embeddings, overrides and isolates.
+      item.embedding = base
+    } else if kind == Bidi.LRE || kind == Bidi.RLE || kind == Bidi.LRO || kind == Bidi.RLO || isolate(kind) {
+      let isIsolate = isolate(kind)
+      let mut right = kind == Bidi.RLE || kind == Bidi.RLO || kind == Bidi.RLI
+      if kind == Bidi.FSI {
+        let mut end = chars.length()
+        if item.matching != usize.MAX { end = item.matching }
+        let first = firstStrong(&chars, index + 1, end)
+        right = first == Bidi.R || first == Bidi.AL
+      }
+      if isIsolate && stack[top].overrideKind != Bidi.ON { item.kind = stack[top].overrideKind }
+      let mut level = stack[top].level + 1
+      if (right && level % 2 == 0) || (!right && level % 2 == 1) { level = level + 1 }
+      if level <= 125 && overflowIsolate == 0 && overflowEmbedding == 0 {
+        let mut overrideKind = Bidi.ON
+        if kind == Bidi.LRO { overrideKind = Bidi.L }
+        if kind == Bidi.RLO { overrideKind = Bidi.R }
+        top = top + 1
+        stack[top] = Status { level: level, overrideKind: overrideKind, isolate: isIsolate }
+        if isIsolate { validIsolate = validIsolate + 1 }
+      } else if isIsolate { overflowIsolate = overflowIsolate + 1 }
+      else if overflowIsolate == 0 { overflowEmbedding = overflowEmbedding + 1 }
+    } else if kind == Bidi.PDI {
+      if overflowIsolate > 0 { overflowIsolate = overflowIsolate - 1 }
+      else if validIsolate > 0 {
+        overflowEmbedding = 0
+        while !stack[top].isolate { top = top - 1 }
+        top = top - 1
+        validIsolate = validIsolate - 1
+      }
+      item.embedding = stack[top].level
+      if stack[top].overrideKind != Bidi.ON { item.kind = stack[top].overrideKind }
+    } else if kind == Bidi.PDF {
+      if overflowIsolate == 0 {
+        if overflowEmbedding > 0 { overflowEmbedding = overflowEmbedding - 1 }
+        else if top > 0 && !stack[top].isolate { top = top - 1 }
+      }
+      item.embedding = stack[top].level
+    } else if stack[top].overrideKind != Bidi.ON { item.kind = stack[top].overrideKind }
+    item.level = item.embedding
+    chars.set(index, item)
+    index = index + 1
+  }
+}
+
+// X9 is a semantic removal only: keep source records for exact shape coverage.
+// Link level runs, then join matching isolate ends according to BD13/X10.
+fn linkSequences(chars: &mut List<Character>) {
+  let mut previous = usize.MAX
+  let mut index: usize = 0
+  while index < chars.length() {
+    let mut item = chars.get(index)
+    if !removed(item.original) {
+      item.previous = previous
+      if previous != usize.MAX {
+        let mut before = chars.get(previous)
+        before.following = index
+        chars.set(previous, before)
+      }
+      chars.set(index, item)
+      previous = index
+    }
+    index = index + 1
+  }
+  index = 0
+  while index < chars.length() {
+    let mut item = chars.get(index)
+    if !removed(item.original) {
+      if item.following != usize.MAX && chars.get(item.following).embedding == item.embedding {
+        item.next = item.following
+      } else if isolate(item.original) && item.matching != usize.MAX {
+        item.next = item.matching
+      }
+      chars.set(index, item)
+      if item.next != usize.MAX {
+        let mut next = chars.get(item.next)
+        next.incoming = true
+        chars.set(item.next, next)
+      }
+    }
+    index = index + 1
+  }
+}
+fn resolveSequence(chars: &mut List<Character>, first: usize, base: u8) {
+  let head = chars.get(first)
+  let mut preceding = base
+  if head.previous != usize.MAX { preceding = chars.get(head.previous).embedding }
+  let sos = levelKind(higher(head.embedding, preceding))
+  let mut last = first
+  while chars.get(last).next != usize.MAX { last = chars.get(last).next }
+  let tail = chars.get(last)
+  let mut following = base
+  if !isolate(tail.original) && tail.following != usize.MAX { following = chars.get(tail.following).embedding }
+  let eos = levelKind(higher(tail.embedding, following))
+
+  // W1, W4–W6 and N0 have no applicable characters in this repertoire.
+  // W2 must precede W3: ALM changes subsequent EN to AN, not to EN or L.
+  let mut previousStrong = sos
+  let mut index = first
+  while index != usize.MAX {
+    let mut item = chars.get(index)
+    if item.kind == Bidi.EN && previousStrong == Bidi.AL { item.kind = Bidi.AN }
+    if strong(item.kind) { previousStrong = item.kind }
+    chars.set(index, item)
+    index = item.next
+  }
+  previousStrong = sos
+  index = first
+  while index != usize.MAX {
+    let mut item = chars.get(index)
+    if item.kind == Bidi.AL { item.kind = Bidi.R }
+    if item.kind == Bidi.EN && previousStrong == Bidi.L { item.kind = Bidi.L }
+    if item.kind == Bidi.L || item.kind == Bidi.R { previousStrong = item.kind }
+    chars.set(index, item)
+    index = item.next
+  }
+
+  // N1/N2 resolve complete neutral sequences, including isolate formatting.
+  let mut before = sos
+  index = first
+  while index != usize.MAX {
+    let item = chars.get(index)
+    if neutral(item.kind) {
+      let start = index
+      while index != usize.MAX && neutral(chars.get(index).kind) { index = chars.get(index).next }
+      let mut after = eos
+      if index != usize.MAX { after = surrounding(chars.get(index).kind) }
+      let mut resolved = levelKind(head.embedding)
+      if before == after { resolved = before }
+      let mut at = start
+      while at != index {
+        let mut value = chars.get(at)
+        value.kind = resolved
+        chars.set(at, value)
+        at = value.next
+      }
+      before = resolved
+    } else {
+      before = surrounding(item.kind)
+      index = item.next
+    }
+  }
+  index = first
+  while index != usize.MAX {
+    let mut item = chars.get(index)
+    if item.embedding % 2 == 0 {
+      if item.kind == Bidi.R { item.level = item.embedding + 1 }
+      else if item.kind == Bidi.EN || item.kind == Bidi.AN { item.level = item.embedding + 2 }
+    } else if item.kind == Bidi.L || item.kind == Bidi.EN || item.kind == Bidi.AN {
+      item.level = item.embedding + 1
+    }
+    chars.set(index, item)
+    index = item.next
+  }
+}
+
+effect fn appendLevel(analysis: &mut TextAnalysis, start: TextCursor, end: TextCursor, level: u8, unwrapped: u8, isRemoved: bool)
+  ! OutOfMemoryError ? &mut Allocator {
+  if level == analysis.level && unwrapped == analysis.level && !isRemoved { return }
+  if analysis.levels.length() > 0 {
+    let lastIndex = analysis.levels.length() - 1
+    let mut last = analysis.levels.get(lastIndex)
+    if last.level == level && last.unwrappedLevel == unwrapped && last.removed == isRemoved && last.end.equal(start) {
+      last.end = end
+      analysis.levels.set(lastIndex, last)
+      return
+    }
+  }
+  run analysis.levels.append(TextLevel { start: start, end: end, level: level, unwrappedLevel: unwrapped, removed: isRemoved })
+}
+
+// Resolve one paragraph in a reusable buffer. Generated CSS scopes are closed
+// before B and reconstructed for the next paragraph; literal controls are not.
+effect fn resolveParagraph(context: TextContext, chars: &mut List<Character>, analysis: &mut TextAnalysis, startUnit: usize, endUnit: usize)
+  ! OutOfMemoryError ? &mut Allocator {
+  pairIsolates(&mut chars)
+  let first = firstStrong(&chars, 0, chars.length())
+  let mut base: u8 = 0
+  if context.unicodeBidi == UnicodeBidi.Plaintext {
+    if first == Bidi.R || first == Bidi.AL { base = 1 }
+  } else if context.direction == Direction.Rtl { base = 1 }
+  explicitLevels(&mut chars, base)
+  linkSequences(&mut chars)
+  let mut index: usize = 0
+  while index < chars.length() {
+    let item = chars.get(index)
+    if !removed(item.original) && !item.incoming { resolveSequence(&mut chars, index, base) }
+    index = index + 1
+  }
+  // Retained X9 controls take preceding resolved affinity. They remain
+  // source-addressable zero-advance runs and are reset at each actual line end.
+  let mut preceding = base
+  index = 0
+  while index < chars.length() {
+    let mut item = chars.get(index)
+    if removed(item.original) { item.level = preceding }
+    else { preceding = item.level }
+    chars.set(index, item)
+    index = index + 1
+  }
+  let paragraph = TextParagraph { end: TextCursor { unit: endUnit, offset: 0 }, level: base, hasStrong: strong(first) }
+  if startUnit == 0 {
+    analysis.level = base
+    // The fallback descriptor always spans the complete context, even when
+    // the paragraph list supplies the actual per-paragraph endpoints.
+    analysis.paragraph = TextParagraph {
+      end: TextCursor { unit: context.tokens.length, offset: 0 }, level: base, hasStrong: strong(first),
+    }
+  }
+  if endUnit < context.tokens.length || analysis.paragraphs.length() > 0 {
+    run analysis.paragraphs.append(paragraph)
+  }
+  // L1 for the unwrapped paragraph: separators reset themselves and the
+  // preceding whitespace, independently of the final trailing suffix.
+  let mut reset = true
+  index = chars.length()
+  while index > 0 {
+    index = index - 1
+    let mut item = chars.get(index)
+    if item.original == Bidi.S || item.original == Bidi.B { reset = true }
+    else if !resettable(item.original) { reset = false }
+    item.unwrapped = item.level
+    if reset { item.unwrapped = base }
+    chars.set(index, item)
+  }
+  index = 0
+  let mut affinityIndex: usize = 0
+  let mut unit = startUnit
+  while unit < endUnit {
+    let length = tokenLength(context.tokens[unit])
+    while index < chars.length() && (chars.get(index).unit == usize.MAX || chars.get(index).unit < unit) { index = index + 1 }
+    if length == 0 {
+      let mut affinity = base
+      let mut unwrapped = base
+      if affinityIndex < index { affinityIndex = index }
+      // Empty structural units follow the next semantic source character,
+      // never one in another paragraph. X9 controls retain preceding affinity.
+      while affinityIndex < chars.length()
+        && (chars.get(affinityIndex).unit == usize.MAX || removed(chars.get(affinityIndex).original)) {
+        affinityIndex = affinityIndex + 1
+      }
+      if affinityIndex < chars.length() {
+        affinity = chars.get(affinityIndex).level
+        unwrapped = chars.get(affinityIndex).unwrapped
+      }
+      run appendLevel(&mut analysis, TextCursor { unit: unit, offset: 0 }, TextCursor { unit: unit + 1, offset: 0 }, affinity, unwrapped, false)
+    } else {
+      while index < chars.length() && chars.get(index).unit == unit {
+        let item = chars.get(index)
+        let mut end = TextCursor { unit: unit, offset: item.end }
+        if item.end == length { end = TextCursor { unit: unit + 1, offset: 0 } }
+        run appendLevel(&mut analysis, TextCursor { unit: unit, offset: item.start }, end, item.level, item.unwrapped, removed(item.original))
+        index = index + 1
+      }
+    }
+    unit = unit + 1
+  }
+}
+
+pub effect fn analyze(context: TextContext, fonts: &[FontMetrics], output: &mut List<TextBreak>) -> TextAnalysis
+  ! OutOfMemoryError | TextError ? &mut Allocator {
+  let profile = run uniformProfile(context, fonts)
+  let mut pending = usize.MAX
+  let mut unit: usize = 0
+  while unit < context.tokens.length {
+    let token = context.tokens[unit]
+    if token.kind != TextTokenKind.Open && token.kind != TextTokenKind.Close {
+      if pending != usize.MAX && !preserved(token.kind) {
+        run appendBreak(&mut output, pending, TextBreakKind.Soft)
+        pending = usize.MAX
+      }
+      if preserved(token.kind) {
+        pending = unit + 1
+        if token.whiteSpaceCollapse == WhiteSpaceCollapse.BreakSpaces {
+          run appendBreak(&mut output, pending, TextBreakKind.Soft)
+          pending = usize.MAX
+        }
+      }
+    }
+    if token.kind == TextTokenKind.Atomic && unit > 0 { run appendBreak(&mut output, unit, TextBreakKind.Soft) }
+    if token.kind == TextTokenKind.Space || token.kind == TextTokenKind.Atomic {
+      run appendBreak(&mut output, unit + 1, TextBreakKind.Soft)
+    }
+    if token.kind == TextTokenKind.SegmentBreak { run appendBreak(&mut output, unit + 1, TextBreakKind.Forced) }
+    unit = unit + 1
+  }
+  if pending != usize.MAX { run appendBreak(&mut output, pending, TextBreakKind.Soft) }
+  run appendBreak(&mut output, context.tokens.length, TextBreakKind.Soft)
+  if profile.simple { return TextAnalysis.uniform(context.tokens.length, 0, 0, profile.hasStrong) }
+
+  let mut analysis = TextAnalysis.uniform(context.tokens.length, 0, 0, false)
+  let mut chars = List<Character>.make()
+  let mut scopes = List<usize>.make()
+  let rootOverride = context.unicodeBidi == UnicodeBidi.BidiOverride || context.unicodeBidi == UnicodeBidi.IsolateOverride
+  if rootOverride { run scope(&mut chars, UnicodeBidi.BidiOverride, context.direction, true) }
+  let mut paragraphStart: usize = 0
+  unit = 0
+  while unit < context.tokens.length {
+    let token = context.tokens[unit]
+    if token.kind == TextTokenKind.Open || token.kind == TextTokenKind.Close {
+      run scope(&mut chars, token.unicodeBidi, token.direction, token.kind == TextTokenKind.Open)
+      if token.unicodeBidi != UnicodeBidi.Normal {
+        if token.kind == TextTokenKind.Open { run scopes.append(unit) }
+        else if scopes.length() > 0 {
+          let remaining = scopes.length() - 1
+          scopes.truncate(remaining)
+        }
+      }
+    } else if token.kind == TextTokenKind.SegmentBreak {
+      let mut nesting = scopes.length()
+      while nesting > 0 {
+        nesting = nesting - 1
+        let opener = context.tokens[scopes.get(nesting)]
+        run scope(&mut chars, opener.unicodeBidi, opener.direction, false)
+      }
+      if rootOverride { run scope(&mut chars, UnicodeBidi.BidiOverride, context.direction, false) }
+      run appendCharacter(&mut chars, Bidi.B, unit, 0, 1)
+      run resolveParagraph(context, &mut chars, &mut analysis, paragraphStart, unit + 1)
+      chars.clear()
+      paragraphStart = unit + 1
+      if rootOverride { run scope(&mut chars, UnicodeBidi.BidiOverride, context.direction, true) }
+      nesting = 0
+      while nesting < scopes.length() {
+        let opener = context.tokens[scopes.get(nesting)]
+        run scope(&mut chars, opener.unicodeBidi, opener.direction, true)
+        nesting = nesting + 1
+      }
+    } else if token.kind == TextTokenKind.Atomic {
+      run appendCharacter(&mut chars, atomicKind(token), unit, 0, 1)
+    } else if textToken(token.kind) {
+      let bytes = String.utf8Bytes(token.text)
+      let mut at: usize = 0
+      while at < bytes.length {
+        let decoded = run decode(bytes, at, token.source)
+        run appendCharacter(&mut chars, decoded.kind, unit, at, at + decoded.length)
+        at = at + decoded.length
+      }
+    }
+    unit = unit + 1
+  }
+  if paragraphStart < context.tokens.length || paragraphStart == 0 {
+    if rootOverride { run scope(&mut chars, UnicodeBidi.BidiOverride, context.direction, false) }
+    run resolveParagraph(context, &mut chars, &mut analysis, paragraphStart, context.tokens.length)
+  }
+  return move analysis
+}
+
+fn includedEnd(request: TextShapeRequest, unit: usize) -> usize {
+  if unit == request.end.unit { return request.end.offset }
+  return tokenLength(request.context.tokens[unit])
+}
+effect fn validateCursor(context: TextContext, cursor: TextCursor) ! TextError {
+  if cursor.unit > context.tokens.length || (cursor.unit == context.tokens.length && cursor.offset != 0) {
+    fail P.invalidText(usize.MAX, "fixture shape cursor is outside its context")
+  }
+  if cursor.unit == context.tokens.length { return }
+  let token = context.tokens[cursor.unit]
+  if cursor.offset > tokenLength(token) { fail P.invalidText(token.source, "fixture shape cursor is outside its token") }
+  if token.kind == TextTokenKind.Text && cursor.offset < String.byteLength(token.text) {
+    let byte = String.utf8Bytes(token.text)[cursor.offset]
+    if byte >= 0x80 && byte < 0xc0 { fail P.invalidText(token.source, "fixture shape cursor splits a UTF-8 scalar") }
+  }
+}
+
+fn wordJustification(method: TextJustify) -> bool {
+  return method == TextJustify.Auto || method == TextJustify.InterWord
+}
+
+fn hangingSpace(request: TextShapeRequest, cursor: TextCursor) -> bool {
+  let mut index: usize = 0
+  while index < request.hangingRanges.length {
+    let range = request.hangingRanges[index]
+    if !cursor.before(range.start) && cursor.before(range.end) { return true }
+    index = index + 1
+  }
+  return false
+}
+
+fn expandingWord(request: TextShapeRequest, token: TextToken, cursor: TextCursor, trailing: TextCursor) -> bool {
+  if !wordJustification(token.textJustify) { return false }
+  if token.kind == TextTokenKind.Space { return true }
+  if token.kind != TextTokenKind.PreservedSpace || hangingSpace(request, cursor) { return false }
+  // Auto retains the fixture's established trailing-separator policy.
+  // Explicit methods use the engine's actual visual hanging ranges.
+  return token.textJustify != TextJustify.Auto || cursor.before(trailing)
+}
+
+// Only the positive inter-character path needs scratch storage: one entry per
+// existing source/bidi run, never one fragment or record per character.
+struct JustificationRun {
+  output: usize, cursor: TextCursor, scope: usize, level: u8,
+  glyphs: usize, weight: f64, leftWeight: f64, rightWeight: f64,
+  barrier: bool, object: bool,
+}
+impl Copy for JustificationRun {}
+struct JustificationScope { parent: usize, depth: usize, method: TextJustify }
+impl Copy for JustificationScope {}
+
+fn commonMethod(scopes: &List<JustificationScope>, first: usize, second: usize) -> TextJustify {
+  let mut a = first
+  let mut b = second
+  while scopes.get(a).depth > scopes.get(b).depth { a = scopes.get(a).parent }
+  while scopes.get(b).depth > scopes.get(a).depth { b = scopes.get(b).parent }
+  while a != b {
+    a = scopes.get(a).parent
+    b = scopes.get(b).parent
+  }
+  return scopes.get(a).method
+}
+
+fn reverseJustification(runs: &mut List<JustificationRun>, start: usize, end: usize) {
+  let mut low = start
+  let mut high = end
+  while low < high {
+    high = high - 1
+    if low == high { break }
+    let first = runs.get(low)
+    let last = runs.get(high)
+    runs.set(low, last)
+    runs.set(high, first)
+    low = low + 1
+  }
+}
+
+effect fn justifyCharacters(request: TextShapeRequest, runs: &mut List<JustificationRun>, output: &mut List<TextRun>)
+  ! OutOfMemoryError | TextError ? &mut Allocator {
+  let mut scopes = List<JustificationScope>.make()
+  run scopes.append(JustificationScope { parent: 0, depth: 0, method: request.context.textJustify })
+  let mut scopeIndex: usize = 0
+  let mut unit: usize = 0
+  let mut index: usize = 0
+  // Include scopes opened before the requested line. Retain ancestry after
+  // closing a scope because visual neighbors need not be logical neighbors.
+  while index < runs.length() {
+    let mut item = runs.get(index)
+    while unit < item.cursor.unit {
+      let token = request.context.tokens[unit]
+      if token.kind == TextTokenKind.Open {
+        let parent = scopes.get(scopeIndex)
+        run scopes.append(JustificationScope { parent: scopeIndex, depth: parent.depth + 1, method: token.textJustify })
+        scopeIndex = scopes.length() - 1
+      } else if token.kind == TextTokenKind.Close {
+        scopeIndex = scopes.get(scopeIndex).parent
+        // Before the first retained run, closed scopes cannot be ancestors
+        // of any endpoint. Reuse their slots rather than retain the prefix.
+        if index == 0 { scopes.truncate(scopeIndex + 1) }
+      }
+      unit = unit + 1
+    }
+    item.scope = scopeIndex
+    runs.set(index, item)
+    index = index + 1
+  }
+
+  let mut total = 0.0
+  let mut start: usize = 0
+  while start < runs.length() {
+    let paragraphEnd = request.analysis.paragraphAt(runs.get(start).cursor).end
+    let mut end = start
+    let mut maximum: u8 = 0
+    while end < runs.length() && runs.get(end).cursor.before(paragraphEnd) {
+      maximum = higher(maximum, runs.get(end).level)
+      end = end + 1
+    }
+    // L2 on runs is sufficient: all visible units inside a run share its
+    // source, method and level. Reversing their order cannot change its weight.
+    let mut level = maximum
+    while level > 0 {
+      index = start
+      while index < end {
+        if runs.get(index).level < level { index = index + 1 }
+        else {
+          let first = index
+          while index < end && runs.get(index).level >= level { index = index + 1 }
+          reverseJustification(&mut runs, first, index)
+        }
+      }
+      level = level - 1
+    }
+    let mut previous = usize.MAX
+    index = start
+    while index < end {
+      let mut item = runs.get(index)
+      if item.barrier { previous = usize.MAX }
+      else if item.glyphs > 0 {
+        if previous != usize.MAX {
+          let mut before = runs.get(previous)
+          // Consecutive atomic inlines form one character unit (§7.2).
+          if !(before.object && item.object)
+            && commonMethod(&scopes, before.scope, item.scope) == TextJustify.InterCharacter {
+            // CSS Text 3 §§6.4.1, 7.2: each adjacent source owns half
+            // the gap. Invisible controls own none; line edges have no pair.
+            before.weight = before.weight + 0.5
+            item.weight = item.weight + 0.5
+            before.rightWeight = before.rightWeight + 0.5
+            item.leftWeight = item.leftWeight + 0.5
+            runs.set(previous, before)
+          }
+        }
+        previous = index
+      }
+      runs.set(index, item)
+      index = index + 1
+    }
+    start = end
+  }
+  index = 0
+  while index < runs.length() {
+    total = total + runs.get(index).weight
+    index = index + 1
+  }
+  if total == 0.0 { return }
+  index = 0
+  while index < runs.length() {
+    let item = runs.get(index)
+    if item.weight > 0.0 {
+      match output.get(item.output) {
+        TextRun.Text { unit: runUnit, start: runStart, end: runEnd, advance, fontKey, bidiLevel, shapeKey } => {
+          let expanded = advance + (item.weight / total) * request.justificationSpace
+          if expanded - expanded != 0.0 { fail P.invalidText(request.context.tokens[runUnit].source, "fixture glyph advance is not finite") }
+          output.set(item.output, TextRun.Text { unit: runUnit, start: runStart, end: runEnd, advance: expanded,
+            fontKey: fontKey, bidiLevel: bidiLevel, shapeKey: shapeKey })
+        }
+        TextRun.Object { unit: runUnit, bidiLevel, lineLeftSpacing: _, lineRightSpacing: _ } => {
+          output.set(item.output, TextRun.Object { unit: runUnit, bidiLevel: bidiLevel,
+            lineLeftSpacing: (item.leftWeight / total) * request.justificationSpace,
+            lineRightSpacing: (item.rightWeight / total) * request.justificationSpace })
+        }
+      }
+    }
+    index = index + 1
+  }
+}
+
+pub effect fn shape(request: TextShapeRequest, fonts: &[FontMetrics], output: &mut List<TextRun>)
+  ! OutOfMemoryError | TextError ? &mut Allocator {
+  let mut source = usize.MAX
+  if request.start.unit < request.context.tokens.length { source = request.context.tokens[request.start.unit].source }
+  if request.hyphenated { fail P.invalidText(source, "fixture text does not support hyphenation") }
+  if request.context.writingMode != WritingMode.HorizontalTb { fail P.invalidText(source, "fixture text supports only horizontal-tb writing mode") }
+  run validateCursor(request.context, request.start)
+  run validateCursor(request.context, request.end)
+  if request.end.before(request.start) { fail P.invalidText(source, "fixture shape range is reversed") }
+  if request.justificationSpace - request.justificationSpace != 0.0 {
+    fail P.invalidText(source, "fixture justification must be finite")
+  }
+
+  // L1 uses original classes. Remember the start of the trailing resettable
+  // suffix without materializing a per-character line buffer.
+  let mut trailing = request.start
+  let mut opportunities = 0.0
+  let mut characterJustification = false
+  let mut justificationRuns = List<JustificationRun>.make()
+  let mut unit = request.start.unit
+  while unit < request.context.tokens.length && unit <= request.end.unit {
+    let token = request.context.tokens[unit]
+    let mut at: usize = 0
+    if unit == request.start.unit { at = request.start.offset }
+    let end = includedEnd(request, unit)
+    if at < end {
+      if token.kind == TextTokenKind.Atomic {
+        trailing = TextCursor { unit: unit, offset: end }
+      } else if token.kind == TextTokenKind.Space {
+        if request.justificationSpace > 0.0 && wordJustification(token.textJustify) { opportunities = opportunities + 1.0 }
+      } else if token.kind == TextTokenKind.Text {
+        let bytes = String.utf8Bytes(token.text)
+        while at < end {
+          let decoded = run decode(bytes, at, token.source)
+          if decoded.kind == Bidi.S || decoded.kind == Bidi.B {
+            fail P.invalidText(token.source, "fixture tabs and segment breaks require dedicated normalized tokens")
+          }
+          if at + decoded.length > end { fail P.invalidText(token.source, "fixture shape cursor splits a UTF-8 scalar") }
+          at = at + decoded.length
+          if !resettable(decoded.kind) { trailing = TextCursor { unit: unit, offset: at } }
+        }
+      }
+    }
+    unit = unit + 1
+  }
+  if request.justificationSpace > 0.0 {
+    characterJustification = request.context.textJustify == TextJustify.InterCharacter
+    unit = request.start.unit
+    while unit < request.context.tokens.length && unit <= request.end.unit {
+      let token = request.context.tokens[unit]
+      if token.textJustify == TextJustify.InterCharacter { characterJustification = true }
+      let at = TextCursor { unit: unit, offset: 0 }
+      // Each surviving separator in a borrowed preserved run has one weight.
+      if token.kind == TextTokenKind.PreservedSpace
+        && expandingWord(request, token, at, trailing) && includedEnd(request, unit) != 0 {
+        let mut start: usize = 0
+        if unit == request.start.unit { start = request.start.offset }
+        opportunities = opportunities + usize.toF64(includedEnd(request, unit) - start)
+      }
+      unit = unit + 1
+    }
+    // A line can start inside an inter-character ancestor whose children
+    // override it. Only still-open ancestors matter, not earlier siblings.
+    let mut closed: usize = 0
+    unit = request.start.unit
+    while !characterJustification && unit > 0 {
+      unit = unit - 1
+      let token = request.context.tokens[unit]
+      if token.kind == TextTokenKind.Close { closed = closed + 1 }
+      else if token.kind == TextTokenKind.Open {
+        if closed > 0 { closed = closed - 1 }
+        else if token.textJustify == TextJustify.InterCharacter { characterJustification = true }
+      }
+    }
+  }
+
+  let mut preceding = request.analysis.paragraphAt(request.start).level
+  let mut paragraphEnd = request.analysis.paragraphAt(request.start).end
+  unit = request.start.unit
+  while unit < request.context.tokens.length && unit <= request.end.unit {
+    let token = request.context.tokens[unit]
+    let mut start: usize = 0
+    if unit == request.start.unit { start = request.start.offset }
+    let end = includedEnd(request, unit)
+    if start < end {
+      let cursor = TextCursor { unit: unit, offset: start }
+      if !cursor.before(paragraphEnd) {
+        let paragraph = request.analysis.paragraphAt(cursor)
+        preceding = paragraph.level
+        paragraphEnd = paragraph.end
+      }
+      if token.kind == TextTokenKind.Atomic {
+        preceding = request.analysis.levelAt(cursor)
+        if characterJustification {
+          run justificationRuns.append(JustificationRun { output: output.length(), cursor: cursor, scope: 0,
+            level: preceding, glyphs: 1, weight: 0.0, leftWeight: 0.0, rightWeight: 0.0,
+            barrier: false, object: true })
+        }
+        run output.append(TextRun.Object { unit: unit, bidiLevel: preceding, lineLeftSpacing: 0.0, lineRightSpacing: 0.0 })
+      } else if textToken(token.kind) {
+        if token.writingMode != WritingMode.HorizontalTb { fail P.invalidText(token.source, "fixture text supports only horizontal-tb writing mode") }
+        if token.fontKey >= fonts.length { fail P.invalidText(token.source, "fixture text fontKey does not identify a supplied font") }
+        let size = fonts[token.fontKey].fontSize
+        if size < 0.0 || size - size != 0.0 { fail P.invalidText(token.source, "fixture text requires a finite nonnegative font size") }
+        let bytes = String.utf8Bytes(token.text)
+        run validateWhitespace(token)
+        while start < end {
+          let atCursor = TextCursor { unit: unit, offset: start }
+          let boundary = request.analysis.boundaryAfter(atCursor)
+          let paragraph = request.analysis.paragraphAt(atCursor)
+          if !atCursor.before(paragraphEnd) {
+            preceding = paragraph.level
+            paragraphEnd = paragraph.end
+          }
+          let mut limit = end
+          if boundary.unit == unit && boundary.offset < limit { limit = boundary.offset }
+          if paragraph.end.unit == unit && paragraph.end.offset < limit { limit = paragraph.end.offset }
+          if limit <= start { fail P.invalidText(token.source, "fixture analysis contains a nonadvancing boundary") }
+          let first = run decode(bytes, start, token.source)
+          let analysisLevel = request.analysis.unwrappedLevelAt(atCursor)
+          let mut level = analysisLevel
+          if removed(first.kind) && analysisLevel == request.analysis.levelAt(atCursor) { level = preceding }
+          if first.kind == Bidi.S || first.kind == Bidi.B
+            || (!atCursor.before(trailing) && resettable(first.kind)) { level = paragraph.level }
+          let mut at = start
+          let mut glyphs: usize = 0
+          while at < limit {
+            let decoded = run decode(bytes, at, token.source)
+            if at + decoded.length > limit { fail P.invalidText(token.source, "fixture analysis boundary splits a UTF-8 scalar") }
+            let position = TextCursor { unit: unit, offset: at }
+            let mut resolved = analysisLevel
+            if removed(decoded.kind) && analysisLevel == request.analysis.levelAt(position) { resolved = preceding }
+            if decoded.kind == Bidi.S || decoded.kind == Bidi.B
+              || (!position.before(trailing) && resettable(decoded.kind)) { resolved = paragraph.level }
+            if resolved != level { break }
+            if decoded.visible { glyphs = glyphs + 1 }
+            preceding = resolved
+            at = at + decoded.length
+          }
+          let mut advance = usize.toF64(glyphs) * (size / 2.0)
+          let hanging = hangingSpace(request, atCursor)
+          let word = expandingWord(request, token, atCursor, trailing)
+          if characterJustification {
+            let barrier = hanging || token.kind == TextTokenKind.Tab || token.kind == TextTokenKind.SegmentBreak
+            let mut weight = 0.0
+            if word { weight = usize.toF64(glyphs) }
+            if !barrier && glyphs > 1 && token.textJustify == TextJustify.InterCharacter {
+              weight = weight + usize.toF64(glyphs - 1)
+            }
+            run justificationRuns.append(JustificationRun { output: output.length(), cursor: atCursor, scope: 0,
+              level: level, glyphs: glyphs, weight: weight, leftWeight: 0.0, rightWeight: 0.0,
+              barrier: barrier, object: false })
+          } else if word && request.justificationSpace > 0.0 && opportunities > 0.0 {
+            advance = advance + (usize.toF64(glyphs) / opportunities) * request.justificationSpace
+          }
+          if advance - advance != 0.0 { fail P.invalidText(token.source, "fixture glyph advance is not finite") }
+          run output.append(TextRun.Text {
+            unit: unit, start: start, end: at, advance: advance,
+            fontKey: token.fontKey, bidiLevel: level, shapeKey: token.fontKey,
+          })
+          start = at
+        }
+      }
+    }
+    unit = unit + 1
+  }
+  if characterJustification { run justifyCharacters(request, &mut justificationRuns, &mut output) }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "resource-css-ratio-precedence",
+  "kind": "chrome",
+  "features": ["replaced", "aspect-ratio", "aspect-ratio-auto"],
+  "description": "With a definite CSS width, a bare ratio overrides the resource ratio while auto plus ratio prefers it. A width-only resource has no natural ratio, so auto plus ratio uses the CSS fallback. Numeric zero spells auto, not a zero-ratio box.",
+  "spec": ["https://www.w3.org/TR/css-sizing-4/#propdef-aspect-ratio"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flow-root", "width": 400}},
+      {"parent": 0, "style": {"width": 120, "aspectRatio": 3}, "natural": {"width": 80, "height": 40, "aspectRatio": 2}},
+      {"parent": 0, "style": {"width": 120, "aspectRatio": 3, "aspectRatioAuto": true}, "natural": {"width": 80, "height": 40, "aspectRatio": 2}},
+      {"parent": 0, "style": {"width": 120, "aspectRatioAuto": true, "aspectRatio": 3}, "natural": {"width": 80}},
+      {"parent": 0, "style": {"width": 120, "aspectRatio": 0}, "natural": {"width": 80, "height": 40, "aspectRatio": 2}}
+    ]
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "name": "inline-interruption-clone-authored-edge",
+  "kind": "spec",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 300
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "position": "relative",
+          "boxDecorationBreak": "clone",
+          "border": 2,
+          "lineHeight": {
+            "length": 10
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "block",
+          "width": 30,
+          "height": 15
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline",
+          "paddingLeft": 3
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "block",
+          "width": 40,
+          "height": 20
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "position": "absolute",
+          "width": {
+            "percent": 0.5
+          },
+          "height": {
+            "percent": 0.5
+          },
+          "inset": {
+            "left": 0,
+            "top": 0
+          }
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visuren.html#phantom-line-box",
+    "https://github.com/w3c/csswg-drafts/issues/14104"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "height": 65
+      },
+      {"width": 100, "height": 59},
+      {
+        "rects": [{"x": 0, "y": 10, "width": 30, "height": 15}]
+      },
+      {
+        "width": 3
+      },
+      {
+        "rects": [{"x": 0, "y": 35, "width": 40, "height": 20}]
+      },
+      {"width": 49}
+    ]
+  }
+}

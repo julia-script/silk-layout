@@ -1,0 +1,80 @@
+{
+  "name": "fragment-block-content-alignment",
+  "kind": "spec",
+  "features": [
+    "fragmentation"
+  ],
+  "input": {
+    "viewport": {
+      "width": 500,
+      "height": 500
+    },
+    "fragmentation": {
+      "kind": "column",
+      "writingMode": "horizontal-tb",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        }
+      ],
+      "repeatStep": {
+        "x": 120,
+        "y": 0
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "height": 100,
+          "alignContent": "center",
+          "writingMode": "horizontal-tb"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 20,
+          "writingMode": "horizontal-tb"
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#distribution-block",
+    "https://drafts.csswg.org/css-break-3/#box-splitting"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "x": 120,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 15,
+            "width": 100,
+            "height": 20
+          }
+        ]
+      }
+    ]
+  }
+}

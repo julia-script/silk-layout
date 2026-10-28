@@ -1,0 +1,84 @@
+{
+  "name": "flex-order",
+  "kind": "spec",
+  "features": [
+    "flex",
+    "order"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 150,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "order": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "order": -1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "order": 2
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-flexbox-1/#order-property"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 150,
+        "height": 20,
+        "contentWidth": 150,
+        "contentHeight": 20
+      },
+      {
+        "x": 40,
+        "y": 0,
+        "width": 30,
+        "height": 20,
+        "contentWidth": 30,
+        "contentHeight": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 40,
+        "height": 20,
+        "contentWidth": 40,
+        "contentHeight": 20
+      },
+      {
+        "x": 70,
+        "y": 0,
+        "width": 20,
+        "height": 20,
+        "contentWidth": 20,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

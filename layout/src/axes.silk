@@ -1,0 +1,81 @@
+import silk.ownership { Copy }
+import geometry { Size, OptionalSize, ResolvedEdges, Point }
+import style { Style, DimensionKind, WritingMode }
+import context { ResolvedBox }
+
+// Internal x is line-left -> line-right and y is block-start -> block-end.
+// This preserves float left/right independently of direction, including the
+// bottom-to-top line axis of sideways-lr (Writing Modes 4 §§6.4 and 7).
+pub struct Axes { pub vertical: bool, pub reverseBlock: bool, pub reverseLine: bool }
+impl Copy for Axes {}
+impl Axes {
+  pub fn make(mode: WritingMode) -> Axes {
+    return Axes {
+      vertical: mode != WritingMode.HorizontalTb,
+      reverseBlock: mode == WritingMode.VerticalRl || mode == WritingMode.SidewaysRl,
+      reverseLine: mode == WritingMode.SidewaysLr,
+    }
+  }
+  pub fn size(self: &Self, value: Size) -> Size {
+    if self.vertical { return Size { width: value.height, height: value.width } }
+    return value
+  }
+  pub fn optional(self: &Self, value: OptionalSize) -> OptionalSize {
+    if self.vertical {
+      return OptionalSize { width: value.height, height: value.width, widthDefinite: value.heightDefinite, heightDefinite: value.widthDefinite }
+    }
+    return value
+  }
+  pub fn edges(self: &Self, value: ResolvedEdges) -> ResolvedEdges {
+    if !self.vertical { return value }
+    let mut result = ResolvedEdges { top: value.left, right: value.bottom, bottom: value.right, left: value.top }
+    if self.reverseBlock { result.top = value.right
+      result.bottom = value.left }
+    if self.reverseLine { result.left = value.bottom
+      result.right = value.top }
+    return result
+  }
+  pub fn physicalEdges(self: &Self, value: ResolvedEdges) -> ResolvedEdges {
+    if !self.vertical { return value }
+    let mut result = ResolvedEdges { top: value.left, right: value.bottom, bottom: value.right, left: value.top }
+    if self.reverseBlock { result.left = value.bottom
+      result.right = value.top }
+    if self.reverseLine { result.top = value.right
+      result.bottom = value.left }
+    return result
+  }
+  pub fn box(self: &Self, value: ResolvedBox) -> ResolvedBox {
+    let mut result = value
+    result.padding = self.edges(value.padding)
+    result.border = self.edges(value.border)
+    result.margin = self.edges(value.margin)
+    result.inset = self.edges(value.inset)
+    result.gutter = self.edges(value.gutter)
+    result.size = self.optional(value.size)
+    result.min = self.size(value.min)
+    result.max = self.size(value.max)
+    return result
+  }
+  pub fn lowAuto(self: &Self, style: &Style) -> bool {
+    if !self.vertical { return style.margin.left.kind == DimensionKind.Auto }
+    if self.reverseLine { return style.margin.bottom.kind == DimensionKind.Auto }
+    return style.margin.top.kind == DimensionKind.Auto
+  }
+  pub fn highAuto(self: &Self, style: &Style) -> bool {
+    if !self.vertical { return style.margin.right.kind == DimensionKind.Auto }
+    if self.reverseLine { return style.margin.top.kind == DimensionKind.Auto }
+    return style.margin.bottom.kind == DimensionKind.Auto
+  }
+  pub fn autoInline(self: &Self, style: &Style) -> bool {
+    if self.vertical { return style.height.kind == DimensionKind.Auto }
+    return style.width.kind == DimensionKind.Auto
+  }
+  pub fn physicalPoint(self: &Self, point: Point, child: Size, container: Size) -> Point {
+    if !self.vertical { return point }
+    let mut x = point.y
+    let mut y = point.x
+    if self.reverseBlock { x = container.width - point.y - child.width }
+    if self.reverseLine { y = container.height - point.x - child.height }
+    return Point { x: x, y: y }
+  }
+}

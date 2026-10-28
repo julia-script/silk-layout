@@ -1,0 +1,85 @@
+import fragmentation { FragmentationError }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.usize
+import text { TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun }
+import silk.effect { Effect }
+import silk.testing { Testing, AssertionError }
+import style { Style, Dimension, Overflow }
+import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize }
+import tree { Tree, LayoutTree, InvalidNode }
+import engine { compute }
+
+struct Host { horizontal: f64, vertical: f64 }
+impl Measure for Host {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    return FontMetrics.zero()
+  }
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop request
+    return ScrollbarMetrics { horizontal: provider.horizontal, vertical: provider.vertical, overlay: false, horizontalOnTop: false, verticalOnLeft: false }
+  }
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop provider
+    drop key
+    let mut size = Size.zero()
+    if request.known.widthDefinite { size.width = request.known.width }
+    if request.known.heightDefinite { size.height = request.known.height }
+    return Measured { size: size, contentBlockSize: 0.0, firstBaselines: BaselineSet.zero(), lastBaselines: BaselineSet.zero(), hasBaseline: false, hasLineBoxes: false, scrollableOverflow: Rect.zero() }
+  }
+}
+impl TextMeasure for Host {
+  fn beginTextLayout(provider: &mut Self) { drop provider }
+  effect fn analyze(provider: &mut Self, context: TextContext, output: &mut List<TextBreak>) -> TextAnalysis ! OutOfMemoryError | TextError ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if context.tokens.length > 0 { source = context.tokens[0].source }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>) ! OutOfMemoryError | TextError ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if request.start.unit < request.context.tokens.length { source = request.context.tokens[request.start.unit].source }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+}
+
+test effect fn providerReplacementAndExactFitClearPriorScrollbarSelection() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.width = Dimension.px(100.0)
+  style.height = Dimension.px(100.0)
+  style.overflowX = Overflow.Auto
+  style.overflowY = Overflow.Auto
+  let mut tree = run Tree.make(move style) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut childStyle = Style.make()
+  childStyle.width = Dimension.px(100.0)
+  childStyle.height = Dimension.px(101.0)
+  let child = run tree.append(root, move childStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut output = LayoutTree.make()
+  let mut original = Host { horizontal: 12.0, vertical: 15.0 }
+  run compute(&tree, &mut output, &mut original, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let first = output.boxes.get(output.firstBySource.get(root.index))
+  run Testing.expect(first.contentSize.width == 85.0 && first.contentSize.height == 88.0 && first.horizontalScrollbar && first.verticalScrollbar, "vertical overflow induces the other scrollbar through reduced content space")
+  let mut replacement = Host { horizontal: 7.0, vertical: 5.0 }
+  run compute(&tree, &mut output, &mut replacement, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let second = output.boxes.get(output.firstBySource.get(root.index))
+  run Testing.expect(second.contentSize.width == 95.0 && second.contentSize.height == 93.0 && second.scrollbarGutter.right == 5.0 && second.scrollbarGutter.bottom == 7.0, "replacing the host refreshes scrollbar metrics without modifying the tree")
+  let childStyleIndex = tree.nodes.asSlice()[child.index].styleIndex
+  let styles = tree.styles.asMutSlice()
+  styles[childStyleIndex].height = Dimension.px(100.0)
+  drop styles
+  run compute(&tree, &mut output, &mut replacement, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let exact = output.boxes.get(output.firstBySource.get(root.index))
+  run Testing.expect(exact.contentSize.width == 100.0 && exact.contentSize.height == 100.0 && !exact.horizontalScrollbar && !exact.verticalScrollbar && exact.scrollbarGutter.horizontal() == 0.0 && exact.scrollbarGutter.vertical() == 0.0, "a new compute starts without stale auto bars even though those bars would perpetuate overflow")
+}

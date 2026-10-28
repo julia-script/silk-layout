@@ -1,0 +1,890 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
+import style { Style, DimensionKind, DisplayOutside, DisplayInside, Float, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
+import tree { Tree, LayoutTree, Measurement, NO_NODE }
+import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
+import block { layoutBlock }
+import flex { layoutFlex }
+import positioned { positionTree, reachableLimits, addOverflow }
+import bfc { BfcState }
+import silk.option { Option }
+import layout_pass { LayoutPass, CacheKind, FullBoxGeometry }
+import replaced { layoutReplaced, preferredRatio, borderRatio }
+import box_tree as Boxes
+import box_tree { BoxTree, BoxKind }
+import fragments { FragmentKind }
+import inline_layout { layoutInline }
+import text { TextMeasure, TextError }
+import fragment_box as FragmentBox
+import fragmentation { FragmentationError, BoundaryProbe }
+import axes { Axes }
+
+// Align3 §9.1: automatic baseline selection retains the legacy block-axis
+// scrolling last baseline. Scroll offsets never enter exported metrics.
+fn exportScrollBaselines(style: &Style, kind: BoxKind, result: &mut Layout) {
+  let horizontal = scrollable(usedOverflowForAxis(style, true))
+  let vertical = scrollable(usedOverflowForAxis(style, false))
+  if !horizontal && !vertical { return }
+  let mut blockSize = result.size.height
+  let mut marginEnd = result.usedMargin.bottom
+  let mut blockScroll = vertical
+  if style.writingMode != WritingMode.HorizontalTb {
+    blockSize = result.size.width
+    blockScroll = horizontal
+    marginEnd = result.usedMargin.right
+    if style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl { marginEnd = result.usedMargin.left }
+  }
+  if blockScroll && kind == BoxKind.Block && !style.replaced && style.baselineSource == BaselineSource.Auto {
+    result.lastBaselines = BaselineSet.uniform(blockSize + marginEnd)
+    result.hasLastBaseline = true
+  }
+  if result.hasFirstBaseline { result.firstBaselines = result.firstBaselines.clamped(0.0, blockSize) }
+  if result.hasLastBaseline { result.lastBaselines = result.lastBaselines.clamped(0.0, blockSize) }
+}
+
+fn scrollbarApplies(style: &Style, input: Input) -> bool {
+  if style.replaced || style.scrollbarWidth == ScrollbarWidth.None || style.display.isNone() || style.display.isContents() { return false }
+  let display = effectiveDisplay(style, input)
+  return !display.outsideIs(DisplayOutside.Inline) || !display.insideIs(DisplayInside.Flow)
+}
+fn configureScrollbars<M: Measure>(style: &Style, output: &mut LayoutPass, measurer: &mut M, id: usize, input: Input, box: ResolvedBox) -> ResolvedBox {
+  if !scrollbarApplies(style, input) { return box }
+  let x = overflowForAxis(style, true)
+  let y = overflowForAxis(style, false)
+  let stable = style.scrollbarGutter != ScrollbarGutter.Auto
+  let inlineHorizontal = style.writingMode == WritingMode.HorizontalTb
+  if x != Overflow.Auto && x != Overflow.Scroll && y != Overflow.Auto && y != Overflow.Scroll && !(stable && scrollable(overflowForAxis(style, !inlineHorizontal))) { return box }
+  output.hasAutoScrollbars = output.hasAutoScrollbars || x == Overflow.Auto || y == Overflow.Auto
+  let mut available = box.size
+  if available.widthDefinite { available.width = max(0.0, available.width - box.border.horizontal() - box.padding.horizontal()) }
+  if available.heightDefinite { available.height = max(0.0, available.height - box.border.vertical() - box.padding.vertical()) }
+  let metrics = Measure.scrollbars(&mut measurer, ScrollbarRequest { width: style.scrollbarWidth, gutter: style.scrollbarGutter, writingMode: style.writingMode, direction: style.usedDirection(), available: available })
+  let horizontal = x == Overflow.Scroll || output.selected(id, true)
+  let vertical = y == Overflow.Scroll || output.selected(id, false)
+  let mut result = withGutter(box, scrollbarGutter(style, metrics, horizontal, vertical))
+  result.scrollbarMetrics = metrics
+  return result
+}
+fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, bfc: &BfcState) -> Layout {
+  let mut known = box.size
+  if known.widthDefinite { known.width = max(0.0, known.width - box.inset.horizontal()) }
+  if known.heightDefinite { known.height = max(0.0, known.height - box.inset.vertical()) }
+  let mut width = input.availableWidth
+  let mut height = input.availableHeight
+  if width.kind == AvailableKind.Definite { width.value = max(0.0, width.value - box.inset.horizontal() - box.margin.horizontal()) }
+  if height.kind == AvailableKind.Definite { height.value = max(0.0, height.value - box.inset.vertical() - box.margin.vertical()) }
+  let request = MeasureRequest.make(known, width, height, nodes.style(id).writingMode, nodes.style(id).textOrientation, nodes.style(id).usedDirection(), bfc, input.bfcContentOrigin)
+  let result = Measure.measure(&mut measurer, nodes.node(id).measureKey, request)
+  let mut layout = Layout.zero()
+  layout.size = Size { width: result.size.width + box.inset.horizontal(), height: result.size.height + box.inset.vertical() }
+  if box.size.widthDefinite { layout.size.width = box.size.width }
+  if box.size.heightDefinite { layout.size.height = box.size.height }
+  let mut baselineInset = box.inset.top
+  let writingMode = nodes.style(id).writingMode
+  if writingMode == WritingMode.VerticalRl || writingMode == WritingMode.SidewaysRl { baselineInset = box.inset.right }
+  if writingMode == WritingMode.VerticalLr || writingMode == WritingMode.SidewaysLr { baselineInset = box.inset.left }
+  let mut contentBlockSize = max(0.0, layout.size.height - box.inset.vertical())
+  if writingMode != WritingMode.HorizontalTb { contentBlockSize = max(0.0, layout.size.width - box.inset.horizontal()) }
+  let mut offset = 0.0
+  if !isFlex(nodes.style(id)) && !nodes.style(id).replaced {
+    offset = blockContentOffset(nodes.style(id), contentBlockSize - result.contentBlockSize)
+  }
+  baselineInset = baselineInset + offset
+  layout.measurementOffset.y = offset
+  if writingMode != WritingMode.HorizontalTb {
+    layout.measurementOffset.y = 0.0
+    layout.measurementOffset.x = offset
+    if writingMode == WritingMode.VerticalRl || writingMode == WritingMode.SidewaysRl { layout.measurementOffset.x = -offset }
+  }
+  layout.scrollableOverflow = Rect { x: box.inset.left, y: box.inset.top, width: 0.0, height: 0.0 }
+  if result.hasLineBoxes {
+    layout.scrollableOverflow = result.scrollableOverflow.translated(Point { x: box.inset.left + layout.measurementOffset.x, y: box.inset.top + layout.measurementOffset.y })
+  }
+  layout.firstBaselines = result.firstBaselines.translated(baselineInset)
+  layout.lastBaselines = result.lastBaselines.translated(baselineInset)
+  layout.hasFirstBaseline = result.hasBaseline
+  layout.hasLastBaseline = result.hasBaseline
+  if !result.hasLineBoxes && !input.blockRoot && !nodes.style(id).replaced && writingMode == input.parentWritingMode && !establishesContext(nodes.style(id), input) {
+    let mut minimumBlock = box.min.height
+    let mut insetBlock = box.inset.vertical()
+    let mut inlineDefinite = box.size.widthDefinite
+    if writingMode != WritingMode.HorizontalTb {
+      minimumBlock = box.min.width
+      insetBlock = box.inset.horizontal()
+      inlineDefinite = box.size.heightDefinite
+    }
+    if contentBlockSize == 0.0 && minimumBlock == 0.0 && insetBlock == 0.0 {
+      layout.collapsesThrough = selfCollapsingSize(nodes.style(id), input.parent, inlineDefinite)
+    }
+  }
+  return layout
+}
+
+effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, box: ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut resolved = box
+  let mut request = input
+  if input.performLayout && input.fragmentation.active {
+    resolved = FragmentBox.current(nodes.style(id), box, output.resumes.get(id), input.fragmentation, output.frames.writingMode)
+    // Slice defers the ending decoration, but does not make descendant
+    // margins adjoining the eventual end of the fragmentation context.
+    if Axes.make(output.frames.writingMode).box(box).inset.bottom != 0.0 {
+      request.fragmentation.marginEnd = false
+    }
+    let full = Axes.make(output.frames.writingMode).box(box)
+    let style = nodes.style(id)
+    // The synthetic frame root supplies available space, not an authored CSS
+    // size tail separating the document's contents from the context endpoint.
+    if id != 0 && nodes.node(id).firstChild != NO_NODE && !isFlex(style) && (request.fragmentation.marginStart || request.fragmentation.marginEnd)
+      && (full.size.heightDefinite || full.min.height > full.inset.vertical() || blockContentOffset(style, 1.0) != 0.0) {
+      // Break4 §5.2 does not define adjacency through alignment free space.
+      // Conservatively use the retained margin envelope (Align3 §5.1.1),
+      // before removal changes alignment. A CSS size tail separates the last
+      // descendant from the context end, not from an actual internal break.
+      // This is not a physical-fragmentainer-edge contact test.
+      let pass = output.checkpoint()
+      let floats = bfc.checkpoint()
+      let mut retained = request
+      retained.fragmentation.marginStart = false
+      retained.fragmentation.marginEnd = false
+      retained.fragmentation.marginEndChosen = false
+      let mut trial = run contentAlgorithm(nodes, &mut output, &mut measurer, id, retained, resolved, natural, &mut bfc)
+      let mut state = output.resumes.get(id)
+      if !state.blocked && !state.skipped {
+        let axes = Axes.make(output.frames.writingMode)
+        let naturalExtent = max(0.0, axes.size(trial.size).height - axes.box(resolved).inset.vertical())
+        let complete = state.normalContentComplete
+        let finished = FragmentBox.finish(style, request, box, resolved, &mut state, &mut trial, output.frames.writingMode)
+        let extent = max(0.0, axes.size(trial.size).height - axes.box(finished).inset.vertical())
+        let free = extent - naturalExtent
+        let offset = blockContentOffset(style, free)
+        if offset != 0.0 { request.fragmentation.marginStart = false }
+        if complete && free - offset > 0.0 { request.fragmentation.marginEnd = false }
+      }
+      output.restoreCheckpoint(pass)
+      output.closeCheckpoint(pass)
+      bfc.restore(floats)
+    }
+    if !request.fragmentation.marginEnd { request.fragmentation.marginEndChosen = false }
+  }
+  return run contentAlgorithm(nodes, &mut output, &mut measurer, id, request, resolved, natural, &mut bfc)
+}
+
+effect fn contentAlgorithm<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, request: Input, resolved: ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if nodes.node(id).kind == BoxKind.InlineFormatting { return run layoutInline(nodes, &mut output, &mut measurer, id, request, resolved, &mut bfc) }
+  if nodes.node(id).measurement == Measurement.Content { return measureLeaf(nodes, &mut measurer, id, request, resolved, &bfc) }
+  if nodes.style(id).replaced { return layoutReplaced(nodes.style(id), request, resolved, natural) }
+  if isFlex(nodes.style(id)) { return run layoutFlex(nodes, &mut output, &mut measurer, id, request, resolved) }
+  return run layoutBlock(nodes, &mut output, &mut measurer, id, nodes.style(id), request, resolved, &mut bfc)
+}
+
+effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, natural: NaturalDimensions, horizontal: bool, minimum: bool) -> f64 ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut request = input
+  request.performLayout = false
+  request.fragmentation.active = false
+  if horizontal {
+    request.intrinsicWidth = true
+    request.known.widthDefinite = false
+    request.availableWidth = AvailableSpace.maxContent()
+    if minimum { request.availableWidth = AvailableSpace.minContent() }
+  } else {
+    request.intrinsicHeight = true
+    request.known.heightDefinite = false
+    request.availableHeight = AvailableSpace.maxContent()
+    if minimum { request.availableHeight = AvailableSpace.minContent() }
+  }
+  request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
+  match output.lookup(id, request, CacheKind.IntrinsicContents) {
+    Option<Layout>.Some { value: cached } => {
+      if horizontal { return cached.size.width }
+      return cached.size.height
+    }
+    Option<Layout>.None => {}
+  }
+  let box = configureScrollbars(nodes.style(id), &mut output, &mut measurer, id, request, resolveBox(nodes.style(id), request))
+  let mut bfc = BfcState.make()
+  let result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+  run output.remember(id, request, CacheKind.IntrinsicContents, result)
+  if horizontal { return result.size.width }
+  return result.size.height
+}
+
+pub fn flowMarginRect(nodes: &BoxTree, id: usize, child: usize, layout: &Layout, parent: &Layout) -> Rect {
+  if !layout.hasBox() || outOfFlow(nodes.style(child)) { return Rect.zero() }
+  let mut margin = layout.usedMargin
+  if !isFlex(nodes.style(id)) {
+    let mut basis = parent.contentSize.width
+    let mut definite = parent.widthDefinite
+    if nodes.style(id).writingMode != WritingMode.HorizontalTb { basis = parent.contentSize.height
+      definite = parent.heightDefinite }
+    // Optional block margins use declared lengths, with resolved auto margins.
+    // CSS2's overconstraint correction is not an extra scrollable margin area.
+    let style = nodes.style(child)
+    let declared = edges(style.margin, basis, definite)
+    if style.margin.left.kind != DimensionKind.Auto { margin.left = declared.left }
+    if style.margin.right.kind != DimensionKind.Auto { margin.right = declared.right }
+    if style.margin.top.kind != DimensionKind.Auto { margin.top = declared.top }
+    if style.margin.bottom.kind != DimensionKind.Auto { margin.bottom = declared.bottom }
+  }
+  return Rect { x: layout.location.x - max(0.0, margin.left), y: layout.location.y - max(0.0, margin.top), width: layout.size.width + max(0.0, margin.left) + max(0.0, margin.right), height: layout.size.height + max(0.0, margin.top) + max(0.0, margin.bottom) }
+}
+fn padFlow(rect: Rect, padding: ResolvedEdges) -> Rect {
+  return Rect { x: rect.x - padding.left, y: rect.y - padding.top, width: rect.width + padding.horizontal(), height: rect.height + padding.vertical() }
+}
+fn addFlow(base: Rect, rect: Rect, padding: ResolvedEdges, limits: ResolvedEdges) -> Rect {
+  if rect.width <= 0.0 || rect.height <= 0.0 || rect.x + rect.width <= limits.left || rect.x >= limits.right || rect.y + rect.height <= limits.top || rect.y >= limits.bottom { return base }
+  return addOverflow(base, padFlow(rect, padding), limits)
+}
+// Capture normal-flow extents before relative/sticky/scroll translations.
+// Keep the full extent separately: clipping a union's bounding rectangle
+// would let wholly unreachable boxes spuriously enlarge its other axis.
+fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: ResolvedBox, result: &mut Layout) {
+  let padding = Rect { x: box.border.left + box.gutter.left, y: box.border.top + box.gutter.top, width: max(0.0, result.size.width - box.border.horizontal() - box.gutter.horizontal()), height: max(0.0, result.size.height - box.border.vertical() - box.gutter.vertical()) }
+  let mut flow = Rect { x: box.inset.left, y: box.inset.top, width: result.contentSize.width, height: result.contentSize.height }
+  let measured = nodes.node(id).measurement == Measurement.Content || nodes.node(id).kind == BoxKind.InlineFormatting
+  let external = result.scrollableOverflow
+  if measured && external.width > 0.0 && external.height > 0.0 { flow = flow.unionWith(external) }
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    let rect = flowMarginRect(nodes, id, child, &output.boxes[child], &result)
+    if rect.width > 0.0 && rect.height > 0.0 { flow = flow.unionWith(rect) }
+    child = nodes.node(child).nextSibling
+  }
+  flow = padFlow(flow, box.padding)
+  let content = Rect { x: box.inset.left, y: box.inset.top, width: result.contentSize.width, height: result.contentSize.height }
+  result.setOverflowGeometry(content, padding, flow)
+  let style = nodes.style(id)
+  if !scrollable(usedOverflowForAxis(style, true)) && !scrollable(usedOverflowForAxis(style, false)) {
+    result.scrollableOverflow = padding.unionWith(flow)
+    return
+  }
+  let limits = reachableLimits(style, padding, flow, false)
+  let mut overflow = padding
+  if measured {
+    overflow = addOverflow(overflow, external, limits)
+    overflow = addFlow(overflow, external, box.padding, limits)
+  }
+  // Scrollable axes require clipping each source before rectangular union.
+  // Revisit only direct generated children, without layout or measurement.
+  child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    let rect = flowMarginRect(nodes, id, child, &output.boxes[child], &result)
+    overflow = addFlow(overflow, rect, box.padding, limits)
+    child = nodes.node(child).nextSibling
+  }
+  result.scrollableOverflow = overflow
+}
+
+fn orthogonalAvailable(input: Input, available: AvailableSpace, horizontal: bool) -> AvailableSpace {
+  let mut limit = min(input.parentMaxSize.width, input.scrollportSize.width)
+  let mut initial = input.initialContainingBlock.width
+  let mut initialDefinite = input.initialContainingBlock.widthDefinite
+  let mut parent = input.parent.width
+  let mut parentDefinite = input.parent.widthDefinite
+  if !horizontal {
+    limit = min(input.parentMaxSize.height, input.scrollportSize.height)
+    initial = input.initialContainingBlock.height
+    initialDefinite = input.initialContainingBlock.heightDefinite
+    parent = input.parent.height
+    parentDefinite = input.parent.heightDefinite
+  }
+  if initialDefinite { limit = min(limit, initial) }
+  if parentDefinite { limit = min(limit, parent) }
+  if available.kind == AvailableKind.Definite { limit = min(limit, available.value) }
+  if limit < UNBOUNDED { return AvailableSpace.definite(max(0.0, limit)) }
+  return available
+}
+
+// CSS Sizing: known dimensions are border-box constraints, not a rewritten style.
+// Intrinsic probes preserve the original percentage containing block.
+pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if !input.performLayout {
+    match output.lookup(id, input, CacheKind.IndependentBox) {
+      Option<Layout>.Some { value: cached } => {
+        run output.store(id, cached, false)
+        return cached
+      }
+      Option<Layout>.None => {}
+    }
+  }
+  let mut bfc = BfcState.make()
+  let mut request = input
+  request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
+  let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, request, &mut bfc)
+  if !input.performLayout { run output.remember(id, input, CacheKind.IndependentBox, result) }
+  return result
+}
+
+// Ordinary block descendants share exclusions; independent formatting contexts
+// and intrinsic probes enter through layoutNode instead.
+pub effect fn layoutInBfc<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if !incoming.performLayout || !incoming.fragmentation.active {
+    return run layoutBox(nodes, &mut output, &mut measurer, id, incoming, &mut bfc)
+  }
+  let checkpoint = output.checkpoint()
+  let exclusions = bfc.checkpoint()
+  let mut state = output.resumes.get(id)
+  state.blocked = false
+  state.skipped = false
+  state.frameLines = 0
+  state.lineBreak = false
+  state.marginTop = MarginStrut.zero()
+  state.marginBottom = MarginStrut.zero()
+  state.pendingMargin = MarginStrut.zero()
+  if !state.started {
+    state.before = FragmentBox.boundary(nodes, id, true, incoming.fragmentation.kind, incoming.fragmentation.rectoOnRight)
+    state.after = FragmentBox.boundary(nodes, id, false, incoming.fragmentation.kind, incoming.fragmentation.rectoOnRight)
+    if incoming.fragmentation.forcedStart { state.beforeHandled = true }
+  }
+  if state.notBeforeFrame > output.frame || state.contentComplete {
+    state.skipped = true
+    run output.resumes.set(id, state)
+    output.closeCheckpoint(checkpoint)
+    return Layout.zero()
+  }
+  let forced = state.before.forced.active(incoming.fragmentation.activeKinds())
+  if !state.started && !state.beforeHandled && forced.kinds.any() && !nodes.node(id).dynamicBefore {
+    state.blocked = true
+    state.requested = forced
+    run output.resumes.set(id, state)
+    output.closeCheckpoint(checkpoint)
+    return Layout.zero()
+  }
+  run output.resumes.set(id, state)
+  let result = run layoutBox(nodes, &mut output, &mut measurer, id, incoming, &mut bfc)
+  let finished = output.resumes.get(id)
+  let discovered = finished.before.forced.active(incoming.fragmentation.activeKinds())
+  let lateForced = !state.started && !state.beforeHandled && discovered.kinds.any()
+  if finished.blocked || finished.skipped || lateForced {
+    output.restoreCheckpoint(checkpoint)
+    bfc.restore(exclusions)
+    let mut restored = output.resumes.get(id)
+    restored.before = finished.before
+    restored.after = finished.after
+    restored.requested = finished.requested
+    restored.blocked = finished.blocked || lateForced
+    if lateForced { restored.requested = discovered }
+    restored.skipped = finished.skipped
+    run output.resumes.set(id, restored)
+    output.closeCheckpoint(checkpoint)
+    return Layout.zero()
+  }
+  output.closeCheckpoint(checkpoint)
+  return result
+}
+
+struct BoxSizing {
+  box: ResolvedBox,
+  request: Input,
+  natural: NaturalDimensions,
+  ratio: f64,
+  ratioBorder: bool,
+  ratioInsetWidth: f64,
+  ratioInsetHeight: f64,
+}
+
+effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, fragmented: bool, monolithic: bool) -> BoxSizing ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let node = nodes.node(id)
+  let display = effectiveDisplay(style, input)
+  // Only flex-item blockification suppresses a declared in-flow float.
+  let floating = style.float != Float.None && !input.blockify && !outOfFlow(style)
+  let mut natural = NaturalDimensions.none()
+  if node.measurement == Measurement.Natural { natural = Measure.natural(&mut measurer, node.measureKey) }
+  let mut box = resolveBox(style, input)
+  let mut request = input
+  if !input.known.widthDefinite && !input.intrinsicWidth {
+    if style.width.kind == DimensionKind.MinContent { request.availableWidth = AvailableSpace.minContent() }
+    if style.width.kind == DimensionKind.MaxContent { request.availableWidth = AvailableSpace.maxContent() }
+  }
+  if !input.known.heightDefinite && !input.intrinsicHeight {
+    if style.height.kind == DimensionKind.MinContent { request.availableHeight = AvailableSpace.minContent() }
+    if style.height.kind == DimensionKind.MaxContent { request.availableHeight = AvailableSpace.maxContent() }
+  }
+  if !input.intrinsicWidth {
+    if style.minWidth.kind == DimensionKind.MinContent || style.minWidth.kind == DimensionKind.MaxContent {
+      box.min.width = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, true, style.minWidth.kind == DimensionKind.MinContent)
+    }
+    if style.maxWidth.kind == DimensionKind.MinContent || style.maxWidth.kind == DimensionKind.MaxContent {
+      box.max.width = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, true, style.maxWidth.kind == DimensionKind.MinContent)
+    }
+  }
+  if !input.intrinsicHeight {
+    if style.minHeight.kind == DimensionKind.MinContent || style.minHeight.kind == DimensionKind.MaxContent {
+      box.min.height = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, false, style.minHeight.kind == DimensionKind.MinContent)
+    }
+    if style.maxHeight.kind == DimensionKind.MinContent || style.maxHeight.kind == DimensionKind.MaxContent {
+      box.max.height = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, false, style.maxHeight.kind == DimensionKind.MinContent)
+    }
+  }
+  let justification = blockJustification(style, input)
+  let parentInlineHorizontal = input.parentWritingMode == WritingMode.HorizontalTb
+  let mut autoInlineMargin = style.margin.left.kind == DimensionKind.Auto || style.margin.right.kind == DimensionKind.Auto
+  if !parentInlineHorizontal { autoInlineMargin = style.margin.top.kind == DimensionKind.Auto || style.margin.bottom.kind == DimensionKind.Auto }
+  let stretchInline = justification == Align.Stretch && !autoInlineMargin
+  let fitInline = justification != Align.Normal && !stretchInline
+  let ratio = preferredRatio(style, natural)
+  let ratioBorder = borderRatio(style)
+  let mut ratioWidth = false
+  let mut ratioHeight = false
+  let mut ratioInsetWidth = box.inset.horizontal()
+  let mut ratioInsetHeight = box.inset.vertical()
+  if ratioBorder { ratioInsetWidth = 0.0
+    ratioInsetHeight = 0.0 }
+  if box.size.heightDefinite { box.size.height = clamp(box.size.height, box.min.height, box.max.height) }
+  if ratio > 0.0 && box.size.heightDefinite && !box.size.widthDefinite && !input.intrinsicWidth && !(stretchInline && parentInlineHorizontal) {
+    box.size.width = max(0.0, box.size.height - ratioInsetHeight) * ratio + ratioInsetWidth
+    box.size.widthDefinite = true
+    ratioWidth = true
+  }
+  // Writing Modes §§7.3.1–7.3.3: orthogonal block auto inline sizes
+  // shrink-to-fit; other formatting contexts use this fallback only when
+  // their available inline space is indefinite. Do not change input.parent.
+  let horizontal = style.writingMode == WritingMode.HorizontalTb
+  let orthogonal = horizontal != parentInlineHorizontal && !style.replaced
+  let autoWidth = style.width.kind == DimensionKind.Auto || ((style.width.kind == DimensionKind.Percent || style.width.kind == DimensionKind.Calc) && !input.parent.widthDefinite)
+  let autoHeight = style.height.kind == DimensionKind.Auto || ((style.height.kind == DimensionKind.Percent || style.height.kind == DimensionKind.Calc) && !input.parent.heightDefinite)
+  if orthogonal && horizontal && !input.intrinsicWidth && (autoWidth || style.width.kind == DimensionKind.FitContent) && request.availableWidth.kind == AvailableKind.MaxContent && input.parent.widthDefinite {
+    request.availableWidth = AvailableSpace.definite(input.parent.width)
+  }
+  if orthogonal && !horizontal && !input.intrinsicHeight && (autoHeight || style.height.kind == DimensionKind.FitContent) && request.availableHeight.kind == AvailableKind.MaxContent && input.parent.heightDefinite {
+    request.availableHeight = AvailableSpace.definite(input.parent.height)
+  }
+  let orthogonalWidth = orthogonal && horizontal && !box.size.widthDefinite && !input.intrinsicWidth && (autoWidth || style.width.kind == DimensionKind.FitContent) && request.availableWidth.kind != AvailableKind.MinContent && (node.kind == BoxKind.Block || request.availableWidth.kind == AvailableKind.MaxContent)
+  let orthogonalHeight = orthogonal && !horizontal && !box.size.heightDefinite && !input.intrinsicHeight && !(ratio > 0.0 && box.size.widthDefinite) && (autoHeight || style.height.kind == DimensionKind.FitContent) && request.availableHeight.kind != AvailableKind.MinContent && (node.kind == BoxKind.Block || request.availableHeight.kind == AvailableKind.MaxContent)
+  if orthogonalWidth { request.availableWidth = orthogonalAvailable(input, request.availableWidth, true) }
+  if orthogonalHeight { request.availableHeight = orthogonalAvailable(input, request.availableHeight, false) }
+  let ordinaryBlock = display.outsideIs(DisplayOutside.Block) && !style.replaced && !floating && !outOfFlow(style)
+  let fillWidth = !orthogonalWidth && ((!input.shrinkToFit && style.writingMode == WritingMode.HorizontalTb && !(fitInline && parentInlineHorizontal)) || (stretchInline && parentInlineHorizontal))
+  if !box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && (ordinaryBlock || (stretchInline && parentInlineHorizontal)) && request.availableWidth.kind == AvailableKind.Definite && fillWidth {
+    box.size.width = max(box.inset.horizontal(), request.availableWidth.value - box.margin.horizontal())
+    box.size.widthDefinite = true
+  }
+  let fillHeight = !orthogonalHeight && ((!input.shrinkToFit && style.writingMode != WritingMode.HorizontalTb && !(fitInline && !parentInlineHorizontal)) || (stretchInline && !parentInlineHorizontal))
+  if !box.size.heightDefinite && !input.intrinsicHeight && style.height.kind == DimensionKind.Auto && (ordinaryBlock || (stretchInline && !parentInlineHorizontal)) && request.availableHeight.kind == AvailableKind.Definite && fillHeight {
+    box.size.height = clamp(max(box.inset.vertical(), request.availableHeight.value - box.margin.vertical()), box.min.height, box.max.height)
+    box.size.heightDefinite = true
+    if ratio > 0.0 && !box.size.widthDefinite && !input.intrinsicWidth {
+      box.size.width = max(0.0, box.size.height - ratioInsetHeight) * ratio + ratioInsetWidth
+      box.size.widthDefinite = true
+      ratioWidth = true
+    }
+  }
+  let fitWidth = orthogonalWidth || (!style.replaced && (input.shrinkToFit || display.outsideIs(DisplayOutside.Inline) || floating || outOfFlow(style))) || style.width.kind == DimensionKind.FitContent || (fitInline && parentInlineHorizontal)
+  if !box.size.widthDefinite && !input.intrinsicWidth && fitWidth && request.availableWidth.kind == AvailableKind.Definite {
+    let smallest = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, true, true)
+    let largest = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, true, false)
+    box.size.width = max(smallest, min(max(0.0, request.availableWidth.value - box.margin.horizontal()), largest))
+    box.size.widthDefinite = true
+  }
+  if !box.size.heightDefinite && !input.intrinsicHeight && (orthogonalHeight || style.height.kind == DimensionKind.FitContent || (fitInline && !parentInlineHorizontal)) && request.availableHeight.kind == AvailableKind.Definite {
+    let smallest = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, false, true)
+    let largest = run intrinsic(nodes, &mut output, &mut measurer, id, input, natural, false, false)
+    box.size.height = max(smallest, min(max(0.0, request.availableHeight.value - box.margin.vertical()), largest))
+    box.size.heightDefinite = true
+  }
+  if fragmented && !monolithic {
+    if horizontal && !box.size.widthDefinite {
+      box.size.width = run intrinsic(nodes, &mut output, &mut measurer, id, request, natural, true, request.availableWidth.kind == AvailableKind.MinContent)
+      box.size.widthDefinite = true
+    }
+    if !horizontal && !box.size.heightDefinite {
+      box.size.height = run intrinsic(nodes, &mut output, &mut measurer, id, request, natural, false, request.availableHeight.kind == AvailableKind.MinContent)
+      box.size.heightDefinite = true
+    }
+  }
+  if box.size.widthDefinite { box.size.width = clamp(box.size.width, box.min.width, box.max.width) }
+  if ratio > 0.0 && box.size.widthDefinite && !box.size.heightDefinite && !input.intrinsicHeight {
+    box.size.height = max(0.0, box.size.width - ratioInsetWidth) / ratio + ratioInsetHeight
+    box.size.heightDefinite = true
+    ratioHeight = true
+  }
+  if box.size.heightDefinite { box.size.height = clamp(box.size.height, box.min.height, box.max.height) }
+  // Sizing 4 §4.3: a non-replaced, non-scrollable ratio-dependent axis
+  // keeps its content-based automatic minimum, capped by its maximum.
+  if !style.replaced {
+    if ratioWidth && style.minWidth.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, true)) {
+      let mut minimumInput = request
+      minimumInput.known = box.size
+      let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, minimumInput, natural, true, true)
+      box.min.width = max(box.min.width, min(minimum, box.max.width))
+      box.size.width = clamp(box.size.width, box.min.width, box.max.width)
+    }
+    if ratioHeight && style.minHeight.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, false)) {
+      let mut minimumInput = request
+      minimumInput.known = box.size
+      let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, minimumInput, natural, false, true)
+      box.min.height = max(box.min.height, min(minimum, box.max.height))
+      box.size.height = clamp(box.size.height, box.min.height, box.max.height)
+    }
+  }
+  box = configureScrollbars(style, &mut output, &mut measurer, id, request, box)
+  return BoxSizing { box: box, request: request, natural: natural, ratio: ratio, ratioBorder: ratioBorder, ratioInsetWidth: ratioInsetWidth, ratioInsetHeight: ratioInsetHeight }
+}
+
+fn boxInput(nodes: &BoxTree, id: usize, incoming: Input) -> Input {
+  let style = nodes.style(id)
+  let node = nodes.node(id)
+  let mut input = incoming
+  input.blockRoot = input.blockRoot || node.independentRoot
+  if node.parent != NO_NODE && nodes.node(node.parent).kind == BoxKind.Flex { input.blockify = true }
+  input.atomicInline = node.kind == BoxKind.Block && !style.replaced && style.display.outsideIs(DisplayOutside.Inline) && style.display.insideIs(DisplayInside.Flow)
+  return input
+}
+
+// Resolve continuation geometry without replaying already-consumed normal flow.
+pub effect fn resolveFragmentBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: Input) -> ResolvedBox ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut input = boxInput(nodes, id, incoming)
+  input.performLayout = false
+  input.fragmentation.active = false
+  let checkpoint = output.checkpoint()
+  let sizing = run prepareSizing(nodes, &mut output, &mut measurer, id, input, true, false)
+  output.restoreCheckpoint(checkpoint)
+  output.closeCheckpoint(checkpoint)
+  return sizing.box
+}
+
+effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let node = nodes.node(id)
+  let mut input = boxInput(nodes, id, incoming)
+  let fragmented = incoming.performLayout && incoming.fragmentation.active
+  let monolithic = fragmented && node.fragmentMonolithic
+  if !input.performLayout || monolithic { input.fragmentation.active = false }
+  let mut wasStarted = false
+  let mut wasNormalComplete = false
+  if fragmented {
+    let previous = output.resumes.get(id)
+    wasStarted = previous.started
+    wasNormalComplete = previous.normalComplete
+  }
+  let sizing = run prepareSizing(nodes, &mut output, &mut measurer, id, input, fragmented, monolithic)
+  let mut box = sizing.box
+  let mut request = sizing.request
+  let natural = sizing.natural
+  let ratio = sizing.ratio
+  let ratioBorder = sizing.ratioBorder
+  let ratioInsetWidth = sizing.ratioInsetWidth
+  let ratioInsetHeight = sizing.ratioInsetHeight
+  let previousParent = output.fragmentParent
+  if input.performLayout {
+    run output.preserveLayout(id)
+    output.boxes[id].location = Point { x: 0.0, y: 0.0 }
+    if fragmented && id == 0 {
+      let frame = output.frame
+      output.fragmentParent = run output.ensureFrameRoot(frame)
+    } else if node.kind != BoxKind.InlineFormatting || node.anonymousBlock {
+      let mut fragment = output.fragment(id, node.source, FragmentKind.Box)
+      fragment.parent = previousParent
+      if node.source != NO_NODE {
+        fragment.first = node.firstForSource
+        fragment.last = node.lastForSource
+      }
+      let emitted = run output.fragments.append(move fragment)
+      output.fragmentParent = emitted.index
+    }
+  }
+  let fragmentCheckpoint = output.fragments.checkpoint()
+  if input.performLayout && output.frame != NO_NODE {
+    let mut ownFragment = output.fragmentParent
+    if ownFragment == previousParent { ownFragment = NO_NODE }
+    run output.beginPublication(id, ownFragment, fragmentCheckpoint)
+  }
+  let checkpoint = bfc.checkpoint()
+  if fragmented && !monolithic && id != 0 && !wasStarted && node.dynamicAfter && input.fragmentation.boundaryProbe == BoundaryProbe.None {
+    let full = Axes.make(output.frames.writingMode).box(box)
+    if full.size.heightDefinite || full.max.height < UNBOUNDED || style.float != Float.None && !input.blockify {
+      // Bounded boxes can finish before their descendants; a float's adjacent
+      // source flow can advance before its independent stream has completed.
+      // Discover the propagated after value before admitting that source flow.
+      // Continuous discovery preserves float constraints but ignores internal
+      // breaks; neither its geometry nor its flow progress is committed.
+      let trial = output.checkpoint()
+      let mut probe = request
+      probe.fragmentation.active = false
+      probe.fragmentation.boundaryProbe = BoundaryProbe.After
+      drop run layoutBox(nodes, &mut output, &mut measurer, id, probe, &mut bfc)
+      let after = output.resumes.get(id).after
+      output.restoreCheckpoint(trial)
+      output.closeCheckpoint(trial)
+      bfc.restore(checkpoint)
+      let mut state = output.resumes.get(id)
+      state.after.merge(after)
+      run output.resumes.set(id, state)
+    }
+  }
+  let passCheckpoint = output.checkpoint()
+  let mut result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+  if fragmented {
+    let state = output.resumes.get(id)
+    if state.blocked || state.skipped {
+      output.closeCheckpoint(passCheckpoint)
+      output.fragmentParent = previousParent
+      return result
+    }
+  }
+  let mut width = clamp(result.size.width, box.min.width, box.max.width)
+  let mut height = clamp(result.size.height, box.min.height, box.max.height)
+  if fragmented && !monolithic {
+    if output.frames.writingMode == WritingMode.HorizontalTb { height = result.size.height }
+    else { width = result.size.width }
+  }
+  // Width changes can rewrap text and flex lines. Height constraints can change
+  // column flexing. Relayout only dimensions actually changed by min/max.
+  if width != result.size.width || height != result.size.height {
+    if width != result.size.width { box.size.width = width
+      box.size.widthDefinite = true }
+    if height != result.size.height { box.size.height = height
+      box.size.heightDefinite = true }
+    box = configureScrollbars(style, &mut output, &mut measurer, id, request, box)
+    bfc.restore(checkpoint)
+    output.restoreCheckpoint(passCheckpoint)
+    result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+  }
+  // An intrinsic inline size can become the ratio-determining size only
+  // after contents have been measured. Transfer the allotted size (including
+  // scrollbar space), not the reduced content area. Cyclic percentages in
+  // the dependent axis remain indefinite during this intrinsic transfer.
+  if ratio > 0.0 && !style.replaced {
+    let mut transferred = false
+    if style.writingMode == WritingMode.HorizontalTb && !box.size.heightDefinite && !input.intrinsicHeight && style.height.kind == DimensionKind.Auto {
+      let mut height = max(0.0, result.size.width - ratioInsetWidth) / ratio + ratioInsetHeight
+      if style.minHeight.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, false)) {
+        let mut contentMinimum = result.size.height
+        if fragmented && !monolithic {
+          let mut probe = request
+          probe.known.width = result.size.width
+          probe.known.widthDefinite = true
+          contentMinimum = run intrinsic(nodes, &mut output, &mut measurer, id, probe, natural, false, true)
+        }
+        height = max(height, contentMinimum)
+      }
+      box.size.height = clamp(height, box.min.height, box.max.height)
+      box.size.heightDefinite = true
+      request.indefiniteHeight = !box.size.widthDefinite || request.indefiniteWidth
+      transferred = true
+    }
+    if style.writingMode != WritingMode.HorizontalTb && !box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto {
+      let mut width = max(0.0, result.size.height - ratioInsetHeight) * ratio + ratioInsetWidth
+      if style.minWidth.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, true)) {
+        let mut contentMinimum = result.size.width
+        if fragmented && !monolithic {
+          let mut probe = request
+          probe.known.height = result.size.height
+          probe.known.heightDefinite = true
+          contentMinimum = run intrinsic(nodes, &mut output, &mut measurer, id, probe, natural, true, true)
+        }
+        width = max(width, contentMinimum)
+      }
+      box.size.width = clamp(width, box.min.width, box.max.width)
+      box.size.widthDefinite = true
+      request.indefiniteWidth = !box.size.heightDefinite || request.indefiniteHeight
+      transferred = true
+    }
+    if transferred {
+      box = configureScrollbars(style, &mut output, &mut measurer, id, request, box)
+      bfc.restore(checkpoint)
+      output.restoreCheckpoint(passCheckpoint)
+      result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+    }
+  }
+  // Block/flex algorithms can enforce an intrinsic min/max internally.
+  // Inform the host when that creates an allotted area, without turning an
+  // indefinite CSS percentage basis into a definite one. Each iteration
+  // marks at least one previously intrinsic axis constrained.
+  if scrollbarApplies(style, input) && !box.scrollbarMetrics.overlay && (box.scrollbarMetrics.horizontal > 0.0 || box.scrollbarMetrics.vertical > 0.0) {
+    let mut available = box.size
+    while true {
+      let constrainWidth = !available.widthDefinite && ((box.min.width > box.border.horizontal() + box.padding.horizontal() && result.size.width <= box.min.width) || result.size.width >= box.max.width)
+      let constrainHeight = !available.heightDefinite && ((box.min.height > box.border.vertical() + box.padding.vertical() && result.size.height <= box.min.height) || result.size.height >= box.max.height)
+      if !constrainWidth && !constrainHeight { break }
+      if constrainWidth { available.width = result.size.width
+        available.widthDefinite = true }
+      if constrainHeight { available.height = result.size.height
+        available.heightDefinite = true }
+      let originalSize = box.size
+      let previous = box.gutter
+      box.size = available
+      box = configureScrollbars(style, &mut output, &mut measurer, id, request, box)
+      box.size = originalSize
+      if previous.top == box.gutter.top && previous.right == box.gutter.right && previous.bottom == box.gutter.bottom && previous.left == box.gutter.left { break }
+      bfc.restore(checkpoint)
+      output.restoreCheckpoint(passCheckpoint)
+      result = run contents(nodes, &mut output, &mut measurer, id, request, box, natural, &mut bfc)
+    }
+  }
+  if input.performLayout && output.frame != NO_NODE {
+    if node.needsFragmentGeometry {
+      let mut fullContent = box.size
+      if fullContent.widthDefinite { fullContent.width = max(0.0, fullContent.width - box.inset.horizontal()) }
+      if fullContent.heightDefinite { fullContent.height = max(0.0, fullContent.height - box.inset.vertical()) }
+      fullContent.widthDefinite = fullContent.widthDefinite && !request.indefiniteWidth
+      fullContent.heightDefinite = fullContent.heightDefinite && !request.indefiniteHeight
+      run output.rememberFullBox(id, FullBoxGeometry { parent: incoming.parent, known: incoming.known, content: fullContent })
+    }
+  }
+  if fragmented {
+    let mut state = output.resumes.get(id)
+    state.started = wasStarted
+    state.normalComplete = wasNormalComplete
+    let frameAxes = Axes.make(output.frames.writingMode)
+    let previousExtent = frameAxes.size(result.size).height
+    let mut naturalContent = previousExtent
+    if monolithic {
+      let axes = Axes.make(incoming.parentWritingMode)
+      let mut margins = axes.edges(box.margin)
+      margins.top = FragmentBox.startMargin(style, margins.top, state, incoming.fragmentation, incoming.parentWritingMode)
+      margins.bottom = FragmentBox.endMargin(style, margins.bottom, true, incoming.fragmentation.marginEnd, incoming.parentWritingMode)
+      box.margin = axes.physicalEdges(margins)
+      if incoming.fragmentation.canBreakBefore && previousExtent > max(0.0, incoming.fragmentation.limit - incoming.fragmentation.offset) {
+        state.blocked = true
+      } else {
+        state.started = true
+        state.normalContentComplete = true
+        state.descendantsComplete = true
+        state.normalComplete = true
+        state.contentComplete = true
+        state.endDecorationDone = true
+      }
+    } else if id == 0 {
+      let frame = run output.requiredFrame(output.frame)
+      result.size = Size { width: frame.rect.width, height: frame.rect.height }
+      result.location = Point { x: frame.rect.x, y: frame.rect.y }
+      state.started = true
+      state.normalComplete = state.normalContentComplete
+      state.contentComplete = state.descendantsComplete
+    } else {
+      let current = FragmentBox.current(style, box, state, incoming.fragmentation, output.frames.writingMode)
+      naturalContent = max(0.0, previousExtent - frameAxes.box(current).inset.vertical())
+      box = FragmentBox.finish(style, incoming, box, current, &mut state, &mut result, output.frames.writingMode)
+    }
+    run output.resumes.set(id, state)
+    let delta = frameAxes.size(result.size).height - previousExtent
+    let mut alignment = 0.0
+    if !monolithic && node.kind == BoxKind.Block && !wasNormalComplete {
+      let content = max(0.0, frameAxes.size(result.size).height - frameAxes.box(box).inset.vertical())
+      alignment = blockContentOffset(style, content - naturalContent)
+    }
+    if !state.blocked && !state.skipped {
+      if result.hasFirstBaseline { result.firstBaselines = result.firstBaselines.translated(alignment) }
+      if result.hasLastBaseline { result.lastBaselines = result.lastBaselines.translated(alignment) }
+      let mut shift = Point { x: 0.0, y: alignment }
+      if frameAxes.vertical {
+        shift = Point { x: alignment, y: 0.0 }
+        if frameAxes.reverseBlock { shift.x = delta - alignment }
+      }
+      if shift.x != 0.0 || shift.y != 0.0 {
+        // Final CSS extent and per-fragment block alignment affect only this
+        // fragment's children; flex alignment is resolved by its own algorithm.
+        let mut child = node.firstChild
+        while child != NO_NODE {
+          if output.publication(child) != NO_NODE {
+            let mut layout = output.boxes[child]
+            layout.location.x = layout.location.x + shift.x
+            layout.location.y = layout.location.y + shift.y
+            run output.store(child, layout, true)
+          }
+          child = nodes.node(child).nextSibling
+        }
+      }
+    }
+    let own = output.publication(id)
+    if own != NO_NODE && output.fragments.values.asSlice()[own].kind == FragmentKind.Box {
+      let fragments = output.fragments.values.asMutSlice()
+      fragments[own].first = node.firstForSource && !wasStarted
+      fragments[own].last = node.lastForSource && state.normalComplete
+      fragments[own].overflowOnly = wasNormalComplete && id != 0
+      if wasNormalComplete && id != 0 { fragments[own].decorationEdges = 0 }
+      else if style.boxDecorationBreak == BoxDecorationBreak.Slice && id != 0 {
+        let mut edges: u8 = 15
+        if wasStarted {
+          if !frameAxes.vertical { edges = edges - 1 }
+          else if frameAxes.reverseBlock { edges = edges - 2 }
+          else { edges = edges - 8 }
+        }
+        if !state.endDecorationDone {
+          if !frameAxes.vertical { edges = edges - 4 }
+          else if frameAxes.reverseBlock { edges = edges - 8 }
+          else { edges = edges - 2 }
+        }
+        fragments[own].decorationEdges = edges
+      }
+    }
+  }
+  // These are used content-box dimensions, not intrinsic sizes or overflow
+  // extents. Normalize after constraints and every layout algorithm.
+  result.contentSize = Size { width: max(0.0, result.size.width - box.inset.horizontal()), height: max(0.0, result.size.height - box.inset.vertical()) }
+  result.scrollbarGutter = box.gutter
+  if scrollbarApplies(style, input) {
+    result.setScrollbarMetrics(box.scrollbarMetrics)
+    result.horizontalScrollbar = overflowForAxis(style, true) == Overflow.Scroll || output.selected(id, true)
+    result.verticalScrollbar = overflowForAxis(style, false) == Overflow.Scroll || output.selected(id, false)
+    if output.frame != NO_NODE && style.scrollbarWidth != ScrollbarWidth.None && (overflowForAxis(style, true) == Overflow.Auto || overflowForAxis(style, false) == Overflow.Auto) {
+      run output.rememberScrollbars(id, box.scrollbarMetrics, box.gutter)
+    }
+  }
+  result.usedMargin = box.margin
+  let mut marginStart = box.margin.top
+  let mut marginEnd = box.margin.bottom
+  if input.parentWritingMode == WritingMode.VerticalRl || input.parentWritingMode == WritingMode.SidewaysRl {
+    marginStart = box.margin.right
+    marginEnd = box.margin.left
+  }
+  if input.parentWritingMode == WritingMode.VerticalLr || input.parentWritingMode == WritingMode.SidewaysLr {
+    marginStart = box.margin.left
+    marginEnd = box.margin.right
+  }
+  result.marginTopPositive = max(result.marginTopPositive, marginStart)
+  result.marginTopNegative = min(result.marginTopNegative, marginStart)
+  result.marginBottomPositive = max(result.marginBottomPositive, marginEnd)
+  result.marginBottomNegative = min(result.marginBottomNegative, marginEnd)
+  if fragmented {
+    let mut state = output.resumes.get(id)
+    let policy = FragmentBox.marginPolicy(style, incoming.parentWritingMode)
+    state.marginTop = state.marginTop.join(MarginStrut.single(marginStart, policy))
+    state.marginBottom = state.marginBottom.join(MarginStrut.single(marginEnd, policy))
+    if incoming.fragmentation.marginStart {
+      state.marginTop = state.marginTop.boundary(incoming.fragmentation.contextStart || incoming.fragmentation.forcedStart || state.requested.kinds.any())
+    }
+    if incoming.fragmentation.marginEnd { state.marginBottom = state.marginBottom.boundary(true) }
+    result.marginTopPositive = state.marginTop.positive()
+    result.marginTopNegative = state.marginTop.negative()
+    result.marginBottomPositive = state.marginBottom.positive()
+    result.marginBottomNegative = state.marginBottom.negative()
+    run output.resumes.set(id, state)
+  }
+  result.widthDefinite = box.size.widthDefinite && !request.indefiniteWidth
+  result.heightDefinite = box.size.heightDefinite && !request.indefiniteHeight
+  result.preferredRatio = ratio
+  result.ratioBorderBox = ratioBorder
+  exportScrollBaselines(style, node.kind, &mut result)
+  if input.performLayout { overflowGeometry(nodes, &output, id, box, &mut result) }
+  run output.store(id, result, input.performLayout)
+  output.closeCheckpoint(passCheckpoint)
+  output.fragmentParent = previousParent
+  return result
+}
+
+pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, output: &mut LayoutTree, measurer: &mut M, viewport: OptionalSize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  TextMeasure.beginTextLayout(&mut measurer)
+  let nodes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  run output.prepare(nodes.boxes.length())
+  output.viewportOverflow = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
+  let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
+  let mut input = Input.make(viewport)
+  input.known = viewport
+  input.blockRoot = true
+  while true {
+    let viewportLayout = run layoutNode(&nodes, &mut boxes, &mut measurer, 0, input)
+    drop viewportLayout
+    let overflow = run positionTree(&nodes, &mut boxes, &mut measurer, viewport, tree.viewportScrollOffset)
+    if !boxes.needsRelayout {
+      drop boxes
+      output.fragments.resolveLocations()
+      output.viewportOverflow = overflow
+      output.adopt(move nodes)
+      return
+    }
+    boxes.restart()
+  }
+}

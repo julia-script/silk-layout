@@ -1,0 +1,57 @@
+{
+  "name": "calc-dimension",
+  "kind": "spec",
+  "features": [
+    "block",
+    "percentage",
+    "calc"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": {
+            "length": 10,
+            "percent": 0.5
+          },
+          "height": 20
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-values-4/#calc-func"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 20,
+        "contentWidth": 200,
+        "contentHeight": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 110,
+        "height": 20,
+        "contentWidth": 110,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "name": "scroll-offsets",
+  "kind": "spec",
+  "features": [
+    "scroll-state",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrolling",
+    "https://drafts.csswg.org/css-position-3/#stickypos-insets",
+    "https://drafts.csswg.org/css-position-3/#static-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 200,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        },
+        "scrollOffset": {
+          "x": 30,
+          "y": 40
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 400,
+          "height": 200
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 50,
+          "height": 20,
+          "position": "relative",
+          "insetLeft": 5,
+          "insetTop": 7
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flex",
+          "width": 100,
+          "height": 50,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        },
+        "scrollOffset": {
+          "x": 30,
+          "y": 0
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "width": 300,
+          "height": 10,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "width": 300,
+          "height": 10,
+          "flexShrink": 0
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 100
+      },
+      {
+        "x": -30,
+        "y": -40,
+        "width": 400,
+        "height": 200
+      },
+      {
+        "x": 5,
+        "y": 7,
+        "width": 50,
+        "height": 20
+      },
+      {
+        "x": -30,
+        "y": 160,
+        "width": 100,
+        "height": 50
+      },
+      {
+        "x": -30,
+        "y": 0,
+        "width": 300,
+        "height": 10
+      },
+      {
+        "x": 270,
+        "y": 0,
+        "width": 300,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -1,0 +1,191 @@
+{
+  "name": "nested-fragmentation-page-page-fixed",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "nested-contexts",
+    "position-fixed"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-position-3/#fixed-positioning-containing-block"
+  ],
+  "input": {
+    "viewport": {
+      "width": 300,
+      "height": 400
+    },
+    "fragmentation": {
+      "kind": "page",
+      "contexts": [
+        "page"
+      ],
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 50,
+          "y": 0,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 0,
+          "y": 100,
+          "width": 50,
+          "height": 40
+        },
+        {
+          "x": 60,
+          "y": 100,
+          "width": 50,
+          "height": 40
+        },
+        {
+          "x": 0,
+          "y": 250,
+          "width": 60,
+          "height": 50
+        },
+        {
+          "x": 70,
+          "y": 250,
+          "width": 60,
+          "height": 50
+        }
+      ],
+      "ancestors": [
+        [
+          {
+            "index": 0,
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 1,
+            "x": 0,
+            "y": 100,
+            "width": 130,
+            "height": 40
+          }
+        ],
+        [
+          {
+            "index": 1,
+            "x": 0,
+            "y": 100,
+            "width": 130,
+            "height": 40
+          }
+        ],
+        [
+          {
+            "index": 2,
+            "x": 0,
+            "y": 250,
+            "width": 150,
+            "height": 50
+          }
+        ],
+        [
+          {
+            "index": 2,
+            "x": 0,
+            "y": 250,
+            "width": 150,
+            "height": 50
+          }
+        ]
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 70
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "fixed",
+          "width": {"percent": 0.5},
+          "height": 5,
+          "insetLeft": {"percent": 0.1},
+          "insetTop": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 40,
+            "height": 30
+          },
+          {
+            "x": 50,
+            "y": 0,
+            "width": 40,
+            "height": 30
+          },
+          {
+            "x": 0,
+            "y": 100,
+            "width": 50,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 4,
+            "y": 5,
+            "width": 20,
+            "height": 5
+          },
+          {
+            "x": 54,
+            "y": 5,
+            "width": 20,
+            "height": 5
+          },
+          {
+            "x": 5,
+            "y": 105,
+            "width": 25,
+            "height": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "name": "percentage-dimensions",
+  "kind": "spec",
+  "features": [
+    "block",
+    "percentage"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200,
+          "height": 100,
+          "padding": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": {
+            "percent": 0.5
+          },
+          "height": {
+            "percent": 0.5
+          }
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-sizing-3/#percentage-sizing"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 220,
+        "height": 120,
+        "contentWidth": 200,
+        "contentHeight": 100
+      },
+      {
+        "x": 10,
+        "y": 10,
+        "width": 100,
+        "height": 50,
+        "contentWidth": 100,
+        "contentHeight": 50
+      }
+    ]
+  }
+}

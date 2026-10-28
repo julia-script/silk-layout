@@ -1,0 +1,36 @@
+{
+  "name": "empty",
+  "kind": "spec",
+  "features": [
+    "empty",
+    "block"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {}
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visudet.html#blockwidth",
+    "https://www.w3.org/TR/CSS22/visudet.html#normal-block"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 0,
+        "contentWidth": 800,
+        "contentHeight": 0
+      }
+    ]
+  }
+}

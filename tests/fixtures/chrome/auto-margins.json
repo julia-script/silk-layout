@@ -1,0 +1,32 @@
+{
+  "name": "auto-margins",
+  "kind": "chrome",
+  "features": [
+    "block",
+    "auto-margins"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 80,
+          "height": 20,
+          "marginLeft": "auto",
+          "marginRight": "auto"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "name": "flex-baseline",
+  "kind": "spec",
+  "features": [
+    "flex",
+    "baseline",
+    "intrinsic-measure"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 200,
+          "alignItems": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {},
+        "measure": {
+          "minWidth": 30,
+          "maxWidth": 30,
+          "height": 20,
+          "firstBaseline": 15,
+          "lastBaseline": 15
+        }
+      },
+      {
+        "parent": 0,
+        "style": {},
+        "measure": {
+          "minWidth": 40,
+          "maxWidth": 40,
+          "height": 30,
+          "firstBaseline": 20,
+          "lastBaseline": 20
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-flexbox-1/#align-items-property"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 30,
+        "contentWidth": 200,
+        "contentHeight": 30
+      },
+      {
+        "x": 0,
+        "y": 5,
+        "width": 30,
+        "height": 20,
+        "contentWidth": 30,
+        "contentHeight": 20,
+        "firstBaseline": 15,
+        "lastBaseline": 15,
+        "hasFirstBaseline": true,
+        "hasLastBaseline": true
+      },
+      {
+        "x": 30,
+        "y": 0,
+        "width": 40,
+        "height": 30,
+        "contentWidth": 40,
+        "contentHeight": 30,
+        "firstBaseline": 20,
+        "lastBaseline": 20,
+        "hasFirstBaseline": true,
+        "hasLastBaseline": true
+      }
+    ]
+  }
+}

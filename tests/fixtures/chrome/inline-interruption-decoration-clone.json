@@ -1,0 +1,54 @@
+{
+  "name": "inline-interruption-decoration-clone",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 300
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "boxDecorationBreak": "clone",
+          "padding": 2,
+          "border": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "block",
+          "width": 30,
+          "height": 15
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 20
+        }
+      }
+    ]
+  }
+}

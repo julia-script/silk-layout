@@ -1,0 +1,69 @@
+{
+  "name": "text-indent-overfull-rtl",
+  "kind": "spec",
+  "features": [
+    "text-indent"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 30,
+          "direction": "rtl",
+          "textAlign": "center",
+          "textIndent": 50
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#text-indent-property",
+    "https://drafts.csswg.org/css-sizing-3/#intrinsic-sizes",
+    "https://drafts.csswg.org/css-pseudo-4/#first-formatted-line"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "width": 30,
+        "height": 10
+      },
+      {
+        "x": -30,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

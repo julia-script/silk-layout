@@ -1,0 +1,477 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.format { Debug, Format, Formatter }
+import silk.writer { Writer, WriterError }
+import silk.list { List }
+import silk.option { Option }
+import silk.ownership { Copy }
+import silk.usize
+import geometry { Layout, Point, Rect, MarginStrut, max }
+import style { Direction, WritingMode, BreakInside }
+import text { TextCursor }
+import tree { NO_NODE }
+import breaks { FragmentainerKind, PageSide, FractionalProgress, BreakRelaxation, BreakKinds, BreakBoundary, ForcedBreaks, avoidsInside }
+
+pub struct FragmentationError { pub frame: usize, pub message: string<'static> }
+impl Copy for FragmentationError {}
+impl Debug for FragmentationError {
+  effect fn debug(self: &Self, formatter: &mut Formatter) ! WriterError ? &mut Writer {
+    return run Format.debugFields(self, "FragmentationError", &mut formatter)
+  }
+}
+
+pub enum BoundaryProbe { None, Before, After }
+pub struct FragmentInput {
+  pub active: bool,
+  pub offset: f64, pub limit: f64,
+  pub canBreakBefore: bool, pub avoidInside: bool, pub forcedStart: bool,
+  pub contextStart: bool,
+  pub marginStart: bool, pub marginEnd: bool,
+  pub marginEndChosen: bool,
+  // Source adjacency is separate from propagated parent break controls.
+  pub sourceAdjacent: bool, pub sourceBoundary: BreakBoundary,
+  pub contextKinds: BreakKinds, pub boundaryKinds: BreakKinds,
+  pub flexAutoExtent: bool,
+  pub boundaryProbe: BoundaryProbe,
+  pub relaxation: BreakRelaxation,
+  pub kind: FragmentainerKind, pub rectoOnRight: bool,
+}
+impl Copy for FragmentInput {}
+impl FragmentInput {
+  pub fn continuous() -> FragmentInput {
+    return FragmentInput {
+      active: false, offset: 0.0, limit: 0.0,
+      canBreakBefore: false, avoidInside: false, forcedStart: false,
+      contextStart: false, contextKinds: BreakKinds.none(), boundaryKinds: BreakKinds.none(),
+      marginStart: false, marginEnd: false,
+      marginEndChosen: false,
+      sourceAdjacent: false, sourceBoundary: BreakBoundary.none(),
+      flexAutoExtent: false, boundaryProbe: BoundaryProbe.None,
+      relaxation: BreakRelaxation.Strict, kind: FragmentainerKind.Page, rectoOnRight: true,
+    }
+  }
+  pub fn activeKinds(self: &Self) -> BreakKinds {
+    if !self.active { return BreakKinds.none() }
+    return self.contextKinds
+  }
+  pub fn avoidsInside(self: &Self, value: BreakInside) -> bool {
+    return (self.boundaryKinds.page && avoidsInside(value, FragmentainerKind.Page))
+      || (self.boundaryKinds.column && avoidsInside(value, FragmentainerKind.Column))
+      || (self.boundaryKinds.region && avoidsInside(value, FragmentainerKind.Region))
+  }
+}
+
+// Host positions describe presentation, not continuous-flow coordinates.
+// A finite prefix may be followed by an explicitly repeating last geometry;
+// the repeat step is supplied by the host, never inferred from page sizes.
+// Outer contexts exclude the implicit leaf context. Ancestors are row-major:
+// rects.length rows of contexts.length entries, in outer-to-inner order.
+// Each depth is a distinct context, even when its kind repeats. Ordinals are
+// global within that depth: begin at zero, stay or advance by one, and advance
+// whenever the parent does. Stable ordinals retain exactly the same rectangle.
+// Geometry is physical and may overflow ancestors. All depths share the host
+// flow writing mode; the stack is fixed for this compute, not CSS multicol.
+// The nearest Page supplies sides and the page area for unanchored fixed boxes.
+// A repeated tail translates every ancestor and advances each ordinal once
+// per repeated leaf; it never repeats a leaf inside an unchanged ancestor.
+// Borrowed slices are validated before layout; finite exhaustion is an error.
+pub struct FragmentAncestor { pub index: usize, pub rect: Rect }
+impl Copy for FragmentAncestor {}
+pub struct Fragmentainers<'a> {
+  pub rects: Option<&'a [Rect]>,
+  pub contexts: Option<&'a [FragmentainerKind]>,
+  pub ancestors: Option<&'a [FragmentAncestor]>,
+  pub repeatStep: Option<Point>,
+  pub kind: FragmentainerKind,
+  pub writingMode: WritingMode,
+  pub direction: Direction,
+  pub firstPageRight: bool,
+  pub rectoOnRight: bool,
+}
+pub struct Fragmentainer {
+  pub index: usize,
+  pub rect: Rect,
+  pub blockExtent: f64,
+  pub side: PageSide,
+}
+impl Copy for Fragmentainer {}
+impl Fragmentainers {
+  pub fn empty<'a>() -> Fragmentainers<'a> {
+    return Fragmentainers {
+      rects: Option<&'a [Rect]>.None, repeatStep: Option<Point>.None, kind: FragmentainerKind.Page,
+      contexts: Option<&'a [FragmentainerKind]>.None, ancestors: Option<&'a [FragmentAncestor]>.None,
+      writingMode: WritingMode.HorizontalTb, direction: Direction.Ltr,
+      firstPageRight: true, rectoOnRight: true,
+    }
+  }
+  pub fn depth(self: &Self) -> usize {
+    return match &self.contexts { Option<&[FragmentainerKind]>.Some { value } => value.length
+      Option<&[FragmentainerKind]>.None => 0 }
+  }
+  pub fn contextKind(self: &Self, depth: usize) -> FragmentainerKind {
+    if depth == self.depth() { return self.kind }
+    return match &self.contexts { Option<&[FragmentainerKind]>.Some { value } => value[depth]
+      Option<&[FragmentainerKind]>.None => self.kind }
+  }
+  pub fn activeKinds(self: &Self) -> BreakKinds {
+    let mut result = BreakKinds.none()
+    let mut depth: usize = 0
+    while depth <= self.depth() {
+      result.add(self.contextKind(depth))
+      depth = depth + 1
+    }
+    return result
+  }
+  pub fn nearest(self: &Self, kind: FragmentainerKind) -> usize {
+    let mut depth = self.depth() + 1
+    while depth > 0 {
+      depth = depth - 1
+      if self.contextKind(depth) == kind { return depth }
+    }
+    return NO_NODE
+  }
+  pub fn ancestor(self: &Self, index: usize, depth: usize) -> Option<FragmentAncestor> {
+    let rects = match &self.rects { Option<&[Rect]>.Some { value } => value
+      Option<&[Rect]>.None => { return Option<FragmentAncestor>.None } }
+    if rects.length == 0 { return Option<FragmentAncestor>.None }
+    let mut row = index
+    let mut repeat: usize = 0
+    if row >= rects.length {
+      row = rects.length - 1
+      repeat = index - row
+    }
+    let mut result = FragmentAncestor { index: index, rect: rects[row] }
+    if depth < self.depth() {
+      result = match &self.ancestors { Option<&[FragmentAncestor]>.Some { value } => value[row * self.depth() + depth]
+        Option<&[FragmentAncestor]>.None => { return Option<FragmentAncestor>.None } }
+      if repeat > usize.MAX - result.index { return Option<FragmentAncestor>.None }
+      result.index = result.index + repeat
+    }
+    if repeat > 0 {
+      match &self.repeatStep {
+        Option<Point>.None => { return Option<FragmentAncestor>.None }
+        Option<Point>.Some { value } => {
+          result.rect.x = result.rect.x + value.x * usize.toF64(repeat)
+          result.rect.y = result.rect.y + value.y * usize.toF64(repeat)
+        }
+      }
+    }
+    if !validRect(result.rect) { return Option<FragmentAncestor>.None }
+    return Option<FragmentAncestor>.Some { value: result }
+  }
+  pub fn page(self: &Self, index: usize) -> Option<FragmentAncestor> {
+    let depth = self.nearest(FragmentainerKind.Page)
+    if depth == NO_NODE { return Option<FragmentAncestor>.None }
+    return self.ancestor(index, depth)
+  }
+  pub fn boundaryKinds(self: &Self, index: usize) -> BreakKinds {
+    let mut result = BreakKinds.none()
+    result.add(self.kind)
+    let mut depth: usize = 0
+    while depth < self.depth() {
+      match self.ancestor(index, depth) {
+        Option<FragmentAncestor>.Some { value: current } => {
+          match self.ancestor(index + 1, depth) {
+            Option<FragmentAncestor>.Some { value: next } => { if current.index != next.index { result.add(self.contextKind(depth)) } }
+            Option<FragmentAncestor>.None => { result.add(self.contextKind(depth)) }
+          }
+        }
+        Option<FragmentAncestor>.None => {}
+      }
+      depth = depth + 1
+    }
+    return result
+  }
+  pub effect fn validate(self: &Self) ! FragmentationError {
+    let rects = match &self.rects { Option<&[Rect]>.Some { value } => value
+      Option<&[Rect]>.None => { fail FragmentationError { frame: 0, message: "Fragmentainer geometry must be nonempty" } } }
+    if rects.length == 0 { fail FragmentationError { frame: 0, message: "Fragmentainer geometry must be nonempty" } }
+    let depth = self.depth()
+    match &self.ancestors {
+      Option<&[FragmentAncestor]>.Some { value } => {
+        if depth > usize.MAX / rects.length || value.length != rects.length * depth {
+          fail FragmentationError { frame: 0, message: "Fragment ancestry must have one row per leaf and one entry per outer context" }
+        }
+      }
+      Option<&[FragmentAncestor]>.None => { if depth != 0 { fail FragmentationError { frame: 0, message: "Outer contexts require fragment ancestry" } } }
+    }
+    match &self.repeatStep {
+      Option<Point>.Some { value } => {
+        if value.x - value.x != 0.0 || value.y - value.y != 0.0 {
+          fail FragmentationError { frame: 0, message: "Fragment repeat step must be finite" }
+        }
+      }
+      Option<Point>.None => {}
+    }
+    let mut row: usize = 0
+    while row < rects.length {
+      if !validRect(rects[row]) { fail FragmentationError { frame: row, message: "Fragment geometry must be finite and nonnegative" } }
+      let mut column: usize = 0
+      let mut parentChanged = false
+      while column < depth {
+        let entries = match &self.ancestors { Option<&[FragmentAncestor]>.Some { value } => value
+          Option<&[FragmentAncestor]>.None => { fail FragmentationError { frame: row, message: "Missing fragment ancestry" } } }
+        let current = entries[row * depth + column]
+        if !validRect(current.rect) || current.index == usize.MAX {
+          fail FragmentationError { frame: row, message: "Invalid ancestor geometry or ordinal" }
+        }
+        if row == 0 {
+          if current.index != 0 { fail FragmentationError { frame: row, message: "Ancestor ordinals must begin at zero" } }
+        } else {
+          let previous = entries[(row - 1) * depth + column]
+          let changed = current.index != previous.index
+          if (changed && current.index != previous.index + 1) || (parentChanged && !changed) {
+            fail FragmentationError { frame: row, message: "Ancestor ordinals must advance consecutively with their parents" }
+          }
+          if !changed && !sameRect(current.rect, previous.rect) {
+            fail FragmentationError { frame: row, message: "An unchanged ancestor must retain its physical geometry" }
+          }
+          parentChanged = changed
+        }
+        column = column + 1
+      }
+      row = row + 1
+    }
+  }
+  pub fn get(self: &Self, index: usize) -> Option<Fragmentainer> {
+    let leaf = match self.ancestor(index, self.depth()) {
+      Option<FragmentAncestor>.Some { value } => value
+      Option<FragmentAncestor>.None => { return Option<Fragmentainer>.None }
+    }
+    let rect = leaf.rect
+    let mut extent = rect.height
+    if self.writingMode != WritingMode.HorizontalTb { extent = rect.width }
+    let mut side = PageSide.Any
+    match self.page(index) {
+      Option<FragmentAncestor>.Some { value } => {
+        let right = self.firstPageRight != (value.index % 2 != 0)
+        side = PageSide.Left
+        if right { side = PageSide.Right }
+      }
+      Option<FragmentAncestor>.None => {}
+    }
+    // Break3 §2: a fragmentainer has at least 1px of effective block extent
+    // for progress, even when its externally supplied physical size is zero.
+    return Option<Fragmentainer>.Some { value: Fragmentainer { index: index, rect: rect, blockExtent: max(1.0, extent), side: side } }
+  }
+}
+
+fn validRect(rect: Rect) -> bool {
+  return rect.x - rect.x == 0.0 && rect.y - rect.y == 0.0
+    && rect.width - rect.width == 0.0 && rect.height - rect.height == 0.0
+    && rect.width >= 0.0 && rect.height >= 0.0
+}
+fn sameRect(a: Rect, b: Rect) -> bool {
+  return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height
+}
+
+// Content progress is independent of progress through specified block sizes.
+// In particular, fixed-size overflow may continue after normal flow completes.
+pub union FlowCursor {
+  Unstarted,
+  Block { pub nextChild: usize },
+  Inline {
+    pub start: TextCursor, pub nextBreak: usize, pub nextChunk: usize,
+    pub realLines: usize, pub hasRealLine: bool, pub afterForced: bool,
+    pub lineDirection: Direction,
+  },
+  Flex { pub line: usize, pub progress: FractionalProgress, pub gap: FractionalProgress },
+}
+impl Copy for FlowCursor {}
+pub struct StaticAnchor {
+  pub parentFragment: usize, pub rect: Rect,
+  pub inlineLevel: bool, pub valid: bool,
+}
+impl Copy for StaticAnchor {}
+impl StaticAnchor {
+  pub fn none() -> StaticAnchor {
+    return StaticAnchor { parentFragment: NO_NODE, rect: Rect.zero(), inlineLevel: false, valid: false }
+  }
+}
+pub struct ResumeState {
+  pub cursor: FlowCursor,
+  pub started: bool,
+  pub normalComplete: bool,
+  pub contentComplete: bool,
+  pub normalContentComplete: bool, pub descendantsComplete: bool,
+  pub blocked: bool, pub skipped: bool,
+  pub before: BreakBoundary, pub after: BreakBoundary,
+  pub sourceAfter: BreakBoundary, pub sourceAfterValid: bool,
+  // Last consumed normalized outer-inline boundary; not a paragraph break.
+  pub inlineSourceCut: usize,
+  pub requested: ForcedBreaks,
+  pub notBeforeFrame: usize, pub beforeHandled: bool,
+  pub marginTop: MarginStrut, pub marginBottom: MarginStrut, pub pendingMargin: MarginStrut,
+  pub endDecorationDone: bool, pub flexLine: usize,
+  pub frameLines: usize, pub lineBreak: bool,
+  pub size: FractionalProgress,
+  pub minimum: FractionalProgress,
+  pub maximum: FractionalProgress,
+  pub flexLeading: FractionalProgress, pub flexTrailing: FractionalProgress,
+  // Parallel overflow and float flows belong to their generated parent.
+  pub pendingFirst: usize, pub pendingLast: usize, pub nextPending: usize,
+  pub pendingOwner: usize,
+  // Publication targets only this invocation, never an earlier box fragment.
+  pub fragmentainer: usize, pub fragment: usize, pub emissionStart: usize,
+  pub fullGeometry: usize,
+  pub anchor: StaticAnchor,
+}
+impl Copy for ResumeState {}
+impl ResumeState {
+  pub fn make() -> ResumeState {
+    return ResumeState {
+      cursor: FlowCursor.Unstarted,
+      started: false, normalComplete: false, contentComplete: false,
+      normalContentComplete: false, descendantsComplete: false,
+      blocked: false, skipped: false,
+      before: BreakBoundary.none(), after: BreakBoundary.none(),
+      sourceAfter: BreakBoundary.none(), sourceAfterValid: false, inlineSourceCut: NO_NODE,
+      requested: ForcedBreaks.none(), notBeforeFrame: 0, beforeHandled: false,
+      marginTop: MarginStrut.zero(), marginBottom: MarginStrut.zero(), pendingMargin: MarginStrut.zero(),
+      endDecorationDone: false, flexLine: NO_NODE,
+      frameLines: 0, lineBreak: false,
+      size: FractionalProgress.make(), minimum: FractionalProgress.make(), maximum: FractionalProgress.make(),
+      flexLeading: FractionalProgress.make(), flexTrailing: FractionalProgress.make(),
+      pendingFirst: NO_NODE, pendingLast: NO_NODE, nextPending: NO_NODE,
+      pendingOwner: NO_NODE,
+      fragmentainer: NO_NODE, fragment: NO_NODE, emissionStart: NO_NODE,
+      fullGeometry: NO_NODE,
+      anchor: StaticAnchor.none(),
+    }
+  }
+}
+struct Cell { state: ResumeState, undo: usize, layoutUndo: usize }
+impl Copy for Cell {}
+struct Change { id: usize, previous: ResumeState, undo: usize }
+impl Copy for Change {}
+struct LayoutChange { id: usize, previous: Layout, undo: usize }
+impl Copy for LayoutChange {}
+pub struct ResumeCheckpoint { index: usize, parent: usize, layouts: usize, layoutParent: usize }
+impl Copy for ResumeCheckpoint {}
+impl ResumeCheckpoint {
+  // Promote a nested candidate without rolling back its accepted work or
+  // changing the active journal marks.
+  pub fn replacing(self: &Self, previous: ResumeCheckpoint) -> ResumeCheckpoint {
+    return ResumeCheckpoint { index: self.index, parent: previous.parent, layouts: self.layouts, layoutParent: previous.layoutParent }
+  }
+}
+
+// Only fragmented layout allocates these cells. Intrinsic probes never advance
+// content, but their scalar sizing writes must roll back with a rejected trial.
+// State and layout snapshots are logged separately, once per nested transaction.
+pub struct ResumeStore {
+  cells: List<Cell>,
+  changes: List<Change>,
+  layouts: List<LayoutChange>,
+  layoutMark: usize,
+  mark: usize,
+}
+impl ResumeStore {
+  pub fn make() -> ResumeStore {
+    return ResumeStore { cells: List<Cell>.make(), changes: List<Change>.make(), layouts: List<LayoutChange>.make(), mark: 0, layoutMark: 0 }
+  }
+  pub effect fn prepare(self: &mut Self, count: usize) ! OutOfMemoryError ? &mut Allocator {
+    self.cells.clear()
+    self.changes.clear()
+    self.layouts.clear()
+    self.layoutMark = 0
+    self.mark = 0
+    run self.cells.reserveExact(count)
+    let mut index: usize = 0
+    while index < count {
+      run self.cells.append(Cell { state: ResumeState.make(), undo: NO_NODE, layoutUndo: NO_NODE })
+      index = index + 1
+    }
+  }
+  pub fn get(self: &Self, id: usize) -> ResumeState { return self.cells.asSlice()[id].state }
+  pub fn publication(self: &Self, id: usize, frame: usize) -> usize {
+    let state = &self.cells.asSlice()[id].state
+    if state.fragmentainer != frame { return NO_NODE }
+    return state.fragment
+  }
+  pub fn reset(self: &mut Self) {
+    let cells = self.cells.asMutSlice()
+    let mut index: usize = 0
+    while index < cells.length {
+      cells[index] = Cell { state: ResumeState.make(), undo: NO_NODE, layoutUndo: NO_NODE }
+      index = index + 1
+    }
+    self.changes.clear()
+    self.layouts.clear()
+    self.layoutMark = 0
+    self.mark = 0
+  }
+  pub effect fn set(self: &mut Self, id: usize, state: ResumeState) ! OutOfMemoryError ? &mut Allocator {
+    let mut undo = self.cells.asSlice()[id].undo
+    if undo < self.mark || undo >= self.changes.length() {
+      undo = self.changes.length()
+      let previous = &self.cells.asSlice()[id]
+      run self.changes.append(Change { id: id, previous: previous.state, undo: previous.undo })
+    }
+    let cells = self.cells.asMutSlice()
+    cells[id].state = state
+    cells[id].undo = undo
+  }
+  pub fn needsLayoutSnapshot(self: &Self, id: usize) -> bool {
+    let undo = self.cells.asSlice()[id].layoutUndo
+    return undo < self.layoutMark || undo >= self.layouts.length()
+  }
+  pub effect fn rememberLayout(self: &mut Self, id: usize, value: Layout) ! OutOfMemoryError ? &mut Allocator {
+    let index = self.layouts.length()
+    run self.layouts.append(LayoutChange { id: id, previous: value, undo: self.cells.asSlice()[id].layoutUndo })
+    let cells = self.cells.asMutSlice()
+    cells[id].layoutUndo = index
+  }
+  pub fn anchor(self: &Self, id: usize) -> StaticAnchor { return self.cells.asSlice()[id].state.anchor }
+  pub fn checkpoint(self: &mut Self) -> ResumeCheckpoint {
+    let result = ResumeCheckpoint { index: self.changes.length(), parent: self.mark, layouts: self.layouts.length(), layoutParent: self.layoutMark }
+    self.mark = result.index
+    self.layoutMark = result.layouts
+    return result
+  }
+  // Restore leaves the checkpoint open so a rejected candidate can be retried.
+  // Closing it commits the current candidate to the enclosing transaction.
+  pub fn restore(self: &mut Self, checkpoint: ResumeCheckpoint, boxes: &mut [Layout]) {
+    let cells = self.cells.asMutSlice()
+    let mut count = self.changes.length()
+    while count > checkpoint.index {
+      count = count - 1
+      let change = self.changes.get(count)
+      cells[change.id].state = change.previous
+      cells[change.id].undo = change.undo
+    }
+    self.changes.truncate(checkpoint.index)
+    self.mark = checkpoint.index
+    count = self.layouts.length()
+    while count > checkpoint.layouts {
+      count = count - 1
+      let change = self.layouts.get(count)
+      boxes[change.id] = change.previous
+      cells[change.id].layoutUndo = change.undo
+    }
+    self.layouts.truncate(checkpoint.layouts)
+    self.layoutMark = checkpoint.layouts
+  }
+  pub fn close(self: &mut Self, checkpoint: ResumeCheckpoint) {
+    self.mark = checkpoint.parent
+    self.layoutMark = checkpoint.layoutParent
+  }
+  pub fn acceptFrame(self: &mut Self) {
+    let cells = self.cells.asMutSlice()
+    let mut index: usize = 0
+    while index < self.changes.length() {
+      let id = self.changes.asSlice()[index].id
+      cells[id].undo = NO_NODE
+      index = index + 1
+    }
+    index = 0
+    while index < self.layouts.length() {
+      let id = self.layouts.asSlice()[index].id
+      cells[id].layoutUndo = NO_NODE
+      index = index + 1
+    }
+    self.layouts.clear()
+    self.layoutMark = 0
+    self.changes.clear()
+    self.mark = 0
+  }
+}

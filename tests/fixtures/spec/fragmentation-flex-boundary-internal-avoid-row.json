@@ -1,0 +1,190 @@
+{
+  "name": "fragmentation-flex-boundary-internal-avoid-row",
+  "kind": "spec",
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#pagination",
+    "https://drafts.csswg.org/css-break-3/#break-propagation",
+    "https://drafts.csswg.org/css-break-3/#unforced-breaks"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 100
+    },
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 100,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 200,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 300,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 400,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 500,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "flexDirection": "row",
+          "flexWrap": "wrap",
+          "alignItems": "flex-start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 10,
+          "breakInside": "avoid"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "height": 30,
+          "breakInside": "avoid"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 5,
+        "style": {
+          "height": 20,
+          "breakInside": "avoid",
+          "breakBefore": "avoid"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "x": 100,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 100,
+            "y": 0,
+            "width": 100,
+            "height": 30
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 100,
+            "y": 0,
+            "width": 100,
+            "height": 30
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 100,
+            "y": 30,
+            "width": 100,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 100,
+            "y": 30,
+            "width": 100,
+            "height": 20
+          }
+        ]
+      }
+    ]
+  }
+}

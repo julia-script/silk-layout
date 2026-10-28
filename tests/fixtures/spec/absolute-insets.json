@@ -1,0 +1,58 @@
+{
+  "name": "absolute-insets",
+  "kind": "spec",
+  "features": [
+    "absolute",
+    "positioning"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "position": "relative",
+          "width": 200,
+          "height": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "insetLeft": 10,
+          "insetRight": 20,
+          "insetTop": 5,
+          "height": 20
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visudet.html#abs-non-replaced-width"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 100,
+        "contentWidth": 200,
+        "contentHeight": 100
+      },
+      {
+        "x": 10,
+        "y": 5,
+        "width": 170,
+        "height": 20,
+        "contentWidth": 170,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

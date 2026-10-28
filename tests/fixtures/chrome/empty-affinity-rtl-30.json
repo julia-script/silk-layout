@@ -1,0 +1,52 @@
+{
+  "name": "empty-affinity-rtl-30",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 30,
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "padding": {
+            "left": 3,
+            "right": 4
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#ignored-boxes",
+    "https://drafts.csswg.org/css-text-3/#line-breaking-box-edges"
+  ]
+}

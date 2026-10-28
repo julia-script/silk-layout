@@ -1,0 +1,80 @@
+{
+  "name": "replaced-block-stretch-float",
+  "kind": "spec",
+  "features": [
+    "block",
+    "replaced",
+    "float-avoidance",
+    "justify-self",
+    "max-width"
+  ],
+  "spec": [
+    "https://www.w3.org/TR/2011/REC-CSS2-20110607/visuren.html#floats",
+    "https://www.w3.org/TR/2011/REC-CSS2-20110607/visudet.html#inline-replaced-width",
+    "https://drafts.csswg.org/css-align-3/#valdef-justify-self-stretch"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 400
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "float": "left",
+          "width": 150,
+          "height": 40
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "replaced": true
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "replaced": true,
+          "justifySelf": "stretch",
+          "maxWidth": 350
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 400,
+        "height": 340
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 150,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 40,
+        "width": 300,
+        "height": 150
+      },
+      {
+        "x": 0,
+        "y": 190,
+        "width": 350,
+        "height": 150
+      }
+    ]
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "name": "bidi-static-override-middle",
+  "kind": "spec",
+  "features": [
+    "source-text",
+    "inline-fragments",
+    "position",
+    "bidi-ordering"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 40,
+          "fontKey": 1,
+          "direction": "ltr",
+          "position": "relative"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "fontKey": 1,
+          "direction": "rtl",
+          "unicodeBidi": "bidi-override"
+        }
+      },
+      {
+        "parent": 1,
+        "text": "ab"
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline",
+          "position": "absolute",
+          "width": 5,
+          "height": 5,
+          "fontKey": 1,
+          "direction": "rtl"
+        }
+      },
+      {
+        "parent": 1,
+        "text": "cd"
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-position-3/#staticpos-rect",
+    "https://www.w3.org/TR/2011/REC-CSS2-20110607/visudet.html#abs-non-replaced-width",
+    "https://drafts.csswg.org/css-writing-modes-4/#bidi-atomic-inlines",
+    "https://www.unicode.org/reports/tr9/tr9-52.html#N1",
+    "https://www.unicode.org/reports/tr9/tr9-52.html#L2"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "width": 100,
+        "height": 40
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 10,
+            "y": 0,
+            "width": 5,
+            "height": 5
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

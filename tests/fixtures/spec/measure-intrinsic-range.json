@@ -1,0 +1,78 @@
+{
+  "name": "measure-intrinsic-range",
+  "kind": "spec",
+  "features": [
+    "min-content",
+    "max-content",
+    "intrinsic-measure"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 200,
+          "alignItems": "flex-start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": "min-content"
+        },
+        "measure": {
+          "minWidth": 30,
+          "maxWidth": 90,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": "max-content"
+        },
+        "measure": {
+          "minWidth": 40,
+          "maxWidth": 80,
+          "height": 20
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-sizing-3/#intrinsic-sizes"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 20,
+        "contentWidth": 200,
+        "contentHeight": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 20,
+        "contentWidth": 30,
+        "contentHeight": 20
+      },
+      {
+        "x": 30,
+        "y": 0,
+        "width": 80,
+        "height": 20,
+        "contentWidth": 80,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

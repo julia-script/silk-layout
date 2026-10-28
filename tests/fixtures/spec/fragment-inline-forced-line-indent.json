@@ -1,0 +1,22 @@
+{
+  "name": "fragment-inline-forced-line-indent",
+  "kind": "spec",
+  "features": ["fragmentation", "source-text", "inline-fragments"],
+  "spec": ["https://drafts.csswg.org/css-text-3/#text-indent-property", "https://drafts.csswg.org/css-break-3/#widows-orphans", "https://drafts.csswg.org/css-break-3/#box-splitting"],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "fragmentation": {"kind": "column", "frames": [{"x": 0, "y": 0, "width": 20, "height": 35}, {"x": 40, "y": 0, "width": 20, "height": 35}]},
+    "fonts": [{"fontSize": 10, "ascent": 8, "descent": 2, "lineGap": 0, "xHeight": 5, "capHeight": 7, "subscriptOffset": 2, "superscriptOffset": 3, "baselines": {"alphabetic": 8, "ideographic": 10, "central": 5, "mathematical": 5}}],
+    "nodes": [
+      {"parent": null, "style": {"fontKey": 1, "textIndent": {"value": 5, "eachLine": true}, "whiteSpaceCollapse": "preserve-breaks"}},
+      {"parent": 0, "text": "aa "}, {"parent": 0, "text": "bb\n"}, {"parent": 0, "text": "cc "}, {"parent": 0, "text": "dd"}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 20, "height": 35}, {"x": 40, "y": 0, "width": 20, "height": 20}]},
+    {"rects": [{"x": 5, "y": 0, "width": 10, "height": 10}]},
+    {"width": 10, "height": 10},
+    {"rects": [{"x": 45, "y": 0, "width": 10, "height": 10}]},
+    {"rects": [{"x": 40, "y": 10, "width": 10, "height": 10}]}
+  ]}
+}

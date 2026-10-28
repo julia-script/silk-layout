@@ -1,0 +1,65 @@
+import silk.option { Option }
+import geometry { Point, Size }
+import style { WritingMode }
+import tree { NO_NODE }
+import fragmentation { Fragmentainer }
+import layout_pass { LayoutPass }
+
+pub fn instance(output: &LayoutPass, box: usize, frame: usize) -> usize {
+  if box == NO_NODE { return NO_NODE }
+  let mut current = output.fragments.first(box)
+  while current != NO_NODE {
+    let fragment = &output.fragments.values.asSlice()[current]
+    if fragment.fragmentainer == frame { return current }
+    current = fragment.nextForBox
+  }
+  return NO_NODE
+}
+pub fn physicalPosition(output: &LayoutPass, id: usize, visual: bool) -> Point {
+  let mut result = Point { x: 0.0, y: 0.0 }
+  let mut current = id
+  while current != NO_NODE {
+    let fragment = &output.fragments.values.asSlice()[current]
+    result.x = result.x + fragment.location.x
+    result.y = result.y + fragment.location.y
+    if visual {
+      result.x = result.x + fragment.visualOffset.x
+      result.y = result.y + fragment.visualOffset.y
+    }
+    current = fragment.parent
+  }
+  return result
+}
+// Host page origins are presentation coordinates. Only logical block extents
+// advance the continuous coordinate system, including for vertical-rl flows.
+pub fn flowTranslation(output: &LayoutPass, frame: usize) -> Point {
+  let before = output.frameOffsets.get(frame)
+  let mut result = Point { x: 0.0, y: 0.0 }
+  match output.frames.get(frame) {
+    Option<Fragmentainer>.Some { value } => {
+      result.x = -value.rect.x
+      result.y = -value.rect.y
+      if output.frames.writingMode == WritingMode.HorizontalTb { result.y = result.y + before }
+      else if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl {
+        result.x = result.x - before - value.rect.width
+      } else { result.x = result.x + before }
+    }
+    Option<Fragmentainer>.None => {}
+  }
+  return result
+}
+pub fn flowPosition(output: &LayoutPass, id: usize) -> Point {
+  let mut result = physicalPosition(output, id, false)
+  if id == NO_NODE || output.frame == NO_NODE { return result }
+  let frame = output.fragments.values.get(id).fragmentainer
+  if frame == NO_NODE { return result }
+  let shift = flowTranslation(output, frame)
+  result.x = result.x + shift.x
+  result.y = result.y + shift.y
+  return result
+}
+pub fn blockStart(output: &LayoutPass, point: Point, size: Size) -> f64 {
+  if output.frames.writingMode == WritingMode.HorizontalTb { return point.y }
+  if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl { return -point.x - size.width }
+  return point.x
+}

@@ -1,0 +1,3 @@
+[workspace]
+members = ["layout", "cli"]
+silk-version = "0.1.0-dev.20+10a8c67813a1"

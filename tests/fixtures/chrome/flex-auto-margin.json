@@ -1,0 +1,37 @@
+{
+  "name": "flex-auto-margin",
+  "kind": "chrome",
+  "features": [
+    "flex",
+    "auto-margins"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 200,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 50,
+          "marginLeft": "auto"
+        }
+      }
+    ]
+  }
+}

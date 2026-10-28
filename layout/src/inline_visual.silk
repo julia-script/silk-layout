@@ -1,0 +1,982 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import box_tree { BoxTree }
+import inline_items { Item, ItemKind, Scope, tabAdvance }
+import inline_text as TextFlow
+import style { Direction, UnicodeBidi, BoxDecorationBreak, WhiteSpaceCollapse, TextWrap }
+import text { TextAnalysis, TextContext, TextCursor, TextTokenKind }
+import tree { NO_NODE }
+
+// Stable parts belong to the infinite paragraph, not to a candidate line.
+struct Part { scope: usize, parent: usize }
+impl Copy for Part {}
+struct Segment {
+  start: TextCursor, end: TextCursor, scope: usize, part: usize,
+  level: u8, unwrappedLevel: u8, removed: bool, marker: bool,
+}
+impl Copy for Segment {}
+struct ScopeState {
+  open: TextCursor, close: TextCursor,
+  content: bool, child: bool,
+  seen: usize, part: usize, firstPart: usize, lastPart: usize,
+  first: usize, last: usize, current: usize,
+  openItem: usize, closeItem: usize, leaf: bool,
+}
+impl Copy for ScopeState {}
+impl ScopeState {
+  fn make() -> Self {
+    let absent = TextCursor { unit: NO_NODE, offset: 0 }
+    return ScopeState {
+      open: absent, close: absent, content: false, child: false,
+      seen: NO_NODE, part: 0, firstPart: 0, lastPart: 0,
+      first: NO_NODE, last: NO_NODE, current: NO_NODE,
+      openItem: NO_NODE, closeItem: NO_NODE, leaf: false,
+    }
+  }
+}
+pub struct Plan {
+  pub active: bool,
+  pub anchorLevels: List<u8>,
+  segments: List<Segment>, parts: List<Part>, states: List<ScopeState>,
+  path: List<usize>, visual: List<usize>,
+}
+impl Plan {
+  pub fn make() -> Plan {
+    return Plan {
+      anchorLevels: List<u8>.make(),
+      active: false, segments: List<Segment>.make(), parts: List<Part>.make(),
+      states: List<ScopeState>.make(), path: List<usize>.make(), visual: List<usize>.make(),
+    }
+  }
+}
+pub struct Placement {
+  pub span: usize, pub x: f64, pub advance: f64, pub precedingReal: bool,
+  anchor: usize, lowHead: usize, highHead: usize, next: usize, sourceOrder: usize,
+  level: u8, part: usize, flow: bool, marker: bool,
+  low: f64, high: f64, outerStart: f64, outerEnd: f64,
+}
+impl Copy for Placement {}
+pub struct Span {
+  pub scope: usize, pub parent: usize, pub start: f64, pub end: f64,
+  pub lowEdge: bool, pub highEdge: bool, pub first: bool, pub last: bool,
+  pub next: usize,
+  part: usize, firstLeaf: usize, lastLeaf: usize, sourceOrder: usize, low: f64, high: f64,
+}
+impl Copy for Span {}
+pub struct Line {
+  pub active: bool, pub order: List<usize>, pub positions: List<Placement>,
+  pub spans: List<Span>, pub firstSpan: usize, pub advance: f64, pub real: bool,
+}
+impl Line {
+  pub fn make() -> Self {
+    return Line {
+      active: false, order: List<usize>.make(), positions: List<Placement>.make(),
+      spans: List<Span>.make(), firstSpan: NO_NODE, advance: 0.0, real: false,
+    }
+  }
+}
+
+fn emptySpan(scope: usize, parent: usize, part: usize, leaf: usize) -> Span {
+  return Span {
+    scope: scope, parent: parent, start: 0.0, end: 0.0,
+    lowEdge: false, highEdge: false, first: false, last: false,
+    next: NO_NODE, part: part, firstLeaf: leaf, lastLeaf: leaf, sourceOrder: NO_NODE, low: 0.0, high: 0.0,
+  }
+}
+
+fn segmentAt(plan: &Plan, at: TextCursor) -> usize {
+  let mut low: usize = 0
+  let mut high = plan.segments.length()
+  while low < high {
+    let middle = low + (high - low) / 2
+    if at.before(plan.segments.get(middle).start) { high = middle }
+    else { low = middle + 1 }
+  }
+  if low == 0 { return NO_NODE }
+  let index = low - 1
+  let segment = plan.segments.get(index)
+  if segment.start.equal(at) || at.before(segment.end) { return index }
+  return NO_NODE
+}
+
+fn markerLevel(plan: &Plan, analysis: &TextAnalysis, at: TextCursor) -> u8 {
+  let paragraph = analysis.paragraphAt(at)
+  let mut low: usize = 0
+  let mut high = plan.segments.length()
+  while low < high {
+    let middle = low + (high - low) / 2
+    if plan.segments.get(middle).start.before(at) { low = middle + 1 }
+    else { high = middle }
+  }
+  while low < plan.segments.length() {
+    let segment = plan.segments.get(low)
+    if !segment.start.before(paragraph.end) { break }
+    if !segment.removed { return segment.level }
+    low = low + 1
+  }
+  return paragraph.level
+}
+
+fn reverse(order: &mut List<usize>, start: usize, end: usize) {
+  let mut low = start
+  let mut high = end
+  while low < high {
+    high = high - 1
+    if low >= high { break }
+    let value = order.get(low)
+    let other = order.get(high)
+    order.set(low, other)
+    order.set(high, value)
+    low = low + 1
+  }
+}
+
+fn reorderSegments(plan: &mut Plan, start: usize, end: usize) {
+  let mut highest: u8 = 0
+  let mut lowest: u8 = 127
+  let mut index = start
+  while index < end {
+    let level = plan.segments.get(plan.visual.get(index)).unwrappedLevel
+    if level > highest { highest = level }
+    if level % 2 == 1 && level < lowest { lowest = level }
+    index = index + 1
+  }
+  if lowest == 127 { return }
+  let mut level = highest
+  while true {
+    index = start
+    while index < end {
+      if plan.segments.get(plan.visual.get(index)).unwrappedLevel < level { index = index + 1 }
+      else {
+        let first = index
+        while index < end && plan.segments.get(plan.visual.get(index)).unwrappedLevel >= level { index = index + 1 }
+        reverse(&mut plan.visual, first, index)
+      }
+    }
+    if level == lowest { break }
+    level = level - 1
+  }
+}
+
+pub effect fn makePlan(nodes: &BoxTree, scopes: &[Scope], original: &[Item], context: TextContext, analysis: &TextAnalysis) -> Plan ! OutOfMemoryError ? &mut Allocator {
+  let mut active = context.direction == Direction.Rtl || context.unicodeBidi == UnicodeBidi.Plaintext
+    || analysis.level % 2 == 1 || analysis.paragraph.level == 1
+  let mut index: usize = 0
+  while !active && index < analysis.levels.length() {
+    active = analysis.levels.get(index).level % 2 == 1
+    index = index + 1
+  }
+  index = 0
+  while !active && index < analysis.paragraphs.length() {
+    active = analysis.paragraphs.get(index).level == 1
+    index = index + 1
+  }
+  index = 1
+  while !active && index < scopes.length {
+    let scope = &scopes[index]
+    active = nodes.style(scopes[scope.parent].id).usedDirection() != context.direction
+      || nodes.style(scope.id).unicodeBidi == UnicodeBidi.Plaintext
+    index = index + 1
+  }
+  index = 0
+  while !active && index < original.length {
+    active = original[index].kind == ItemKind.Anchor && original[index].level % 2 == 1
+    index = index + 1
+  }
+  let mut plan = Plan.make()
+  plan.active = active
+  if !active { return move plan }
+  if scopes.length > 1 {
+    index = 0
+    while index < scopes.length { run plan.states.append(ScopeState.make())
+      index = index + 1 }
+    run plan.parts.append(Part { scope: 0, parent: 0 })
+  }
+  // First establish semantic occupancy; empty leaf scopes receive one geometry
+  // marker, and their ancestor path supplies any empty parent boxes.
+  if scopes.length > 1 {
+    index = 0
+    while index < context.tokens.length {
+      let token = &context.tokens[index]
+      let scope = original[index].scope
+      if token.kind == TextTokenKind.Open {
+        let states = plan.states.asMutSlice()
+        states[scope].open = TextCursor { unit: index, offset: 0 }
+        states[scopes[scope].parent].child = true
+      } else if token.kind == TextTokenKind.Close {
+        let states = plan.states.asMutSlice()
+        states[scope].close = TextCursor { unit: index, offset: 0 }
+      }
+      let length = TextFlow.length(token)
+      let mut offset: usize = 0
+      let mut content = false
+      while offset < length && !content {
+        let at = TextCursor { unit: index, offset: offset }
+        content = token.kind != TextTokenKind.Text || !analysis.removedAt(at)
+        let boundary = analysis.boundaryAfter(at)
+        offset = length
+        if boundary.unit == index { offset = boundary.offset }
+      }
+      if content {
+        let mut ancestor = scope
+        while ancestor != 0 && !plan.states.get(ancestor).content {
+          let states = plan.states.asMutSlice()
+          states[ancestor].content = true
+          ancestor = scopes[ancestor].parent
+        }
+      }
+      index = index + 1
+    }
+  }
+  index = 0
+  while index < context.tokens.length {
+    let token = &context.tokens[index]
+    let scope = original[index].scope
+    if scopes.length > 1 && token.kind == TextTokenKind.Open {
+      let state = plan.states.get(scope)
+      if !state.content && !state.child {
+        let at = TextCursor { unit: index, offset: 0 }
+        run plan.segments.append(Segment { start: at, end: at, scope: scope, part: 0,
+          level: analysis.levelAt(at), unwrappedLevel: analysis.unwrappedLevelAt(at), removed: false, marker: true })
+      }
+    }
+    let length = TextFlow.length(token)
+    let mut offset: usize = 0
+    while offset < length {
+      let at = TextCursor { unit: index, offset: offset }
+      let boundary = analysis.boundaryAfter(at)
+      let mut next = length
+      if boundary.unit == index && boundary.offset < next { next = boundary.offset }
+      let mut end = TextCursor { unit: index, offset: next }
+      if next == length { end = TextCursor { unit: index + 1, offset: 0 } }
+      let removed = token.kind == TextTokenKind.Text && analysis.removedAt(at)
+      run plan.segments.append(Segment {
+        start: at, end: end, scope: scope, part: 0,
+        level: analysis.levelAt(at), unwrappedLevel: analysis.unwrappedLevelAt(at), removed: removed, marker: false,
+      })
+      offset = next
+    }
+    index = index + 1
+  }
+  if scopes.length == 1 { return move plan }
+  // Following semantic affinity is independent of structural provider levels.
+  let terminalParagraph = analysis.paragraphAt(TextCursor { unit: context.tokens.length, offset: 0 })
+  let mut following = terminalParagraph.level
+  let mut followingUnwrapped = terminalParagraph.level
+  let mut followingEnd = terminalParagraph.end
+  index = plan.segments.length()
+  while index > 0 {
+    index = index - 1
+    let mut segment = plan.segments.get(index)
+    let paragraph = analysis.paragraphAt(segment.start)
+    if !paragraph.end.equal(followingEnd) {
+      following = paragraph.level
+      followingUnwrapped = paragraph.level
+      followingEnd = paragraph.end
+    }
+    if segment.marker {
+      segment.level = following
+      segment.unwrappedLevel = followingUnwrapped
+      plan.segments.set(index, segment)
+    } else if !segment.removed {
+      following = segment.level
+      followingUnwrapped = segment.unwrappedLevel
+    }
+  }
+  index = 0
+  let mut paragraphStart: usize = 0
+  let mut paragraphEnd = analysis.paragraphAt(TextCursor { unit: 0, offset: 0 }).end
+  while index < plan.segments.length() {
+    let segment = plan.segments.get(index)
+    if !segment.start.before(paragraphEnd) {
+      let visualEnd = plan.visual.length()
+      reorderSegments(&mut plan, paragraphStart, visualEnd)
+      paragraphStart = plan.visual.length()
+      paragraphEnd = analysis.paragraphAt(segment.start).end
+    }
+    if !segment.removed { run plan.visual.append(index) }
+    index = index + 1
+  }
+  let visualEnd = plan.visual.length()
+  reorderSegments(&mut plan, paragraphStart, visualEnd)
+  index = 0
+  while index < plan.visual.length() {
+    let segmentIndex = plan.visual.get(index)
+    let mut segment = plan.segments.get(segmentIndex)
+    plan.path.clear()
+    let mut scope = segment.scope
+    while scope != 0 { run plan.path.append(scope)
+      scope = scopes[scope].parent }
+    let mut parent: usize = 0
+    let mut depth = plan.path.length()
+    while depth > 0 {
+      depth = depth - 1
+      scope = plan.path.get(depth)
+      let mut state = plan.states.get(scope)
+      if state.seen == NO_NODE || state.seen + 1 != index || plan.parts.get(state.part).parent != parent {
+        state.part = plan.parts.length()
+        run plan.parts.append(Part { scope: scope, parent: parent })
+      }
+      state.seen = index
+      parent = state.part
+      plan.states.set(scope, state)
+    }
+    segment.part = parent
+    plan.segments.set(segmentIndex, segment)
+    index = index + 1
+  }
+  // Logical endpoint parts are only a fallback for a line containing trimmed
+  // content and structural markers but no shaped leaf in that scope.
+  index = 0
+  while index < plan.segments.length() {
+    let segment = plan.segments.get(index)
+    let mut part = segment.part
+    while part != 0 {
+      let value = plan.parts.get(part)
+      let states = plan.states.asMutSlice()
+      if states[value.scope].firstPart == 0 { states[value.scope].firstPart = part }
+      states[value.scope].lastPart = part
+      part = value.parent
+    }
+    index = index + 1
+  }
+  // Removed coverage inherits an existing scope part; it cannot introduce an
+  // infinite-paragraph split. A shaped discretionary glyph can later occupy
+  // space next to that part without entering L2.
+  index = 0
+  while index < plan.segments.length() {
+    let mut segment = plan.segments.get(index)
+    if segment.removed {
+      let state = plan.states.get(segment.scope)
+      segment.part = state.current
+      if segment.part == NO_NODE { segment.part = state.firstPart }
+      plan.segments.set(index, segment)
+    } else {
+      let mut part = segment.part
+      while part != 0 {
+        let value = plan.parts.get(part)
+        let states = plan.states.asMutSlice()
+        states[value.scope].current = part
+        part = value.parent
+      }
+    }
+    index = index + 1
+  }
+  plan.visual.clear()
+  plan.path.clear()
+  return move plan
+}
+
+fn reorderPlacements(order: &mut List<usize>, positions: &[Placement]) {
+  let mut highest: u8 = 0
+  let mut lowest: u8 = 127
+  let mut index: usize = 0
+  while index < order.length() {
+    let level = positions[order.get(index)].level
+    if level > highest { highest = level }
+    if level % 2 == 1 && level < lowest { lowest = level }
+    index = index + 1
+  }
+  if lowest == 127 { return }
+  let mut level = highest
+  while true {
+    index = 0
+    while index < order.length() {
+      if positions[order.get(index)].level < level { index = index + 1 }
+      else {
+        let start = index
+        while index < order.length() && positions[order.get(index)].level >= level { index = index + 1 }
+        reverse(&mut order, start, index)
+      }
+    }
+    if level == lowest { break }
+    level = level - 1
+  }
+}
+
+fn anchorDecoration(scopes: &[Scope], line: &Line, scope: usize, leaf: usize, low: bool) -> f64 {
+  let mut result = 0.0
+  let mut span = line.positions.get(leaf).span
+  while span != 0 {
+    let value = line.spans.get(span)
+    let mut ancestor = scope
+    while ancestor != 0 && ancestor != value.scope { ancestor = scopes[ancestor].parent }
+    if ancestor == value.scope {
+      if low && value.firstLeaf == leaf { result = result + value.low }
+      if !low && value.lastLeaf == leaf { result = result + value.high }
+    }
+    span = value.parent
+  }
+  return result
+}
+
+// A hypothetical zero-advance object selects a visual insertion edge. Its
+// permutation is scratch only: an out-of-flow box must not reorder real text.
+effect fn positionAnchors(plan: &mut Plan, scopes: &[Scope], items: &[Item], line: &mut Line) ! OutOfMemoryError ? &mut Allocator {
+  let mut anchor: usize = 0
+  while anchor < items.length {
+    if items[anchor].kind == ItemKind.Anchor {
+      plan.visual.clear()
+      let mut index: usize = 0
+      while index < items.length {
+        if line.positions.get(index).flow || index == anchor { run plan.visual.append(index) }
+        index = index + 1
+      }
+      reorderPlacements(&mut plan.visual, line.positions.asSlice())
+      // Evaluate hypothetical geometry with the retained advances, never with
+      // the real leaves' x coordinates: the hypothetical order can legitimately
+      // differ (e.g. a neutral between a number and an LRM). Shaping and tab
+      // advances remain those of the actual line, as CSS2's approximation.
+      index = 0
+      let mut cursor = 0.0
+      while plan.visual.get(index) != anchor {
+        cursor = cursor + line.positions.get(plan.visual.get(index)).advance
+        index = index + 1
+      }
+      if index + 1 < plan.visual.length() {
+        cursor = cursor + anchorDecoration(scopes, &line, items[anchor].scope, plan.visual.get(index + 1), true)
+      }
+      if index > 0 {
+        cursor = cursor - anchorDecoration(scopes, &line, items[anchor].scope, plan.visual.get(index - 1), false)
+      }
+      let mut placement = line.positions.get(anchor)
+      placement.x = cursor
+      line.positions.set(anchor, placement)
+    }
+    anchor = anchor + 1
+  }
+  plan.visual.clear()
+}
+
+// X9 removes bidi input, not necessarily shaped advance (a discretionary
+// hyphen is one example). Insert such runs only AFTER semantic L2. Linked
+// attachment chains keep this linear and avoid moving any shaped items.
+effect fn attachRemoved(plan: &mut Plan, items: &[Item], analysis: &TextAnalysis, start: TextCursor, line: &mut Line) ! OutOfMemoryError ? &mut Allocator {
+  let mut index: usize = 0
+  if line.order.length() == 0 {
+    while index < items.length {
+      if items[index].kind == ItemKind.Text && items[index].advance != 0.0 {
+        let positions = line.positions.asMutSlice()
+        positions[index].flow = true
+        positions[index].level = analysis.paragraphAt(start).level
+        run line.order.append(index)
+        break
+      }
+      index = index + 1
+    }
+  }
+  let mut previous = NO_NODE
+  index = 0
+  while index < items.length {
+    if line.positions.get(index).flow { previous = index }
+    else { let positions = line.positions.asMutSlice()
+      positions[index].anchor = previous }
+    index = index + 1
+  }
+  let mut following = NO_NODE
+  index = items.length
+  while index > 0 {
+    index = index - 1
+    if line.positions.get(index).flow { following = index }
+    else if line.positions.get(index).anchor == NO_NODE {
+      let positions = line.positions.asMutSlice()
+      positions[index].anchor = following
+    }
+  }
+  // Prepending in reverse source order preserves even runs; prepending in
+  // source order reverses odd runs. Neither operation reorders semantic leaves.
+  let mut pass: usize = 0
+  while pass < 2 {
+    let mut at: usize = 0
+    while at < items.length {
+      index = at
+      if pass == 0 { index = items.length - at - 1 }
+      let mut placement = line.positions.get(index)
+      if items[index].kind == ItemKind.Text && !placement.flow && items[index].advance != 0.0 {
+        let anchor = placement.anchor
+        let mut target = line.positions.get(anchor)
+        let odd = target.level % 2 == 1
+        if (pass == 0 && !odd) || (pass == 1 && odd) {
+          placement.level = target.level
+          placement.flow = true
+          if (index < anchor) != odd {
+            placement.next = target.lowHead
+            target.lowHead = index
+          } else {
+            placement.next = target.highHead
+            target.highHead = index
+          }
+          line.positions.set(anchor, target)
+          line.positions.set(index, placement)
+        }
+      }
+      at = at + 1
+    }
+    pass = pass + 1
+  }
+  plan.visual.clear()
+  index = 0
+  while index < line.order.length() {
+    let anchor = line.order.get(index)
+    let mut next = line.positions.get(anchor).lowHead
+    while next != NO_NODE { run plan.visual.append(next)
+      next = line.positions.get(next).next }
+    run plan.visual.append(anchor)
+    next = line.positions.get(anchor).highHead
+    while next != NO_NODE { run plan.visual.append(next)
+      next = line.positions.get(next).next }
+    index = index + 1
+  }
+  let next = Intrinsic.replace(plan.visual, List<usize>.make())
+  let old = Intrinsic.replace(line.order, move next)
+  plan.visual = move old
+  plan.visual.clear()
+}
+
+fn parentRtl(nodes: &BoxTree, scopes: &[Scope], scope: usize) -> bool {
+  return nodes.style(scopes[scopes[scope].parent].id).usedDirection() == Direction.Rtl
+}
+fn startSpan(nodes: &BoxTree, scopes: &[Scope], states: &[ScopeState], scope: usize) -> usize {
+  if scope == 0 { return 0 }
+  if parentRtl(nodes, scopes, scope) { return states[scope].last }
+  return states[scope].first
+}
+fn endSpan(nodes: &BoxTree, scopes: &[Scope], states: &[ScopeState], scope: usize) -> usize {
+  if scope == 0 { return 0 }
+  if parentRtl(nodes, scopes, scope) { return states[scope].first }
+  return states[scope].last
+}
+
+fn edgeBoundary(span: &Span, rtl: bool, opening: bool, preceding: f64) -> f64 {
+  if opening {
+    if rtl && span.high != 0.0 { return span.end - span.high }
+    if !rtl && span.low != 0.0 { return span.start + span.low }
+  } else {
+    if rtl && span.low != 0.0 { return span.start }
+    if !rtl && span.high != 0.0 { return span.end }
+  }
+  return preceding
+}
+
+// CSSOM rectangles follow source-node content order. Runs of a single text
+// node keep their visual order. Geometry stays visual-indexed; the span links
+// only change enumeration. Reuse placement buckets instead of sorting/copying
+// spans, and do this only for an accepted line that will actually be emitted.
+pub effect fn prepareEmission(line: &mut Line) ! OutOfMemoryError ? &mut Allocator {
+  if !line.active { return }
+  let mut index: usize = 0
+  while index < line.positions.length() {
+    let positions = line.positions.asMutSlice()
+    positions[index].lowHead = NO_NODE
+    positions[index].highHead = NO_NODE
+    positions[index].next = NO_NODE
+    index = index + 1
+  }
+  index = 0
+  while index < line.order.length() {
+    let item = line.order.get(index)
+    let group = line.positions.get(item).sourceOrder
+    let positions = line.positions.asMutSlice()
+    let previous = positions[group].highHead
+    if previous == NO_NODE { positions[group].lowHead = item }
+    else { positions[previous].next = item }
+    positions[group].highHead = item
+    index = index + 1
+  }
+  line.order.clear()
+  index = 0
+  while index < line.positions.length() {
+    let mut item = line.positions.get(index).lowHead
+    while item != NO_NODE {
+      run line.order.append(item)
+      item = line.positions.get(item).next
+    }
+    let positions = line.positions.asMutSlice()
+    positions[index].lowHead = NO_NODE
+    positions[index].highHead = NO_NODE
+    index = index + 1
+  }
+  index = 1
+  while index < line.spans.length() {
+    let group = line.spans.get(index).sourceOrder
+    let positions = line.positions.asMutSlice()
+    let previous = positions[group].highHead
+    if previous == NO_NODE { positions[group].lowHead = index }
+    else {
+      let spans = line.spans.asMutSlice()
+      spans[previous].next = index
+    }
+    positions[group].highHead = index
+    index = index + 1
+  }
+  let mut last = NO_NODE
+  index = 0
+  while index < line.positions.length() {
+    let bucket = line.positions.get(index)
+    if bucket.lowHead != NO_NODE {
+      if last == NO_NODE { line.firstSpan = bucket.lowHead }
+      else {
+        let spans = line.spans.asMutSlice()
+        spans[last].next = bucket.lowHead
+      }
+      last = bucket.highHead
+    }
+    index = index + 1
+  }
+}
+
+fn edgeHasInset(scopes: &[Scope], line: &Line, item: usize, high: bool) -> bool {
+  let mut spanId = line.positions.get(item).span
+  while spanId != 0 {
+    let span = line.spans.get(spanId)
+    if high && span.lastLeaf == item && span.highEdge && scopes[span.scope].inset.right != 0.0 { return true }
+    if !high && span.firstLeaf == item && span.lowEdge && scopes[span.scope].inset.left != 0.0 { return true }
+    spanId = span.parent
+  }
+  return false
+}
+
+pub struct WhitespaceTail { pub advance: f64, pub items: usize }
+pub fn trailingWhitespace(nodes: &BoxTree, scopes: &[Scope], items: &[Item], context: TextContext, analysis: &TextAnalysis, line: &Line, rtl: bool) -> WhitespaceTail {
+  let mut count = items.length
+  if line.active { count = line.order.length() }
+  let mut total = 0.0
+  let mut tail: usize = 0
+  let mut index: usize = 0
+  while index < count {
+    let mut ordered = count - index - 1
+    if rtl { ordered = index }
+    let mut itemIndex = ordered
+    if line.active { itemIndex = line.order.get(ordered) }
+    let item = items[itemIndex]
+    index = index + 1
+    if item.kind == ItemKind.Float || item.kind == ItemKind.Anchor { continue }
+    if line.active && edgeHasInset(scopes, line, itemIndex, !rtl) { break }
+    if item.kind == ItemKind.Open || item.kind == ItemKind.Close {
+      if !line.active && scopes[item.scope].inset.horizontal() != 0.0 { break }
+      continue
+    }
+    if item.kind != ItemKind.Text { break }
+    let token = &context.tokens[item.start.unit]
+    if token.kind == TextTokenKind.SegmentBreak || (item.advance == 0.0 && analysis.removedAt(item.start)) { continue }
+    if token.kind != TextTokenKind.PreservedSpace && token.kind != TextTokenKind.Tab { break }
+    let style = nodes.style(item.id)
+    if style.textWrap != TextWrap.Wrap || (style.whiteSpaceCollapse != WhiteSpaceCollapse.Preserve && style.whiteSpaceCollapse != WhiteSpaceCollapse.PreserveSpaces) { break }
+    total = total + item.advance
+    tail = index
+    if line.active && edgeHasInset(scopes, line, itemIndex, rtl) { break }
+  }
+  return WhitespaceTail { advance: total, items: tail }
+}
+
+fn resolveTabs(nodes: &BoxTree, scopes: &[Scope], items: &mut [Item], context: TextContext, line: &Line, origin: f64) -> f64 {
+  let rtl = context.direction == Direction.Rtl
+  let mut count = items.length
+  if line.active { count = line.order.length() }
+  let mut cursor = origin
+  let mut index: usize = 0
+  while index < count {
+    let mut ordered = index
+    if rtl { ordered = count - index - 1 }
+    let mut itemIndex = ordered
+    if line.active { itemIndex = line.order.get(ordered) }
+    let item = items[itemIndex]
+    let mut low = 0.0
+    let mut high = 0.0
+    let mut advance = item.advance
+    if line.active {
+      let placement = line.positions.get(itemIndex)
+      low = placement.low
+      high = placement.high
+      if placement.marker { advance = 0.0 }
+    } else if item.kind == ItemKind.Float || item.kind == ItemKind.Anchor {
+      advance = 0.0
+    }
+    if rtl { cursor = cursor + high }
+    else { cursor = cursor + low }
+    if item.kind == ItemKind.Text && context.tokens[item.start.unit].kind == TextTokenKind.Tab {
+      advance = tabAdvance(nodes.style(item.id).tabSize, scopes[0].font.metrics.spaceAdvance, scopes[item.scope].font.metrics.zeroAdvance, cursor)
+      items[itemIndex].advance = advance
+    }
+    cursor = cursor + advance
+    if rtl { cursor = cursor + low }
+    else { cursor = cursor + high }
+    index = index + 1
+  }
+  return cursor - origin
+}
+
+pub effect fn fit(plan: &mut Plan, nodes: &BoxTree, scopes: &[Scope], items: &mut [Item], context: TextContext, analysis: &TextAnalysis, start: TextCursor, end: TextCursor, tabs: bool, inlineOrigin: f64, output: &mut Line) ! OutOfMemoryError ? &mut Allocator {
+  output.active = plan.active
+  output.order.clear()
+  output.positions.clear()
+  output.spans.clear()
+  output.firstSpan = NO_NODE
+  output.advance = 0.0
+  output.real = false
+  if !plan.active {
+    if tabs { output.advance = resolveTabs(nodes, scopes, &mut items, context, &output, inlineOrigin) }
+    return
+  }
+  let mut index: usize = 0
+  while index < plan.states.length() {
+    let mut state = plan.states.get(index)
+    state.seen = NO_NODE
+    state.first = NO_NODE
+    state.last = NO_NODE
+    state.current = NO_NODE
+    state.openItem = NO_NODE
+    state.closeItem = NO_NODE
+    state.leaf = false
+    plan.states.set(index, state)
+    index = index + 1
+  }
+  let mut lastSemantic = NO_NODE
+  let mut removedAdvance = false
+  let mut removedCoverage = false
+  index = 0
+  while index < items.length {
+    let item = &items[index]
+    let segmentIndex = segmentAt(&plan, item.start)
+    let mut removed = false
+    let mut part: usize = 0
+    if segmentIndex != NO_NODE {
+      let segment = plan.segments.get(segmentIndex)
+      removed = segment.removed
+      part = segment.part
+    }
+    let flow = (item.kind == ItemKind.Text || item.kind == ItemKind.Atomic) && !removed
+    if flow { lastSemantic = index }
+    if item.kind == ItemKind.Text && removed {
+      removedCoverage = true
+      if item.advance != 0.0 { removedAdvance = true }
+    }
+    let mut sourceOrder = index
+    if index > 0 && item.kind == ItemKind.Text && items[index - 1].kind == ItemKind.Text && items[index - 1].id == item.id {
+      sourceOrder = output.positions.get(index - 1).sourceOrder
+    }
+    run output.positions.append(Placement {
+      span: 0, x: 0.0, advance: 0.0, precedingReal: false,
+      anchor: NO_NODE, lowHead: NO_NODE, highHead: NO_NODE, next: NO_NODE, sourceOrder: sourceOrder,
+      level: item.level, part: part, flow: flow, marker: false,
+      low: 0.0, high: 0.0, outerStart: 0.0, outerEnd: 0.0,
+    })
+    if scopes.length > 1 {
+      if item.kind == ItemKind.Open || item.kind == ItemKind.Close {
+        let states = plan.states.asMutSlice()
+        if item.kind == ItemKind.Open { states[item.scope].openItem = index }
+        else { states[item.scope].closeItem = index }
+      }
+      if flow {
+        let mut scope = item.scope
+        while scope != 0 && !plan.states.get(scope).leaf {
+          let states = plan.states.asMutSlice()
+          states[scope].leaf = true
+          scope = scopes[scope].parent
+        }
+      }
+    }
+    index = index + 1
+  }
+  // Empty scopes remain geometry, not neutral UBA input. Choose innermost
+  // markers first so an empty ancestor does not acquire an extra leaf.
+  index = plan.states.length()
+  while index > 1 {
+    index = index - 1
+    let state = plan.states.get(index)
+    if !state.leaf && (state.openItem != NO_NODE || state.closeItem != NO_NODE) {
+      let mut marker = state.openItem
+      let mut part = state.firstPart
+      if marker == NO_NODE { marker = state.closeItem
+        part = state.lastPart }
+      let positions = output.positions.asMutSlice()
+      positions[marker].flow = true
+      positions[marker].marker = true
+      positions[marker].part = part
+      positions[marker].level = markerLevel(&plan, analysis, items[marker].start)
+      if lastSemantic == NO_NODE || marker > lastSemantic {
+        positions[marker].level = analysis.paragraphAt(start).level
+      }
+      let mut scope = index
+      while scope != 0 && !plan.states.get(scope).leaf {
+        let states = plan.states.asMutSlice()
+        states[scope].leaf = true
+        scope = scopes[scope].parent
+      }
+    }
+  }
+  index = 0
+  while index < items.length {
+    if output.positions.get(index).flow { run output.order.append(index) }
+    index = index + 1
+  }
+  reorderPlacements(&mut output.order, output.positions.asSlice())
+  if removedAdvance { run attachRemoved(&mut plan, &items, analysis, start, &mut output) }
+  run output.spans.append(emptySpan(0, 0, 0, NO_NODE))
+  let mut visual: usize = 0
+  while visual < output.order.length() {
+    let itemIndex = output.order.get(visual)
+    let placement = output.positions.get(itemIndex)
+    plan.path.clear()
+    let mut part = placement.part
+    while part != 0 {
+      run plan.path.append(part)
+      part = plan.parts.get(part).parent
+    }
+    let mut parent: usize = 0
+    let mut depth = plan.path.length()
+    while depth > 0 {
+      depth = depth - 1
+      part = plan.path.get(depth)
+      let scope = plan.parts.get(part).scope
+      let mut state = plan.states.get(scope)
+      let mut span = state.current
+      if state.seen == NO_NODE || state.seen + 1 != visual || output.spans.get(span).part != part || output.spans.get(span).parent != parent {
+        span = output.spans.length()
+        run output.spans.append(emptySpan(scope, parent, part, itemIndex))
+        if state.first == NO_NODE { state.first = span }
+        state.last = span
+      }
+      let spans = output.spans.asMutSlice()
+      spans[span].lastLeaf = itemIndex
+      if placement.sourceOrder < spans[span].sourceOrder { spans[span].sourceOrder = placement.sourceOrder }
+      state.seen = visual
+      state.current = span
+      plan.states.set(scope, state)
+      parent = span
+    }
+    let positions = output.positions.asMutSlice()
+    positions[itemIndex].span = parent
+    let spans = output.spans.asMutSlice()
+    if visual == 0 { spans[0].firstLeaf = itemIndex }
+    spans[0].lastLeaf = itemIndex
+    visual = visual + 1
+  }
+  // Writing Modes 4 §2.4.5.2 selects edges using each inline's PARENT.
+  index = 1
+  while index < output.spans.length() {
+    let mut span = output.spans.get(index)
+    let scope = &scopes[span.scope]
+    let state = plan.states.get(span.scope)
+    let rtl = parentRtl(nodes, scopes, span.scope)
+    let firstLine = !state.open.before(start) && state.open.before(end)
+    let lastLine = !state.close.before(start) && state.close.before(end)
+    span.first = firstLine && nodes.node(scope.id).firstForSource
+      && index == startSpan(nodes, scopes, plan.states.asSlice(), span.scope)
+    span.last = lastLine && nodes.node(scope.id).lastForSource
+      && index == endSpan(nodes, scopes, plan.states.asSlice(), span.scope)
+    let clone = nodes.style(scope.id).boxDecorationBreak == BoxDecorationBreak.Clone
+    span.lowEdge = clone || (!rtl && span.first) || (rtl && span.last)
+    span.highEdge = clone || (rtl && span.first) || (!rtl && span.last)
+    if span.lowEdge { span.low = scope.inset.left + scope.margin.left }
+    if span.highEdge { span.high = scope.inset.right + scope.margin.right }
+    let positions = output.positions.asMutSlice()
+    positions[span.firstLeaf].low = positions[span.firstLeaf].low + span.low
+    positions[span.lastLeaf].high = positions[span.lastLeaf].high + span.high
+    output.spans.set(index, span)
+    index = index + 1
+  }
+  if tabs { drop resolveTabs(nodes, scopes, &mut items, context, &output, inlineOrigin) }
+  let mut cursor = 0.0
+  index = 0
+  while index < output.order.length() {
+    let itemIndex = output.order.get(index)
+    let mut placement = output.positions.get(itemIndex)
+    let mut advance = items[itemIndex].advance
+    if placement.marker { advance = 0.0 }
+    placement.outerStart = cursor
+    placement.x = cursor + placement.low
+    placement.advance = placement.low + advance + placement.high
+    cursor = cursor + placement.advance
+    placement.outerEnd = cursor
+    output.positions.set(itemIndex, placement)
+    index = index + 1
+  }
+  output.advance = cursor
+  let spans = output.spans.asMutSlice()
+  spans[0].end = cursor
+  index = 1
+  while index < output.spans.length() {
+    let mut span = output.spans.get(index)
+    let parent = output.spans.get(span.parent)
+    span.start = output.positions.get(span.firstLeaf).outerStart
+    span.end = output.positions.get(span.lastLeaf).outerEnd
+    if parent.firstLeaf == span.firstLeaf { span.start = parent.start + parent.low }
+    if parent.lastLeaf == span.lastLeaf { span.end = parent.end - parent.high }
+    output.spans.set(index, span)
+    index = index + 1
+  }
+  // Source-order static positions must not use emission order, nor introduce
+  // neutrals into L2. Closing a scope completes its decorated logical boundary.
+  index = 0
+  while index < plan.states.length() {
+    let states = plan.states.asMutSlice()
+    states[index].current = NO_NODE
+    index = index + 1 }
+  // X9 source coverage is emitted without participating in the visual path;
+  // out-of-flow items still follow all attributed text in emission order.
+  if removedCoverage {
+    index = 0
+    while index < items.length {
+      if items[index].kind == ItemKind.Text && !output.positions.get(index).flow { run output.order.append(index) }
+      index = index + 1
+    }
+  }
+  let mut boundary = 0.0
+  if analysis.paragraphAt(start).level % 2 == 1 { boundary = output.advance }
+  let mut real = false
+  index = 0
+  while index < items.length {
+    let item = &items[index]
+    let mut placement = output.positions.get(index)
+    placement.precedingReal = real
+    if placement.flow {
+      if placement.marker {
+        let value = output.spans.get(placement.span)
+        boundary = edgeBoundary(&value, parentRtl(nodes, scopes, item.scope), item.kind == ItemKind.Open, boundary)
+      } else {
+        boundary = placement.x
+        if placement.level % 2 == 0 { boundary = boundary + item.advance }
+      }
+      let mut span = placement.span
+      while span != 0 {
+        let value = output.spans.get(span)
+        let states = plan.states.asMutSlice()
+        states[value.scope].current = span
+        span = value.parent
+      }
+      // Placement edges can belong to an ancestor clone. Line participation
+      // comes from this item's own content/edges, not that visual aggregate.
+      if item.kind == ItemKind.Atomic || item.kind == ItemKind.Text
+        || (!scopes[item.scope].phantomClone && item.advance != 0.0) { real = true }
+    } else if item.kind == ItemKind.Open || item.kind == ItemKind.Close {
+      let mut span = startSpan(nodes, scopes, plan.states.asSlice(), item.scope)
+      if item.kind == ItemKind.Close { span = endSpan(nodes, scopes, plan.states.asSlice(), item.scope) }
+      if span != NO_NODE {
+        let value = output.spans.get(span)
+        placement.span = span
+        let rtl = parentRtl(nodes, scopes, item.scope)
+        boundary = edgeBoundary(&value, rtl, item.kind == ItemKind.Open, boundary)
+        placement.x = boundary
+        let states = plan.states.asMutSlice()
+        states[item.scope].current = span
+        if !scopes[item.scope].phantomClone && item.advance != 0.0 { real = true }
+      }
+    } else {
+      placement.x = boundary
+      if item.scope != 0 {
+        let state = plan.states.get(item.scope)
+        placement.span = state.current
+        if placement.span == NO_NODE { placement.span = startSpan(nodes, scopes, plan.states.asSlice(), item.scope) }
+        if placement.span == NO_NODE { placement.span = 0 }
+      }
+      if item.kind == ItemKind.Float || item.kind == ItemKind.Anchor { run output.order.append(index) }
+      if item.kind == ItemKind.Text { real = true }
+    }
+    output.positions.set(index, placement)
+    index = index + 1
+  }
+  output.real = real
+  run positionAnchors(&mut plan, scopes, &items, &mut output)
+}

@@ -1,0 +1,815 @@
+import fragmentation { FragmentationError, Fragmentainers, FragmentAncestor }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.usize
+import text { TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun }
+import silk.effect { Effect }
+import silk.testing { AssertionError, Testing }
+import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, Point, AvailableKind, Layout, abs, max }
+import style { Style, Display, DisplayOutside, DisplayInside, Dimension, DimensionKind, BoxSizing, FlexDirection, FlexWrap, Direction, WritingMode, Align, OverflowAlignment, Visibility, Overflow, Edges }
+import tree { Tree, LayoutTree, InvalidNode }
+import context { Input }
+import geometry { OptionalSize, AvailableSpace }
+import engine { layoutNode }
+import layout_pass { LayoutPass }
+import box_tree as Boxes
+import silk.option { Option }
+import breaks { FragmentainerKind }
+import fragment_flow { computeFragmented }
+
+struct BoxMeasure {}
+impl Measure for BoxMeasure {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    return FontMetrics.zero()
+  }
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop provider
+    drop request
+    return ScrollbarMetrics.zero()
+  }
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop provider
+    let mut width = 120.0
+    if request.width.kind == AvailableKind.MinContent { width = 30.0 }
+    if request.width.kind == AvailableKind.Definite { width = max(30.0, request.width.value) }
+    let mut height = 20.0
+    if key == 1 { height = 40.0 }
+    let contentBlockSize = height
+    if request.known.widthDefinite { width = request.known.width }
+    if request.known.heightDefinite { height = request.known.height }
+    let mut baseline = 15.0
+    if key == 1 { baseline = 25.0 }
+    return Measured { size: Size { width: width, height: height }, scrollableOverflow: Rect { x: 0.0, y: 0.0, width: max(30.0, width), height: contentBlockSize }, contentBlockSize: contentBlockSize, firstBaselines: BaselineSet.uniform(baseline), lastBaselines: BaselineSet.uniform(baseline), hasBaseline: true, hasLineBoxes: true }
+  }
+}
+impl TextMeasure for BoxMeasure {
+  fn beginTextLayout(provider: &mut Self) { drop provider }
+  effect fn analyze(provider: &mut Self, context: TextContext, output: &mut List<TextBreak>) -> TextAnalysis ! OutOfMemoryError | TextError ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if context.tokens.length > 0 { source = context.tokens[0].source }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>) ! OutOfMemoryError | TextError ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if request.start.unit < request.context.tokens.length { source = request.context.tokens[request.start.unit].source }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+}
+enum Case { PartialGrow, PartialShrink, MaxFreeze, MinFreeze, BalancedViolations, NegativeInnerBase, AsymmetricInnerBase, RatioCrossMaximum, RatioCrossMinimum, ScrollMinimum, ScaledShrink, AutoMargin, ReverseRtl, VerticalAxis, WrapGap, Collapse, ColumnRatio, ColumnMinimum, PercentageBasis, ReplacedMinimum, NonReplacedMinimum, SafeOverflow, IntrinsicContribution, Baseline, Stretch, StableOrder }
+effect fn near(actual: f64, expected: f64) ! AssertionError<'static> {
+  run Testing.expect(abs(actual - expected) < 0.00001, "flex geometry matches the normative algorithm")
+}
+effect fn scenario(case: Case) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.width = Dimension.px(200.0)
+  root.alignItems = Align.FlexStart
+  let mut first = Style.make()
+  first.width = Dimension.px(100.0)
+  first.height = Dimension.px(20.0)
+  first.minWidth = Dimension.px(0.0)
+  let mut second = Style.make()
+  second.width = Dimension.px(100.0)
+  second.height = Dimension.px(20.0)
+  second.minWidth = Dimension.px(0.0)
+  let mut third = Style.make()
+  third.display = Display.None
+  third.width = Dimension.px(40.0)
+  third.height = Dimension.px(10.0)
+  third.minWidth = Dimension.px(0.0)
+  if case == Case.PartialGrow {
+    root.width = Dimension.px(400.0)
+    first.flexGrow = 0.25
+    second.flexGrow = 0.25
+  } else if case == Case.PartialShrink {
+    root.width = Dimension.px(100.0)
+    first.flexShrink = 0.25
+    second.flexShrink = 0.25
+  } else if case == Case.BalancedViolations {
+    first.flexBasis = Dimension.px(0.0)
+    second.flexBasis = Dimension.px(0.0)
+    first.flexGrow = 1.0
+    second.flexGrow = 1.0
+    first.minWidth = Dimension.px(120.0)
+    second.maxWidth = Dimension.px(80.0)
+  } else if case == Case.NegativeInnerBase || case == Case.AsymmetricInnerBase {
+    root.width = Dimension.px(100.0)
+    first.boxSizing = BoxSizing.BorderBox
+    second.boxSizing = BoxSizing.BorderBox
+    first.flexBasis = Dimension.px(0.0)
+    second.flexBasis = Dimension.px(0.0)
+    first.padding.left = Dimension.px(40.0)
+    second.padding.left = Dimension.px(40.0)
+    if case == Case.AsymmetricInnerBase { second.padding.left = Dimension.px(10.0) }
+    first.flexGrow = 1.0
+    second.flexGrow = 1.0
+  } else if case == Case.RatioCrossMaximum || case == Case.RatioCrossMinimum {
+    // Flexbox §9.2 step 3B transfers the used (cross-min/max-clamped) size.
+    root.width = Dimension.px(400.0)
+    root.height = Dimension.px(200.0)
+    first.width = Dimension.auto()
+    first.height = Dimension.pct(0.5)
+    first.maxHeight = Dimension.px(50.0)
+    if case == Case.RatioCrossMinimum {
+      first.height = Dimension.px(50.0)
+      first.minHeight = Dimension.px(100.0)
+      first.maxHeight = Dimension.auto()
+    }
+    first.aspectRatio = 2.0
+    first.flexBasis = Dimension.keyword(DimensionKind.Content)
+    first.flexShrink = 0.0
+    second.display = Display.None
+  } else if case == Case.ScrollMinimum {
+    root.width = Dimension.px(10.0)
+    first.width = Dimension.auto()
+    first.minWidth = Dimension.auto()
+    first.overflowX = Overflow.Hidden
+    second.display = Display.None
+  } else if case == Case.MaxFreeze {
+    root.width = Dimension.px(400.0)
+    first.flexGrow = 1.0
+    first.maxWidth = Dimension.px(120.0)
+    second.flexGrow = 1.0
+  } else if case == Case.MinFreeze {
+    root.width = Dimension.px(100.0)
+    first.minWidth = Dimension.px(80.0)
+  } else if case == Case.ScaledShrink {
+    root.width = Dimension.px(180.0)
+    first.padding.left = Dimension.px(20.0)
+    first.padding.right = Dimension.px(20.0)
+    second.width = Dimension.px(200.0)
+  } else if case == Case.AutoMargin {
+    root.width = Dimension.px(400.0)
+    first.margin.left = Dimension.auto()
+    first.margin.right = Dimension.auto()
+    root.justifyContent = Align.SpaceBetween
+  } else if case == Case.ReverseRtl {
+    root.flexDirection = FlexDirection.RowReverse
+    root.direction = Direction.Rtl
+    first.width = Dimension.px(40.0)
+    second.width = Dimension.px(60.0)
+  } else if case == Case.VerticalAxis {
+    root.writingMode = WritingMode.VerticalRl
+    root.width = Dimension.px(80.0)
+    root.height = Dimension.px(200.0)
+    first.width = Dimension.px(30.0)
+    first.height = Dimension.px(40.0)
+    second.width = Dimension.px(20.0)
+    second.height = Dimension.px(50.0)
+  } else if case == Case.WrapGap {
+    root.width = Dimension.px(100.0)
+    root.flexWrap = FlexWrap.WrapReverse
+    root.columnGap = Dimension.px(10.0)
+    root.rowGap = Dimension.px(5.0)
+    first.width = Dimension.px(40.0)
+    second.width = Dimension.px(40.0)
+    third.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flow }
+  } else if case == Case.Collapse {
+    root.width = Dimension.px(100.0)
+    first.width = Dimension.px(50.0)
+    first.height = Dimension.px(80.0)
+    first.visibility = Visibility.Collapse
+    second.width = Dimension.px(50.0)
+    second.flexGrow = 1.0
+  } else if case == Case.ColumnRatio {
+    root.flexDirection = FlexDirection.Column
+    first.width = Dimension.auto()
+    first.height = Dimension.auto()
+    first.minHeight = Dimension.px(0.0)
+    first.aspectRatio = 2.0
+    first.flexBasis = Dimension.keyword(DimensionKind.Content)
+    second.display = Display.None
+  } else if case == Case.PercentageBasis {
+    root.flexDirection = FlexDirection.Column
+    first.flexBasis = Dimension.pct(0.0)
+    second.flexBasis = Dimension.px(0.0)
+    first.minHeight = Dimension.px(0.0)
+    second.minHeight = Dimension.px(0.0)
+    first.height = Dimension.auto()
+    second.height = Dimension.auto()
+  } else if case == Case.ReplacedMinimum || case == Case.NonReplacedMinimum {
+    root.width = Dimension.px(10.0)
+    first.width = Dimension.auto()
+    first.height = Dimension.px(40.0)
+    first.aspectRatio = 2.0
+    first.minWidth = Dimension.auto()
+    first.replaced = case == Case.ReplacedMinimum
+    second.display = Display.None
+  } else if case == Case.SafeOverflow {
+    root.width = Dimension.px(50.0)
+    root.justifyContent = Align.Center
+    root.justifyContentSafety = OverflowAlignment.Safe
+    first.flexShrink = 0.0
+    second.display = Display.None
+  } else if case == Case.IntrinsicContribution {
+    root.width = Dimension.auto()
+    root.display = Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Flex }
+    first.width = Dimension.px(50.0)
+    first.flexBasis = Dimension.px(20.0)
+    second.width = Dimension.px(70.0)
+    second.flexBasis = Dimension.px(40.0)
+  } else if case == Case.ColumnMinimum {
+    // Flexbox §9.9.1.3: largest contribution, not sum, also for columns.
+    root.flexDirection = FlexDirection.Column
+    root.flexWrap = FlexWrap.Wrap
+    root.height = Dimension.keyword(DimensionKind.MinContent)
+    second.height = Dimension.px(40.0)
+  } else if case == Case.Baseline {
+    root.alignItems = Align.Baseline
+    first.height = Dimension.auto()
+    second.height = Dimension.auto()
+  } else if case == Case.Stretch {
+    root.height = Dimension.px(80.0)
+    root.alignItems = Align.Stretch
+    first.height = Dimension.auto()
+    second.height = Dimension.auto()
+    second.maxHeight = Dimension.px(30.0)
+  } else if case == Case.StableOrder {
+    first.order = 1
+    second.order = 0
+    first.width = Dimension.px(40.0)
+    second.width = Dimension.px(40.0)
+    third.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flow }
+    third.order = 0
+  }
+  let mut tree = run Tree.make(move root)
+  let parent = tree.root()
+  let firstId = run tree.append(parent, move first)
+  let secondId = run tree.append(parent, move second)
+  let thirdId = run tree.append(parent, move third)
+  run tree.setMeasurement(firstId, 0)
+  run tree.setMeasurement(secondId, 1)
+  run tree.setMeasurement(thirdId, 0)
+  let mut output = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run output.prepare(constructed.boxes.length())
+  let mut measure = BoxMeasure {}
+  let mut input = Input.make(OptionalSize.none())
+  input.blockRoot = true
+  input.shrinkToFit = true
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input)
+  drop pass
+  output.fragments.resolveLocations()
+  output.adopt(move constructed)
+  let a = output.boxes.get(output.firstBySource.get(firstId.index))
+  let b = output.firstBySource.get(secondId.index)
+  let c = output.firstBySource.get(thirdId.index)
+  if case == Case.PartialGrow {
+    run near(a.size.width, 150.0)
+    run near(output.boxes.get(b).size.width, 150.0)
+  } else if case == Case.PartialShrink {
+    run near(a.size.width, 75.0)
+    run near(output.boxes.get(b).size.width, 75.0)
+  } else if case == Case.BalancedViolations {
+    run near(a.size.width, 120.0)
+    run near(output.boxes.get(b).size.width, 80.0)
+  } else if case == Case.NegativeInnerBase || case == Case.AsymmetricInnerBase {
+    run near(a.size.width, 50.0)
+    run near(output.boxes.get(b).size.width, 50.0)
+  } else if case == Case.RatioCrossMaximum {
+    run near(a.size.width, 100.0)
+    run near(a.size.height, 50.0)
+  } else if case == Case.RatioCrossMinimum {
+    run near(a.size.width, 200.0)
+    run near(a.size.height, 100.0)
+  } else if case == Case.ScrollMinimum {
+    run near(a.size.width, 10.0)
+  } else if case == Case.MaxFreeze {
+    run near(a.size.width, 120.0)
+    run near(output.boxes.get(b).size.width, 280.0)
+  } else if case == Case.MinFreeze {
+    run near(a.size.width, 80.0)
+    run near(output.boxes.get(b).size.width, 20.0)
+  } else if case == Case.ScaledShrink {
+    run near(a.size.width, 86.6666666667)
+    run near(output.boxes.get(b).size.width, 93.3333333333)
+  } else if case == Case.AutoMargin {
+    run near(a.location.x, 100.0)
+    run near(output.boxes.get(b).location.x, 300.0)
+  } else if case == Case.ReverseRtl {
+    run near(a.location.x, 0.0)
+    run near(output.boxes.get(b).location.x, 40.0)
+  } else if case == Case.VerticalAxis {
+    run near(a.location.y, 0.0)
+    run near(output.boxes.get(b).location.y, 40.0)
+    run near(a.location.x, 50.0)
+    run near(output.boxes.get(b).location.x, 60.0)
+  } else if case == Case.WrapGap {
+    run near(a.location.x, 0.0)
+    run near(output.boxes.get(b).location.x, 50.0)
+    run near(a.location.y, 15.0)
+    run near(output.boxes.get(c).location.y, 0.0)
+    run near(result.size.height, 35.0)
+  } else if case == Case.Collapse {
+    run near(a.size.width, 0.0)
+    run near(output.boxes.get(b).size.width, 100.0)
+    run near(result.size.height, 80.0)
+  } else if case == Case.ColumnRatio {
+    run near(a.size.height, 60.0)
+    run near(a.size.width, 120.0)
+    run near(result.size.height, 60.0)
+  } else if case == Case.PercentageBasis {
+    run near(a.size.height, 20.0)
+    run near(output.boxes.get(b).size.height, 0.0)
+    run near(result.size.height, 20.0)
+  } else if case == Case.ReplacedMinimum {
+    run near(a.size.width, 30.0)
+  } else if case == Case.NonReplacedMinimum {
+    run near(a.size.width, 80.0)
+  } else if case == Case.SafeOverflow {
+    run near(a.location.x, 0.0)
+    run near(a.size.width, 100.0)
+  } else if case == Case.IntrinsicContribution {
+    run near(result.size.width, 60.0)
+    run near(a.size.width, 20.0)
+    run near(output.boxes.get(b).size.width, 40.0)
+  } else if case == Case.ColumnMinimum {
+    run near(result.size.height, 40.0)
+    run near(a.size.height, 20.0)
+    run near(output.boxes.get(b).size.height, 40.0)
+    run near(a.location.y, 0.0)
+    run near(output.boxes.get(b).location.y, 0.0)
+    run near(output.boxes.get(b).location.x, 100.0)
+  } else if case == Case.Baseline {
+    run near(a.location.y, 10.0)
+    run near(output.boxes.get(b).location.y, 0.0)
+    run near(result.size.height, 40.0)
+    run near(result.firstBaselines.alphabetic, 25.0)
+    run near(result.lastBaselines.alphabetic, 25.0)
+  } else if case == Case.Stretch {
+    run near(a.size.height, 80.0)
+    run near(output.boxes.get(b).size.height, 30.0)
+  } else if case == Case.StableOrder {
+    run near(output.boxes.get(b).location.x, 0.0)
+    run near(output.boxes.get(c).location.x, 40.0)
+    run near(a.location.x, 80.0)
+  }
+}
+effect fn check(case: Case) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run scenario(case) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn flexGrowFactorsBelowOneLeaveFreeSpace() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.PartialGrow) }
+test effect fn flexShrinkFactorsBelowOneLeaveOverflow() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.PartialShrink) }
+test effect fn flexMaxViolationFreezesThenRedistributes() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.MaxFreeze) }
+test effect fn flexMinViolationFreezesThenRedistributes() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.MinFreeze) }
+test effect fn flexBalancedMinMaxViolationsFreezeTogether() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.BalancedViolations) }
+test effect fn flexBaseDoesNotFloorBorderBoxToPadding() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.NegativeInnerBase) }
+// Flexbox §9.2's negative-inner-base exception applies before §9.7 growth.
+// Unequal padding distinguishes it from prematurely flooring both bases.
+test effect fn flexAsymmetricPaddingDoesNotAlterZeroBorderBoxBases() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.AsymmetricInnerBase) }
+test effect fn flexContentBasisTransfersClampedPercentageCrossSize() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.RatioCrossMaximum) }
+test effect fn flexContentBasisTransfersCrossMinimum() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.RatioCrossMinimum) }
+test effect fn flexScrollableAutoMinimumIsZero() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.ScrollMinimum) }
+test effect fn flexShrinkUsesContentBaseNotBorderBox() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.ScaledShrink) }
+test effect fn flexAutoMarginsPrecedeJustification() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.AutoMargin) }
+test effect fn flexRowReverseComposesWithRtl() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.ReverseRtl) }
+test effect fn flexVerticalWritingModeMapsBothAxes() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.VerticalAxis) }
+test effect fn flexWrapReverseKeepsGapBetweenLines() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.WrapGap) }
+test effect fn flexCollapseRestartsWithCrossStrut() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.Collapse) }
+test effect fn flexZeroPercentBasisIsContentInIndefiniteAxis() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.PercentageBasis) }
+test effect fn flexReplacedAutoMinimumUsesSmallerSuggestion() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.ReplacedMinimum) }
+test effect fn flexNonReplacedAutoMinimumUsesLargerSuggestion() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.NonReplacedMinimum) }
+test effect fn flexSafeCenterFallsBackOnOverflow() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.SafeOverflow) }
+test effect fn flexIntrinsicContributionsRespectInflexibleBasis() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.IntrinsicContribution) }
+test effect fn flexBaselineUsesAscentAndDescent() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.Baseline) }
+test effect fn flexStretchRelayoutHonorsCrossMaximum() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.Stretch) }
+test effect fn flexOrderIsStable() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.StableOrder) }
+test effect fn flexColumnContentBasisTransfersFitContentCrossSize() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.ColumnRatio) }
+test effect fn flexWrappedColumnMinContentUsesLargestMainContribution() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> { run check(Case.ColumnMinimum) }
+
+effect fn percentageDescendant(definiteMain: bool) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.flexDirection = FlexDirection.Column
+  root.width = Dimension.px(200.0)
+  if definiteMain { root.height = Dimension.px(100.0) }
+  let mut item = Style.make()
+  item.minHeight = Dimension.px(0.0)
+  item.flexBasis = Dimension.keyword(DimensionKind.Content)
+  if definiteMain { item.flexBasis = Dimension.px(0.0)
+    item.flexGrow = 1.0 }
+  let mut child = Style.make()
+  child.height = Dimension.pct(0.5)
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let itemId = run tree.append(rootId, move item)
+  let childId = run tree.append(itemId, move child)
+  run tree.setMeasurement(childId, 1)
+  let mut output = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run output.prepare(constructed.boxes.length())
+  let mut measure = BoxMeasure {}
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  drop pass
+  output.fragments.resolveLocations()
+  output.adopt(move constructed)
+  let childLayout = output.boxes.get(output.firstBySource.get(childId.index))
+  if definiteMain {
+    run near(result.size.height, 100.0)
+    run near(childLayout.size.height, 50.0)
+  } else {
+    run near(result.size.height, 40.0)
+    run near(childLayout.size.height, 40.0)
+  }
+}
+test effect fn flexDefinitePostFlexSizeResolvesDescendantPercentage() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run percentageDescendant(true) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn flexIndefiniteContentBasisDoesNotResolveDescendantPercentage() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run percentageDescendant(false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Flexbox §§9.2 step 4, 9.9.1.2 and 9.9.3: the automatic block size is
+// max-content, including the preferred height contribution of a growable item.
+// §9.7 then leaves unused space when the total grow factor is less than one.
+enum ColumnContribution { Preferred, LargerBasis, UnresolvedBasis, OverflowingContent }
+effect fn preferredColumnContribution(case: ColumnContribution) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.flexDirection = FlexDirection.Column
+  root.width = Dimension.px(100.0)
+  let mut item = Style.make()
+  item.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  item.height = Dimension.px(50.0)
+  item.flexBasis = Dimension.px(0.0)
+  item.flexGrow = 0.2
+  if case == ColumnContribution.LargerBasis {
+    item.flexBasis = Dimension.px(80.0)
+    item.flexGrow = 1.0
+  }
+  if case == ColumnContribution.UnresolvedBasis { item.flexBasis = Dimension.pct(0.25) }
+  if case == ColumnContribution.OverflowingContent {
+    item.height = Dimension.px(20.0)
+    item.flexBasis = Dimension.auto()
+    item.flexGrow = 1.0
+  }
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let itemId = run tree.append(rootId, move item)
+  if case == ColumnContribution.OverflowingContent {
+    let mut overflow = Style.make()
+    overflow.height = Dimension.px(80.0)
+    let overflowId = run tree.append(itemId, move overflow)
+    drop overflowId
+  }
+  let mut output = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run output.prepare(constructed.boxes.length())
+  let mut measure = BoxMeasure {}
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  drop pass
+  output.fragments.resolveLocations()
+  output.adopt(move constructed)
+  let mut expectedHeight = 50.0
+  let mut expectedItem = 10.0
+  if case == ColumnContribution.LargerBasis { expectedItem = 50.0 }
+  if case == ColumnContribution.OverflowingContent {
+    expectedHeight = 80.0
+    expectedItem = 80.0
+  }
+  run near(result.size.height, expectedHeight)
+  run near(output.boxes.get(output.firstBySource.get(itemId.index)).size.height, expectedItem)
+}
+test effect fn flexAutomaticColumnSizeIncludesGrowablePreferredContribution() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run preferredColumnContribution(ColumnContribution.Preferred) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+// §9.9.3 does not floor a shrinkable item's contribution at its flex basis.
+test effect fn flexAutomaticColumnContributionCanBeSmallerThanBasis() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run preferredColumnContribution(ColumnContribution.LargerBasis) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+// §7.2.3: an unresolved percentage flex basis is content, not auto.
+test effect fn flexUnresolvedPercentageBasisStillIncludesPreferredContribution() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run preferredColumnContribution(ColumnContribution.UnresolvedBasis) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+// §9.9.3: preferred main size does not cap the content contribution.
+test effect fn flexAutomaticColumnContributionIncludesOverflowingContent() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run preferredColumnContribution(ColumnContribution.OverflowingContent) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Flexbox §§8.3, 9.4 and 9.8: only a computed auto cross size stretches.
+// Stretch makes its used cross size definite for percentage descendants;
+// an unresolved percentage on the item itself does not become stretchable.
+effect fn crossPercentage(percentItem: bool, definiteParent: bool) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.width = Dimension.px(200.0)
+  if definiteParent { root.height = Dimension.px(80.0) }
+  let mut item = Style.make()
+  item.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  item.flexBasis = Dimension.px(100.0)
+  if percentItem { item.height = Dimension.pct(0.5) }
+  let mut sibling = Style.make()
+  sibling.flexBasis = Dimension.px(100.0)
+  sibling.height = Dimension.px(80.0)
+  let mut descendant = Style.make()
+  descendant.width = Dimension.px(10.0)
+  descendant.height = Dimension.pct(0.5)
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let itemId = run tree.append(rootId, move item)
+  let siblingId = run tree.append(rootId, move sibling)
+  drop siblingId
+  let descendantId = run tree.append(itemId, move descendant)
+  let mut output = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run output.prepare(constructed.boxes.length())
+  let mut measure = BoxMeasure {}
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  drop pass
+  output.fragments.resolveLocations()
+  output.adopt(move constructed)
+  let mut expected = 80.0
+  if percentItem {
+    expected = 0.0
+    if definiteParent { expected = 40.0 }
+  }
+  run near(result.size.height, 80.0)
+  run near(output.boxes.get(output.firstBySource.get(itemId.index)).size.height, expected)
+  run near(output.boxes.get(output.firstBySource.get(descendantId.index)).size.height, expected / 2.0)
+}
+test effect fn flexAutoCrossStretchResolvesPercentageDescendants() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run crossPercentage(false, false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn flexIndefiniteCrossPercentageDoesNotStretch() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run crossPercentage(true, false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn flexDefiniteCrossPercentageResolvesBeforeDescendants() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run crossPercentage(true, true) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Flexbox §9.4: baseline-to-margin-edge distances are signed. Floor only
+// the resulting line cross size, not each group's before/after distance.
+effect fn negativeBaselineMargin(last: bool) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.width = Dimension.px(100.0)
+  root.alignItems = Align.Baseline
+  if last { root.alignItems = Align.LastBaseline }
+  let mut item = Style.make()
+  item.width = Dimension.px(100.0)
+  item.height = Dimension.px(20.0)
+  item.margin.top = Dimension.px(-20.0)
+  if last {
+    item.margin.top = Dimension.px(0.0)
+    item.margin.bottom = Dimension.px(-10.0)
+  }
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let itemId = run tree.append(rootId, move item)
+  run tree.setMeasurement(itemId, 0)
+  let mut output = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run output.prepare(constructed.boxes.length())
+  let mut measure = BoxMeasure {}
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  drop pass
+  output.fragments.resolveLocations()
+  output.adopt(move constructed)
+  let itemLayout = output.boxes.get(output.firstBySource.get(itemId.index))
+  if last {
+    run near(result.size.height, 10.0)
+    run near(itemLayout.location.y, 0.0)
+    run near(result.lastBaselines.alphabetic, 15.0)
+  } else {
+    run near(result.size.height, 0.0)
+    run near(itemLayout.location.y, -20.0)
+    run near(result.firstBaselines.alphabetic, -5.0)
+  }
+}
+test effect fn flexFirstBaselinePreservesNegativeStartDistance() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run negativeBaselineMargin(false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn flexLastBaselinePreservesNegativeEndDistance() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run negativeBaselineMargin(true) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Alignment §§9.2–9.3: opposite block flows share a baseline group only
+// with opposite preferences. Wrap reversal does not change compatibility.
+effect fn oppositeBaselineFlows(compatible: bool, reverse: bool) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.writingMode = WritingMode.VerticalRl
+  root.height = Dimension.px(200.0)
+  root.alignItems = Align.Baseline
+  if reverse { root.flexWrap = FlexWrap.WrapReverse }
+  let mut first = Style.make()
+  first.writingMode = WritingMode.VerticalRl
+  first.width = Dimension.px(30.0)
+  first.height = Dimension.px(40.0)
+  let mut second = Style.make()
+  second.writingMode = WritingMode.VerticalLr
+  second.width = Dimension.px(60.0)
+  second.height = Dimension.px(40.0)
+  if compatible { second.alignSelf = Align.LastBaseline }
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let firstId = run tree.append(rootId, move first)
+  let secondId = run tree.append(rootId, move second)
+  run tree.setMeasurement(firstId, 0)
+  run tree.setMeasurement(secondId, 1)
+  let mut output = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run output.prepare(constructed.boxes.length())
+  let mut measure = BoxMeasure {}
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  drop pass
+  output.fragments.resolveLocations()
+  output.adopt(move constructed)
+  let firstLayout = output.boxes.get(output.firstBySource.get(firstId.index))
+  let secondLayout = output.boxes.get(output.firstBySource.get(secondId.index))
+  run near(result.size.width, 60.0)
+  run near(secondLayout.location.x, 0.0)
+  if compatible {
+    run near(firstLayout.location.x, 10.0)
+    run near(firstLayout.location.x + firstLayout.size.width - firstLayout.firstBaselines.central, secondLayout.location.x + secondLayout.lastBaselines.central)
+    run near(result.firstBaselines.central, 35.0)
+  } else {
+    run near(firstLayout.location.x, 30.0)
+    run near(result.firstBaselines.central, 15.0)
+  }
+}
+test effect fn flexOppositeFlowsShareOppositeBaselinePreferences() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run oppositeBaselineFlows(true, false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn flexOppositeFlowsSeparateEqualBaselinePreferences() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run oppositeBaselineFlows(false, false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn flexBaselineSharingSurvivesWrapReversal() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run oppositeBaselineFlows(true, true) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Flexbox §9.9.2 and Sizing §5.2: a definite cross size contributes itself,
+// even when its contents overflow. The main-axis contribution rule in
+// Flexbox §9.9.3 (larger of preferred/content) does not apply across the axis.
+effect fn columnPreferredCrossContribution(fit: bool) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.flexDirection = FlexDirection.Column
+  root.flexWrap = FlexWrap.Wrap
+  root.width = Dimension.keyword(DimensionKind.MinContent)
+  if fit { root.width = Dimension.keyword(DimensionKind.FitContent) }
+  root.height = Dimension.px(100.0)
+  let mut item = Style.make()
+  item.width = Dimension.px(60.0)
+  item.height = Dimension.px(20.0)
+  let mut overflow = Style.make()
+  overflow.width = Dimension.px(200.0)
+  overflow.height = Dimension.px(10.0)
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let itemId = run tree.append(rootId, move item)
+  let overflowId = run tree.append(itemId, move overflow)
+  let mut output = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run output.prepare(constructed.boxes.length())
+  let mut measure = BoxMeasure {}
+  let mut input = Input.make(OptionalSize.none())
+  input.availableWidth = AvailableSpace.definite(300.0)
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input)
+  drop pass
+  output.fragments.resolveLocations()
+  output.adopt(move constructed)
+  run near(result.size.width, 60.0)
+  run near(output.boxes.get(output.firstBySource.get(itemId.index)).size.width, 60.0)
+  run near(output.boxes.get(output.firstBySource.get(overflowId.index)).size.width, 200.0)
+}
+test effect fn flexWrappedColumnMinContentUsesPreferredCrossContribution() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run columnPreferredCrossContribution(false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+test effect fn flexWrappedColumnFitContentUsesPreferredCrossContribution() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run columnPreferredCrossContribution(true) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Flexbox §9.2 step 3 preserves the negative inner base. §9.7 step 5b
+// limits remaining space to initial-free-space * sum(grow), before the
+// target's padding floor. 200 * .2 = 40, not 20 + (200 - 20) * .2 = 56.
+effect fn partialNegativeInnerBase() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.width = Dimension.px(200.0)
+  let mut item = Style.make()
+  item.boxSizing = BoxSizing.BorderBox
+  item.padding = Edges.all(Dimension.px(10.0))
+  item.flexBasis = Dimension.px(0.0)
+  item.flexGrow = 0.2
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let itemId = run tree.append(rootId, move item)
+  let mut output = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run output.prepare(constructed.boxes.length())
+  let mut measure = BoxMeasure {}
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, Input.make(OptionalSize.none()))
+  drop pass
+  output.fragments.resolveLocations()
+  output.adopt(move constructed)
+  run near(result.size.width, 200.0)
+  run near(output.boxes.get(output.firstBySource.get(itemId.index)).size.width, 40.0)
+}
+test effect fn flexPartialGrowPreservesNegativeInnerBase() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run partialNegativeInnerBase() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+fn columnFrames<'a>(rects: &'a [Rect]) -> Fragmentainers<'a> {
+  return Fragmentainers {
+    rects: Option<&'a [Rect]>.Some { value: rects }, repeatStep: Option<Point>.None,
+    contexts: Option<&'a [FragmentainerKind]>.None, ancestors: Option<&'a [FragmentAncestor]>.None,
+    kind: FragmentainerKind.Column, writingMode: WritingMode.HorizontalTb,
+    direction: Direction.Ltr, firstPageRight: true, rectoOnRight: true,
+  }
+}
+
+effect fn fragmentedBaselineExports(reverse: bool) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
+  let mut root = Style.make()
+  root.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  root.width = Dimension.px(50.0)
+  root.flexWrap = FlexWrap.Wrap
+  if reverse { root.flexWrap = FlexWrap.WrapReverse }
+  root.alignItems = Align.FlexStart
+  let mut first = Style.make()
+  first.width = Dimension.px(50.0)
+  first.height = Dimension.px(20.0)
+  let mut second = Style.make()
+  second.width = Dimension.px(50.0)
+  second.height = Dimension.px(30.0)
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let a = run tree.append(rootId, move first)
+  let b = run tree.append(rootId, move second)
+  run tree.setMeasurement(a, 0)
+  run tree.setMeasurement(b, 1)
+  let mut rects = List<Rect>.make()
+  run rects.append(Rect { x: 0.0, y: 0.0, width: 50.0, height: 30.0 })
+  run rects.append(Rect { x: 50.0, y: 0.0, width: 50.0, height: 30.0 })
+  let frames = columnFrames(rects.asSlice())
+  let mut output = LayoutTree.make()
+  let mut measure = BoxMeasure {}
+  run computeFragmented(&tree, &mut output, &mut measure, OptionalSize.none(), move frames)
+  let rootBox = output.firstBySource.get(rootId.index)
+  let firstFragment = output.fragments.first(rootBox)
+  run Testing.expect(firstFragment != usize.MAX, "first flex fragment is published")
+  let fragments = output.fragments.values.asSlice()
+  let next = fragments[firstFragment].nextForBox
+  run Testing.expect(next != usize.MAX, "second flex line continues in another fragment")
+  let firstLayout = fragments[firstFragment]
+  let lastLayout = fragments[next]
+  run Testing.expect(firstLayout.hasFirstBaseline && firstLayout.hasLastBaseline && lastLayout.hasFirstBaseline && lastLayout.hasLastBaseline, "each accepted flex fragment exports its own item baselines")
+  let mut firstExpected = 15.0
+  let mut lastExpected = 25.0
+  if reverse { firstExpected = 25.0
+    lastExpected = 15.0 }
+  run near(firstLayout.firstBaselines.alphabetic, firstExpected)
+  run near(firstLayout.lastBaselines.alphabetic, firstExpected)
+  run near(lastLayout.firstBaselines.alphabetic, lastExpected)
+  run near(lastLayout.lastBaselines.alphabetic, lastExpected)
+}
+test effect fn flexFragmentBaselinesExcludeUnpublishedAndEarlierItems() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run fragmentedBaselineExports(false) |> Effect.provideMut<Allocator>(&mut allocator)
+  run fragmentedBaselineExports(true) |> Effect.provideMut<Allocator>(&mut allocator)
+}

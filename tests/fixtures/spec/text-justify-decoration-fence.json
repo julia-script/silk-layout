@@ -1,0 +1,94 @@
+{
+  "name": "text-justify-decoration-fence",
+  "kind": "spec",
+  "features": [
+    "source-text",
+    "text-justify",
+    "preserved-whitespace"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 30,
+          "fontKey": 1,
+          "textAlign": "justify",
+          "textAlignLast": "auto",
+          "textJustify": "inter-word",
+          "whiteSpaceCollapse": "preserve"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "fontKey": 1,
+          "textJustify": "inter-word",
+          "whiteSpaceCollapse": "preserve",
+          "boxDecorationBreak": "clone",
+          "paddingRight": 1
+        }
+      },
+      {
+        "parent": 1,
+        "text": "a "
+      },
+      {
+        "parent": 0,
+        "text": "cccc"
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#text-justify-property",
+    "https://drafts.csswg.org/css-text-3/#expanding-text",
+    "https://drafts.csswg.org/css-text-3/#letter-spacing-property",
+    "https://drafts.csswg.org/css-text-3/#hanging"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "height": 20
+      },
+      {
+        "width": 30
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 29,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "width": 20
+      }
+    ]
+  }
+}

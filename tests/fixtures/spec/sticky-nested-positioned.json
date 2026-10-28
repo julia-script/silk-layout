@@ -1,0 +1,119 @@
+{
+  "name": "sticky-nested-positioned",
+  "kind": "spec",
+  "features": [
+    "scroll-state",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrolling",
+    "https://drafts.csswg.org/css-position-3/#stickypos-insets",
+    "https://drafts.csswg.org/css-position-3/#static-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        },
+        "scrollOffset": {
+          "x": 0,
+          "y": 50
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "height": 300
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "position": "sticky",
+          "insetTop": 10
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "width": 100,
+          "height": 20,
+          "position": "sticky",
+          "insetTop": 20
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "width": 10,
+          "height": 10,
+          "position": "absolute",
+          "insetLeft": 5,
+          "insetTop": 5
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "width": 10,
+          "height": 10,
+          "position": "fixed",
+          "insetLeft": 7,
+          "insetTop": 7
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": -50,
+        "width": 100,
+        "height": 300
+      },
+      {
+        "x": 0,
+        "y": 60,
+        "width": 100,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 5,
+        "y": 5,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 7,
+        "y": -3,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

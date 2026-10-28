@@ -1,0 +1,164 @@
+import silk.box { Box }
+import silk.json_value { Json, Value, JsonChild }
+import silk.list { List }
+import silk.option { Option }
+import silk.string { String }
+import silk.os_writer { StderrWriter }
+import silk.ownership { Copy }
+import silk.effect { Effect }
+import silk.writer { Writer, WriterError }
+import silk.json_scanner { JsonError }
+import silk.json_output { JsonOptions }
+import layout.lib { TextError }
+
+pub struct ProtocolError {}
+impl Copy for ProtocolError {}
+
+effect fn report(message: string) ! WriterError ? &mut Writer {
+  run Writer.writeString("silk-layout: ")
+  run Writer.writeString(message)
+  run Writer.writeString("\n")
+}
+pub fn invalid(message: string) -> ProtocolError {
+  let mut stderr = StderrWriter.make()
+  let written = run report(message) |> Effect.provideMut<Writer>(&mut stderr) |> Effect.result
+  drop written
+  return ProtocolError {}
+}
+
+// LIMITATION-1: template formatting in borrowed Option/JsonChild match arms
+// fails on dev.20; keep diagnostics on Writer until silk-lang/silk#2390 is fixed.
+pub fn invalidField(message: string, key: string) -> ProtocolError {
+  let mut stderr = StderrWriter.make()
+  let context = run report(message) |> Effect.provideMut<Writer>(&mut stderr) |> Effect.result
+  drop context
+  let field = run report(key) |> Effect.provideMut<Writer>(&mut stderr) |> Effect.result
+  drop field
+  return ProtocolError {}
+}
+
+effect fn reportText(error: TextError) ! WriterError | JsonError ? &mut Writer {
+  run Writer.writeString("silk-layout: text source ")
+  run Json.serialize(&error.source, &JsonOptions.compact())
+  run Writer.writeString(": ")
+  run Writer.writeString(error.message)
+  run Writer.writeString("\n")
+}
+pub fn invalidText(source: usize, message: string<'static>) -> TextError {
+  let error = TextError { source: source, message: message }
+  let mut stderr = StderrWriter.make()
+  let written = run reportText(error) |> Effect.provideMut<Writer>(&mut stderr) |> Effect.result
+  drop written
+  return error
+}
+
+pub effect fn object<'a>(value: &'a Value) -> &'a [JsonChild] ! ProtocolError {
+  return match &value.* {
+    Value.Object { entries } => {
+      let boxed = Box<List<JsonChild>>.get(&entries)
+      return List<JsonChild>.asSlice(&boxed[0])
+    }
+    _ => { fail invalid("expected an object") }
+  }
+}
+
+pub effect fn array<'a>(value: &'a Value) -> &'a [JsonChild] ! ProtocolError {
+  return match &value.* {
+    Value.Array { values } => {
+      let boxed = Box<List<JsonChild>>.get(&values)
+      return List<JsonChild>.asSlice(&boxed[0])
+    }
+    _ => { fail invalid("expected an array") }
+  }
+}
+
+pub effect fn item<'a>(child: &'a JsonChild) -> &'a Value ! ProtocolError {
+  return match &child.* {
+    JsonChild.Item { value } => &value
+    _ => { fail invalid("expected an array element") }
+  }
+}
+
+pub effect fn required<'a>(value: &'a Value, key: string) -> &'a Value ! ProtocolError {
+  return match move Json.field(value, key) {
+    Option<&'a Value>.Some { value: field } => field
+    Option<&'a Value>.None => {
+      fail invalidField("missing required field", key)
+    }
+  }
+}
+
+pub fn has(value: &Value, key: string) -> bool {
+  return match move Json.field(value, key) {
+    Option<&Value>.Some { value: _ } => true
+    Option<&Value>.None => false
+  }
+}
+
+pub fn isNull(value: &Value) -> bool {
+  return match &value.* {
+    Value.Null => true
+    _ => false
+  }
+}
+
+pub effect fn number(value: &Value) -> f64 ! ProtocolError {
+  return match move Json.asF64(Option<&Value>.some(value)) {
+    Option<f64>.Some { value: result } => result
+    Option<f64>.None => { fail invalid("expected a finite number") }
+  }
+}
+pub effect fn finite(value: &Value) -> f64 ! ProtocolError {
+  let result = run number(value)
+  if result - result != 0.0 { fail invalid("expected a finite number") }
+  return result
+}
+pub effect fn nonnegative(value: &Value) -> f64 ! ProtocolError {
+  let result = run finite(value)
+  if result < 0.0 { fail invalid("expected a nonnegative number") }
+  return result
+}
+
+pub effect fn integer(value: &Value) -> i32 ! ProtocolError {
+  return match move Json.asI32(Option<&Value>.some(value)) {
+    Option<i32>.Some { value: result } => result
+    Option<i32>.None => { fail invalid("expected a signed 32-bit integer") }
+  }
+}
+
+pub effect fn text<'a>(value: &'a Value) -> string<'a> ! ProtocolError {
+  return match move Json.asString(Option<&'a Value>.some(value)) {
+    Option<string<'a>>.Some { value: result } => result
+    Option<string<'a>>.None => { fail invalid("expected a string") }
+  }
+}
+
+pub effect fn boolean(value: &Value) -> bool ! ProtocolError {
+  return match &value.* {
+    Value.Bool { value: result } => result
+    _ => { fail invalid("expected a boolean") }
+  }
+}
+
+pub effect fn fields(value: &Value, allowed: &[string]) ! ProtocolError {
+  let entries = run object(value)
+  let mut index: usize = 0
+  while index < entries.length {
+    match &entries[index] {
+      JsonChild.Member { entry } => {
+        let key = String.view(&entry.key)
+        let mut found = false
+        let mut candidate: usize = 0
+        while candidate < allowed.length {
+          if key == allowed[candidate] { found = true }
+          candidate = candidate + 1
+        }
+        if !found {
+          fail invalidField("unsupported object field", key)
+        }
+      }
+      _ => { fail invalid("expected an object member") }
+    }
+    index = index + 1
+  }
+}

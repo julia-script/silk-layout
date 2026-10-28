@@ -1,0 +1,23 @@
+{
+  "name": "flex-intrinsic-min-content-basis",
+  "kind": "spec",
+  "features": ["flex", "min-content", "intrinsic-measure", "factors-below-one"],
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#algo-main-item",
+    "https://drafts.csswg.org/css-flexbox-1/#intrinsic-main-sizes-compat",
+    "https://drafts.csswg.org/css-flexbox-1/#resolve-flexible-lengths"
+  ],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flex", "width": "min-content", "height": 20}},
+      {"parent": 0, "style": {"minWidth": 0, "flexShrink": 0.2}, "measure": {"minWidth": 40, "maxWidth": 100, "height": 20}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 40, "height": 20, "contentWidth": 40, "contentHeight": 20},
+      {"x": 0, "y": 0, "width": 40, "height": 20, "contentWidth": 40, "contentHeight": 20}
+    ]
+  }
+}

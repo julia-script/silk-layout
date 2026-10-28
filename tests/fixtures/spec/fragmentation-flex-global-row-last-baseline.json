@@ -1,0 +1,113 @@
+{
+  "name": "fragmentation-flex-global-row-last-baseline",
+  "kind": "spec",
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#pagination",
+    "https://github.com/w3c/csswg-drafts/issues/6812"
+  ],
+  "input": {
+    "viewport": {
+      "width": 300,
+      "height": 200
+    },
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 100,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        {
+          "x": 200,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        }
+      ],
+      "repeatStep": {
+        "x": 100,
+        "y": 0
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "height": 130,
+          "alignItems": "last baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 20,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 30,
+          "flexShrink": 0
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "x": 100,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "x": 200,
+            "y": 0,
+            "width": 100,
+            "height": 30
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 200,
+            "y": 10,
+            "width": 40,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 240,
+            "y": 0,
+            "width": 40,
+            "height": 30
+          }
+        ]
+      }
+    ]
+  }
+}

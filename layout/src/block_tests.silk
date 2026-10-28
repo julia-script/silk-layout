@@ -1,0 +1,976 @@
+import fragmentation { FragmentationError }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.usize
+import text { TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun }
+import silk.effect { Effect }
+import silk.testing { Testing, AssertionError }
+import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize, AvailableSpace, AvailableKind, max }
+import style { Style, Display, DisplayOutside, DisplayInside, Dimension, Direction, Float, Clear, Position, WritingMode, Align, Overflow, OverflowAlignment }
+import tree { Tree, LayoutTree, InvalidNode }
+import context { Input }
+import engine { layoutNode }
+import layout_pass { LayoutPass }
+import box_tree as Boxes
+
+struct FixedMeasure {}
+impl Measure for FixedMeasure {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    return FontMetrics.zero()
+  }
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop provider
+    drop request
+    return ScrollbarMetrics.zero()
+  }
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop provider
+    drop key
+    let mut width = 80.0
+    if request.width.kind == AvailableKind.MinContent { width = 20.0 }
+    if request.known.widthDefinite { width = request.known.width }
+    let mut height = 12.0
+    if request.known.heightDefinite { height = request.known.height }
+    return Measured { size: Size { width: width, height: height }, scrollableOverflow: Rect { x: 0.0, y: 0.0, width: max(20.0, width), height: 12.0 }, contentBlockSize: 12.0, firstBaselines: BaselineSet.uniform(9.0), lastBaselines: BaselineSet.uniform(9.0), hasBaseline: true, hasLineBoxes: true }
+  }
+}
+impl TextMeasure for FixedMeasure {
+  fn beginTextLayout(provider: &mut Self) { drop provider }
+  effect fn analyze(provider: &mut Self, context: TextContext, output: &mut List<TextBreak>) -> TextAnalysis ! OutOfMemoryError | TextError ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if context.tokens.length > 0 { source = context.tokens[0].source }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>) ! OutOfMemoryError | TextError ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if request.start.unit < request.context.tokens.length { source = request.context.tokens[request.start.unit].source }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+}
+fn sized(width: f64, height: f64) -> Style {
+  let mut style = Style.make()
+  style.width = Dimension.px(width)
+  style.height = Dimension.px(height)
+  return move style
+}
+effect fn arrange(tree: &Tree, width: f64) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut layouts = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run layouts.prepare(constructed.boxes.length())
+  let mut measure = FixedMeasure {}
+  let mut input = Input.make(OptionalSize.none())
+  input.known.width = width
+  input.known.widthDefinite = true
+  input.availableWidth = AvailableSpace.definite(width)
+  input.blockRoot = true
+  let mut pass = run LayoutPass.make(layouts.boxes.asMutSlice(), &mut layouts.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input)
+  drop result
+  drop pass
+  layouts.fragments.resolveLocations()
+  layouts.adopt(move constructed)
+  return move layouts
+}
+
+test effect fn blockAutoMarginsAndRtlOverconstraint() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.direction = Direction.Rtl
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut centered = sized(80.0, 10.0)
+  centered.margin.left = Dimension.auto()
+  centered.margin.right = Dimension.auto()
+  let a = run tree.append(rootId, move centered) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut overflow = sized(240.0, 10.0)
+  overflow.direction = Direction.Ltr
+  overflow.margin.left = Dimension.auto()
+  overflow.margin.right = Dimension.px(7.0)
+  let b = run tree.append(rootId, move overflow) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == 60.0, "both auto margins divide positive free space")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == -47.0, "RTL containing block discards left margin under overconstraint")
+}
+
+test effect fn blockEmptyChainRetainsNegativeMarginExtrema() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(10.0, 10.0)
+  first.margin.bottom = Dimension.px(20.0)
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut empty = Style.make()
+  empty.margin.top = Dimension.px(30.0)
+  empty.margin.bottom = Dimension.px(-15.0)
+  let b = run tree.append(rootId, move empty) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut last = sized(10.0, 10.0)
+  last.margin.top = Dimension.px(-25.0)
+  let c = run tree.append(rootId, move last) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 0.0, "first block begins at content top")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 40.0, "empty border edge excludes its own bottom margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 15.0, "adjoining set uses max positive plus most negative")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 25.0, "empty border edge does not inflate auto height")
+}
+
+test effect fn blockParentChildMarginsEscapeOnlyOpenBoundaries() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut parent = Style.make()
+  parent.margin.top = Dimension.px(10.0)
+  parent.margin.bottom = Dimension.px(5.0)
+  let a = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut inner = sized(10.0, 10.0)
+  inner.margin.top = Dimension.px(30.0)
+  inner.margin.bottom = Dimension.px(20.0)
+  let b = run tree.append(a, move inner) |> Effect.provideMut<Allocator>(&mut allocator)
+  let c = run tree.append(rootId, sized(10.0, 10.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 30.0, "child top margin collapses outside parent")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 10.0, "escaped margins do not count toward parent height")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 0.0, "collapsed child shares parent border top")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 60.0, "child bottom margin joins parent bottom margin")
+}
+
+test effect fn blockPaddingAndFlowRootStopChildMarginCollapse() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut parent = Style.make()
+  parent.padding.top = Dimension.px(3.0)
+  parent.border.bottom = Dimension.px(2.0)
+  let a = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut inner = sized(10.0, 10.0)
+  inner.margin.top = Dimension.px(11.0)
+  inner.margin.bottom = Dimension.px(13.0)
+  let b = run tree.append(a, move inner) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut flowRoot = Style.make()
+  flowRoot.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  let c = run tree.append(rootId, move flowRoot) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut nested = sized(10.0, 10.0)
+  nested.margin.top = Dimension.px(7.0)
+  nested.margin.bottom = Dimension.px(9.0)
+  let d = run tree.append(c, move nested) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 14.0, "padding blocks top margin collapse")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 39.0, "bottom border retains last child bottom margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(d.index)).location.y == 7.0, "flow root retains top margin without padding")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).size.height == 26.0, "flow root retains bottom margin")
+}
+
+test effect fn blockMinimumHeightStopsEmptyMarginThrough() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut parent = Style.make()
+  parent.minHeight = Dimension.px(50.0)
+  parent.margin.bottom = Dimension.px(7.0)
+  let a = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut empty = Style.make()
+  empty.margin.top = Dimension.px(20.0)
+  empty.margin.bottom = Dimension.px(30.0)
+  let b = run tree.append(a, move empty) |> Effect.provideMut<Allocator>(&mut allocator)
+  let c = run tree.append(rootId, sized(10.0, 10.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 30.0, "empty child margins join parent top")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 0.0, "empty child remains on collapsed top edge")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 87.0, "minimum height prevents top set escaping at bottom")
+}
+
+test effect fn blockFloatsPackWrapClearAndContributeToRootHeight() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut left = sized(60.0, 30.0)
+  left.float = Float.Left
+  let a = run tree.append(rootId, move left) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut right = sized(50.0, 20.0)
+  right.float = Float.Right
+  let b = run tree.append(rootId, move right) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut wrap = sized(100.0, 15.0)
+  wrap.float = Float.Left
+  let c = run tree.append(rootId, move wrap) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut clear = sized(20.0, 5.0)
+  clear.clear = Clear.Both
+  clear.margin.top = Dimension.px(4.0)
+  let d = run tree.append(rootId, move clear) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 180.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == 0.0, "left float uses left edge")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 130.0, "right float uses right edge")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 20.0, "float chooses earliest fitting band")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.x == 60.0, "float avoids remaining left float")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(d.index)).location.y == 35.0, "clearance places border edge at float bottom")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 40.0, "root auto height includes cleared flow")
+}
+
+test effect fn blockFloatContainmentDiffersFromOrdinaryBlock() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let a = run tree.append(rootId, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut floatA = sized(20.0, 30.0)
+  floatA.float = Float.Left
+  let childA = run tree.append(a, move floatA) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut parent = Style.make()
+  parent.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  let b = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut floatB = sized(20.0, 40.0)
+  floatB.float = Float.Left
+  let childB = run tree.append(b, move floatB) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(childA.index)).size.height == 30.0, "ordinary block still lays out floated descendants")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 0.0, "ordinary block excludes its floats from auto height")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(childB.index)).size.height == 40.0, "flow root lays out floated descendants")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.height == 40.0, "flow root contains its floats")
+}
+
+test effect fn blockFlowRootAvoidsFloatWithAutoWidth() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut floated = sized(60.0, 30.0)
+  floated.float = Float.Left
+  let a = run tree.append(rootId, move floated) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut parent = Style.make()
+  parent.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  parent.height = Dimension.px(10.0)
+  let b = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 0.0, "float begins at root top")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 60.0, "flow root avoids float border area")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.width == 140.0, "auto-width flow root occupies remaining strip")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 30.0, "root includes float extending below normal flow")
+}
+
+test effect fn blockContentsFlattensAndOutOfFlowDoesNotStack() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut contents = Style.make()
+  contents.display = Display.Contents
+  let a = run tree.append(rootId, move contents) |> Effect.provideMut<Allocator>(&mut allocator)
+  let b = run tree.append(a, sized(20.0, 10.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut absolute = sized(10.0, 100.0)
+  absolute.position = Position.Absolute
+  let c = run tree.append(a, move absolute) |> Effect.provideMut<Allocator>(&mut allocator)
+  let d = run tree.append(rootId, sized(20.0, 15.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop c
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 0.0, "contents child participates in root flow")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(d.index)).location.y == 10.0, "absolute child consumes no stack height")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 25.0, "contents wrapper contributes no extra box")
+}
+
+test effect fn blockIntrinsicWidthsUseMeasuredChildContributions() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut child = Style.make()
+  child.margin.left = Dimension.px(3.0)
+  child.margin.right = Dimension.px(7.0)
+  let a = run tree.append(rootId, move child) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(a, 0)
+  let mut layouts = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootBox = constructed.firstBySource.get(rootId.index)
+  run layouts.prepare(constructed.boxes.length()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut measure = FixedMeasure {}
+  let mut input = Input.make(OptionalSize.none())
+  input.availableWidth = AvailableSpace.minContent()
+  input.blockRoot = true
+  let mut pass = run LayoutPass.make(layouts.boxes.asMutSlice(), &mut layouts.fragments, constructed.sources) |> Effect.provideMut<Allocator>(&mut allocator)
+  let narrow = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input) |> Effect.provideMut<Allocator>(&mut allocator)
+  input.availableWidth = AvailableSpace.maxContent()
+  pass.fragments.rollback(0)
+  let wide = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop pass
+  layouts.fragments.resolveLocations()
+  layouts.adopt(move constructed)
+  run Testing.expect(narrow.size.width == 30.0, "min-content width includes measured minimum and margins")
+  run Testing.expect(wide.size.width == 90.0, "max-content width includes measured maximum and margins")
+  run Testing.expect(wide.size.height == 12.0, "auto block height comes from measured child")
+  run Testing.expect(wide.firstBaselines.alphabetic == 9.0 && wide.lastBaselines.alphabetic == 9.0, "block exports measured child baselines")
+}
+
+test effect fn blockClearanceCanBeNegativeWithoutAddingMarginsTwice() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(10.0, 10.0)
+  first.margin.bottom = Dimension.px(40.0)
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut floated = sized(10.0, 20.0)
+  floated.float = Float.Left
+  let b = run tree.append(rootId, move floated) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut last = sized(10.0, 10.0)
+  last.clear = Clear.Left
+  last.margin.top = Dimension.px(30.0)
+  let c = run tree.append(rootId, move last) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 0.0, "first block starts normally")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 50.0, "float starts after preceding collapsed-through margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 70.0, "negative clearance avoids adding both margins to float bottom")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).hasClearance, "actual clearance is recorded independently of clear property")
+}
+
+test effect fn blockNegativeInlineMarginsAndMaximumWidthRebalance() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut widened = Style.make()
+  widened.height = Dimension.px(10.0)
+  widened.margin.left = Dimension.px(-10.0)
+  widened.margin.right = Dimension.px(-20.0)
+  let a = run tree.append(rootId, move widened) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut capped = Style.make()
+  capped.height = Dimension.px(10.0)
+  capped.maxWidth = Dimension.px(100.0)
+  capped.margin.left = Dimension.auto()
+  capped.margin.right = Dimension.auto()
+  let b = run tree.append(rootId, move capped) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == -10.0, "negative start margin shifts border box")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.width == 230.0, "auto width absorbs negative margins")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.width == 100.0, "maximum width clamps auto fill")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 50.0, "auto margins rebalance after maximum-width clamp")
+}
+
+test effect fn blockFlowRootMinimumWidthMovesBelowFloatAndRefills() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut floated = sized(100.0, 30.0)
+  floated.float = Float.Left
+  let a = run tree.append(rootId, move floated) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut flowRoot = Style.make()
+  flowRoot.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  flowRoot.minWidth = Dimension.px(150.0)
+  flowRoot.height = Dimension.px(10.0)
+  let b = run tree.append(rootId, move flowRoot) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 0.0, "float starts at content top")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 30.0, "minimum width cannot overlap float")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 0.0, "cleared band starts at content left")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.width == 200.0, "auto width expands again below float")
+}
+
+effect fn arrangeVertical(tree: &Tree, inlineSize: f64) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut layouts = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootBox = constructed.firstBySource.get(tree.root().index)
+  run layouts.prepare(constructed.boxes.length())
+  let mut measure = FixedMeasure {}
+  let mut input = Input.make(OptionalSize.none())
+  input.parentWritingMode = tree.styles.asSlice()[tree.nodes.asSlice()[0].styleIndex].writingMode
+  input.known.height = inlineSize
+  input.known.heightDefinite = true
+  input.availableHeight = AvailableSpace.definite(inlineSize)
+  input.blockRoot = true
+  let mut pass = run LayoutPass.make(layouts.boxes.asMutSlice(), &mut layouts.fragments, constructed.sources)
+  let result = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input)
+  drop result
+  drop pass
+  layouts.fragments.resolveLocations()
+  layouts.adopt(move constructed)
+  return move layouts
+}
+
+test effect fn blockVerticalRlStacksFromRightAndCollapsesPhysicalSideMargins() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.VerticalRl
+  root.padding.right = Dimension.px(3.0)
+  root.padding.left = Dimension.px(2.0)
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(20.0, 40.0)
+  first.writingMode = WritingMode.VerticalRl
+  first.margin.right = Dimension.px(10.0)
+  first.margin.left = Dimension.px(30.0)
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut second = sized(15.0, 40.0)
+  second.writingMode = WritingMode.VerticalRl
+  second.margin.right = Dimension.px(-5.0)
+  let b = run tree.append(rootId, move second) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.width == 75.0, "auto physical width sums block-axis extents")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == 42.0, "first vertical-rl block starts at right padding plus margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 2.0, "second block follows collapsed left/right margin set")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 0.0, "vertical ltr inline axis starts at top")
+}
+
+test effect fn blockVerticalLrAutoMarginsAndRtlOverflowUseTopBottom() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.VerticalLr
+  root.direction = Direction.Rtl
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(20.0, 40.0)
+  first.writingMode = WritingMode.VerticalLr
+  first.margin.top = Dimension.auto()
+  first.margin.bottom = Dimension.auto()
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut second = sized(30.0, 120.0)
+  second.writingMode = WritingMode.VerticalLr
+  second.margin.top = Dimension.auto()
+  second.margin.bottom = Dimension.px(7.0)
+  let b = run tree.append(rootId, move second) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 30.0, "top/bottom auto margins center vertical inline size")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == -27.0, "RTL overflow discards physical top margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 20.0, "vertical-lr block progression is left-to-right")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.width == 50.0, "auto block size is physical width")
+}
+
+test effect fn blockSidewaysLrReversesLineAxisButNotBlockAxis() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.SidewaysLr
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(20.0, 40.0)
+  first.writingMode = WritingMode.SidewaysLr
+  first.margin.top = Dimension.px(7.0)
+  first.margin.bottom = Dimension.px(11.0)
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut second = sized(30.0, 40.0)
+  second.writingMode = WritingMode.SidewaysLr
+  let b = run tree.append(rootId, move second) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 49.0, "sideways-lr ltr inline-start is physical bottom")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 60.0, "zero margin aligns second box to physical bottom")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 20.0, "sideways-lr blocks still progress to physical right")
+}
+
+test effect fn blockVerticalPercentageEdgesUseContainingInlineSize() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.VerticalLr
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut child = sized(20.0, 50.0)
+  child.writingMode = WritingMode.VerticalLr
+  child.padding.right = Dimension.pct(0.1)
+  child.margin.left = Dimension.pct(0.2)
+  child.margin.top = Dimension.pct(0.1)
+  let a = run tree.append(rootId, move child) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.width == 30.0, "percentage padding resolves against vertical containing inline size")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == 20.0, "block margin percentage resolves against containing height")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 10.0, "inline margin percentage uses same basis")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.width == 50.0, "percentage margin and padding contribute to auto physical width")
+}
+
+test effect fn blockSidewaysRlFloatsAndClearFollowLogicalBlockAxis() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.SidewaysRl
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(30.0, 40.0)
+  first.writingMode = WritingMode.SidewaysRl
+  first.float = Float.Left
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut second = sized(20.0, 30.0)
+  second.writingMode = WritingMode.SidewaysRl
+  second.float = Float.Right
+  let b = run tree.append(rootId, move second) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut cleared = sized(10.0, 20.0)
+  cleared.writingMode = WritingMode.SidewaysRl
+  cleared.clear = Clear.Both
+  let c = run tree.append(rootId, move cleared) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 0.0, "left float maps to physical top in sideways-rl")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 70.0, "right float maps to physical bottom in sideways-rl")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == 10.0, "first float occupies right block-start region")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.x == 0.0, "clear moves block left of preceding floats")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.width == 40.0, "cleared block expands auto block dimension")
+}
+
+test effect fn blockVerticalParentChildCollapseUsesRightLeftEdges() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.VerticalRl
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut parent = Style.make()
+  parent.writingMode = WritingMode.VerticalRl
+  parent.margin.right = Dimension.px(10.0)
+  parent.margin.left = Dimension.px(5.0)
+  let a = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut child = sized(20.0, 40.0)
+  child.writingMode = WritingMode.VerticalRl
+  child.margin.right = Dimension.px(30.0)
+  child.margin.left = Dimension.px(25.0)
+  let b = run tree.append(a, move child) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut sibling = sized(10.0, 40.0)
+  sibling.writingMode = WritingMode.VerticalRl
+  let c = run tree.append(rootId, move sibling) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.width == 85.0, "escaped right/left margins remain in outer flow")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.width == 20.0, "collapsed child side margins do not inflate parent width")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == 35.0, "parent block-start uses child's larger right margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 0.0, "child shares parent's right border edge")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.x == 0.0, "next sibling follows collapsed block-end margin")
+}
+
+test effect fn blockVerticalBaselinesUseBlockStartAndReverseOppositeFlows() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.VerticalRl
+  root.padding.right = Dimension.px(3.0)
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(20.0, 40.0)
+  first.writingMode = WritingMode.VerticalRl
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(a, 0)
+  let mut second = sized(20.0, 40.0)
+  second.writingMode = WritingMode.VerticalLr
+  let b = run tree.append(rootId, move second) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(b, 0)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).firstBaselines.central == 12.0, "first baseline includes block-start right padding")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).lastBaselines.central == 34.0, "opposite vertical flow baseline is measured from containing block-start")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 0.0, "baseline conversion does not change physical positioning")
+}
+
+test effect fn blockOrthogonalFlowPreventsParentChildMarginCollapse() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.VerticalLr
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut parent = sized(40.0, 60.0)
+  parent.margin.left = Dimension.px(7.0)
+  let a = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut child = sized(10.0, 10.0)
+  child.margin.top = Dimension.px(13.0)
+  let b = run tree.append(a, move child) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == 7.0, "orthogonal child's external margins use containing block axis")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 13.0, "orthogonal flow root retains its first child's top margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.width == 47.0, "orthogonal physical width contributes to vertical block progression")
+}
+
+effect fn alignedChild(align: Align, safety: OverflowAlignment, overflow: Overflow, height: f64, childHeight: f64) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError | InvalidNode ? &mut Allocator {
+  let mut root = Style.make()
+  root.height = Dimension.px(height)
+  root.alignContent = align
+  root.alignContentSafety = safety
+  root.overflowY = overflow
+  let mut tree = run Tree.make(move root)
+  let rootId = tree.root()
+  let child = run tree.append(rootId, sized(10.0, childHeight))
+  drop child
+  let layouts = run arrange(&tree, 100.0)
+  return move layouts
+}
+
+test effect fn blockAlignContentCentersWholeSubjectAndMovesBaselines() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.height = Dimension.px(100.0)
+  root.padding.top = Dimension.px(4.0)
+  root.padding.bottom = Dimension.px(6.0)
+  root.alignContent = Align.Center
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let a = run tree.append(rootId, sized(10.0, 20.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(a, 0)
+  let b = run tree.append(rootId, sized(10.0, 30.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 29.0, "center alignment uses content box excluding padding")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 49.0, "content moves as a unit without introducing inter-child gaps")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).firstBaselines.alphabetic == 38.0, "exported baseline follows aligned content")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 110.0, "alignment does not alter border-box size")
+}
+
+test effect fn blockAlignContentDistributionUsesSingleSubjectFallbacks() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let around = run alignedChild(Align.SpaceAround, OverflowAlignment.Default, Overflow.Visible, 100.0, 20.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let evenly = run alignedChild(Align.SpaceEvenly, OverflowAlignment.Default, Overflow.Visible, 100.0, 20.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let between = run alignedChild(Align.SpaceBetween, OverflowAlignment.Default, Overflow.Visible, 100.0, 20.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let stretch = run alignedChild(Align.Stretch, OverflowAlignment.Default, Overflow.Visible, 100.0, 20.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let last = run alignedChild(Align.LastBaseline, OverflowAlignment.Default, Overflow.Visible, 100.0, 20.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(around.boxes.get(around.firstBySource.get(1)).location.y == 40.0 && evenly.boxes.get(evenly.firstBySource.get(1)).location.y == 40.0, "space-around and space-evenly fall back to center")
+  run Testing.expect(between.boxes.get(between.firstBySource.get(1)).location.y == 0.0 && stretch.boxes.get(stretch.firstBySource.get(1)).location.y == 0.0, "space-between and stretch fall back to start")
+  run Testing.expect(stretch.boxes.get(stretch.firstBySource.get(1)).size.height == 20.0, "block content stretch does not stretch child boxes")
+  run Testing.expect(last.boxes.get(last.firstBySource.get(1)).location.y == 80.0, "last baseline outside a shared group falls back to end")
+}
+
+test effect fn blockAlignContentOverflowDistinguishesDefaultSafeUnsafe() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let normal = run alignedChild(Align.Center, OverflowAlignment.Default, Overflow.Visible, 20.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let unsafeResult = run alignedChild(Align.Center, OverflowAlignment.Unsafe, Overflow.Visible, 20.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let scrolling = run alignedChild(Align.Center, OverflowAlignment.Default, Overflow.Scroll, 20.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let safeScroll = run alignedChild(Align.End, OverflowAlignment.Safe, Overflow.Scroll, 20.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let distribution = run alignedChild(Align.SpaceAround, OverflowAlignment.Default, Overflow.Scroll, 20.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(normal.boxes.get(normal.firstBySource.get(1)).location.y == 0.0, "non-scroll block default overflow alignment is safe")
+  run Testing.expect(unsafeResult.boxes.get(unsafeResult.firstBySource.get(1)).location.y == -20.0, "explicit unsafe preserves requested center during overflow")
+  run Testing.expect(scrolling.boxes.get(scrolling.firstBySource.get(1)).location.y == -20.0, "scrollable block-axis default alignment is unsafe")
+  run Testing.expect(safeScroll.boxes.get(safeScroll.firstBySource.get(1)).location.y == 0.0, "explicit safe overrides scroll-container default")
+  run Testing.expect(distribution.boxes.get(distribution.firstBySource.get(1)).location.y == 0.0, "distribution fallback remains safe in a scroll container")
+}
+
+test effect fn blockExplicitAlignContentStopsParentChildMarginCollapse() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut parent = Style.make()
+  parent.height = Dimension.px(100.0)
+  parent.alignContent = Align.End
+  parent.margin.top = Dimension.px(7.0)
+  let a = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut child = sized(10.0, 10.0)
+  child.margin.top = Dimension.px(20.0)
+  child.margin.bottom = Dimension.px(10.0)
+  let b = run tree.append(a, move child) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 7.0, "explicit alignment prevents descendant margin escaping through parent")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 80.0, "alignment subject includes retained top and bottom margins")
+}
+
+test effect fn blockAlignContentIncludesFloatsButNotAbsoluteChildren() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.height = Dimension.px(100.0)
+  root.alignContent = Align.End
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut floated = sized(20.0, 40.0)
+  floated.float = Float.Left
+  let a = run tree.append(rootId, move floated) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut positioned = sized(10.0, 200.0)
+  positioned.position = Position.Absolute
+  positioned.inset.top = Dimension.px(0.0)
+  let b = run tree.append(rootId, move positioned) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 60.0, "float contributes to formatting context alignment subject")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 0.0, "explicitly positioned absolute child is not shifted with content")
+}
+
+test effect fn blockAlignContentEndFollowsVerticalBlockProgression() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.writingMode = WritingMode.VerticalRl
+  root.width = Dimension.px(100.0)
+  root.padding.right = Dimension.px(5.0)
+  root.padding.left = Dimension.px(7.0)
+  root.alignContent = Align.End
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(20.0, 40.0)
+  first.writingMode = WritingMode.VerticalRl
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut second = sized(30.0, 40.0)
+  second.writingMode = WritingMode.VerticalRl
+  let b = run tree.append(rootId, move second) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrangeVertical(&tree, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.x == 37.0, "end alignment shifts right-to-left content toward physical left")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 7.0, "last block ends at physical left content edge")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.width == 112.0, "logical alignment keeps physical padding intact")
+}
+
+// CSS 2.2 §§8.3.1, 9.4.1; Flexbox 1 §3. A flex container's own
+// block margins still collapse with siblings, unlike its item margins.
+test effect fn blockFlexAndReplacedSiblingMarginsKeepSignedExtrema() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.padding.top = Dimension.px(8.0)
+  root.padding.bottom = Dimension.px(8.0)
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut first = sized(80.0, 34.0)
+  first.margin.top = Dimension.px(10.0)
+  first.margin.bottom = Dimension.px(-3.0)
+  let a = run tree.append(rootId, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut flex = sized(33.0, 18.0)
+  flex.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  flex.padding.top = Dimension.px(2.0)
+  flex.padding.bottom = Dimension.px(2.0)
+  flex.margin.top = Dimension.px(4.0)
+  flex.margin.bottom = Dimension.px(-3.0)
+  let b = run tree.append(rootId, move flex) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut replaced = sized(20.0, 10.0)
+  replaced.replaced = true
+  replaced.margin.top = Dimension.px(-5.0)
+  replaced.margin.bottom = Dimension.px(2.0)
+  let c = run tree.append(rootId, move replaced) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 18.0, "padding retains first block top margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 53.0, "positive flex top margin joins preceding negative bottom margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 70.0, "two negative margins use the more negative extremum")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 90.0, "last replaced margin remains inside bottom padding")
+}
+
+// CSS 2.2 §§8.3.1 and 10.6.3; Flexbox 1 §3. Empty flex containers
+// remain formatting-context boundaries, including when their used height is zero.
+test effect fn blockAutoHeightIncludesFlexMarginsAndEmptyFlexBoundary() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut parent = Style.make()
+  parent.padding.top = Dimension.px(12.0)
+  parent.padding.bottom = Dimension.px(12.0)
+  let a = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut flex = sized(40.0, 96.0)
+  flex.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  flex.padding.top = Dimension.px(3.0)
+  flex.padding.bottom = Dimension.px(3.0)
+  flex.margin.top = Dimension.px(11.0)
+  flex.margin.bottom = Dimension.px(11.0)
+  let b = run tree.append(a, move flex) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut empty = Style.make()
+  empty.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  empty.margin.top = Dimension.px(6.0)
+  empty.margin.bottom = Dimension.px(6.0)
+  let c = run tree.append(a, move empty) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 23.0, "flex border top follows parent padding and own margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 136.0, "empty flex top uses collapsed sibling margin")
+  run Testing.expect(!layouts.boxes.get(layouts.firstBySource.get(c.index)).collapsesThrough, "empty flex cannot join its own top and bottom margins")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 154.0, "auto height retains flex bottom margin behind padding")
+}
+
+// CSS 2.2 §8.3.1: an independent formatting context prevents inward
+// collapse, not its own outer margins collapsing with an ordinary parent.
+test effect fn blockParentExportsFlexOuterMarginsWithoutCollapsingItems() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut wrapper = Style.make()
+  wrapper.margin.top = Dimension.px(6.0)
+  wrapper.margin.bottom = Dimension.px(2.0)
+  let a = run tree.append(rootId, move wrapper) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut flex = sized(40.0, 10.0)
+  flex.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  flex.margin.top = Dimension.px(13.0)
+  flex.margin.bottom = Dimension.px(7.0)
+  let b = run tree.append(a, move flex) |> Effect.provideMut<Allocator>(&mut allocator)
+  let c = run tree.append(rootId, sized(10.0, 10.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 13.0, "flex outer top margin escapes through unpadded block")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 0.0, "escaped margin does not also offset flex inside parent")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 10.0, "escaped outer margins do not inflate wrapper")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 30.0, "flex outer bottom margin participates through wrapper")
+}
+
+// CSS 2.2 §§10.6.3 and 8.3.1: overflowing descendants do not enlarge
+// a specified block height or change the following sibling's normal-flow origin.
+test effect fn blockExplicitHeightKeepsNestedPaddingAndFollowingFlow() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut root = Style.make()
+  root.padding.top = Dimension.px(11.0)
+  let mut tree = run Tree.make(move root) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut parent = sized(86.0, 11.0)
+  parent.padding.top = Dimension.px(4.0)
+  parent.padding.bottom = Dimension.px(4.0)
+  parent.margin.top = Dimension.px(7.0)
+  parent.margin.bottom = Dimension.px(-1.0)
+  let a = run tree.append(rootId, move parent) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut child = Style.make()
+  child.padding.top = Dimension.px(7.0)
+  child.padding.bottom = Dimension.px(7.0)
+  child.margin.top = Dimension.px(2.0)
+  child.margin.bottom = Dimension.px(5.0)
+  let b = run tree.append(a, move child) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut sibling = sized(70.0, 51.0)
+  sibling.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  sibling.margin.top = Dimension.px(2.0)
+  let c = run tree.append(rootId, move sibling) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 249.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 18.0, "specified-height parent follows root padding and margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 19.0, "specified content height plus padding controls border height")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 6.0, "nested child retains parent padding and own top margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.height == 14.0, "empty auto-height child retains its padding")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 38.0, "following sibling uses parent border bottom, not descendant overflow")
+}
+
+// CSS 2.2 §9.5, https://www.w3.org/TR/CSS22/visuren.html#bfc-next-to-float:
+// block-level replaced border boxes must avoid floats in their BFC.
+test effect fn blockReplacedChildrenAvoidSiblingFloatMarginBoxes() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut floated = sized(50.0, 25.0)
+  floated.float = Float.Left
+  floated.margin.right = Dimension.px(10.0)
+  floated.margin.bottom = Dimension.px(5.0)
+  let a = run tree.append(rootId, move floated) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut narrow = sized(100.0, 10.0)
+  narrow.replaced = true
+  let b = run tree.append(rootId, move narrow) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut wide = sized(160.0, 10.0)
+  wide.replaced = true
+  let c = run tree.append(rootId, move wide) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 0.0, "float establishes first available exclusion band")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 60.0, "replaced border box avoids float including its right margin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 0.0, "fitting replaced element remains beside the float")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.x == 0.0, "wide replaced element returns to containing block edge")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 30.0, "nonfitting replaced element clears float bottom margin edge")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 40.0, "auto height includes the relocated in-flow replaced element")
+}
+
+// CSS 2.2 §§9.4.1, 9.5 and 9.5.2: ordinary descendants remain in
+// their ancestor's BFC; padding changes coordinates, not exclusion ownership.
+test effect fn blockInheritedFloatsReachNestedFlowRootsAndClearance() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut floated = sized(60.0, 40.0)
+  floated.float = Float.Left
+  let a = run tree.append(rootId, move floated) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut wrapper = Style.make()
+  wrapper.padding.left = Dimension.px(10.0)
+  wrapper.padding.top = Dimension.px(5.0)
+  let b = run tree.append(rootId, move wrapper) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut flowRoot = Style.make()
+  flowRoot.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  flowRoot.height = Dimension.px(10.0)
+  let c = run tree.append(b, move flowRoot) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut cleared = sized(20.0, 10.0)
+  cleared.clear = Clear.Both
+  cleared.margin.top = Dimension.px(3.0)
+  let d = run tree.append(b, move cleared) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 40.0, "ancestor float supplies the shared exclusion")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.x == 0.0, "ordinary block itself does not avoid ancestor float")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.x == 60.0, "nested flow-root avoids float in root coordinates")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 5.0, "nested flow-root stays at padded content top")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).size.width == 140.0, "nested flow-root uses remaining shared float band")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(d.index)).location.y == 40.0, "nested clear reaches the ancestor float bottom")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.height == 50.0, "ordinary auto height includes its cleared in-flow child")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 50.0, "root contains resulting in-flow height")
+}
+
+// CSS 2.2 §9.5.1 source-order rules and §10.6.7 include floated
+// descendants sharing the BFC even when their ordinary parent excludes them.
+test effect fn blockNestedFloatsAffectLaterSiblingsAndRootAutoHeight() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut wrapper = Style.make()
+  wrapper.margin.left = Dimension.px(20.0)
+  wrapper.padding.top = Dimension.px(7.0)
+  let a = run tree.append(rootId, move wrapper) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut nested = sized(40.0, 30.0)
+  nested.float = Float.Left
+  nested.margin.bottom = Dimension.px(5.0)
+  let b = run tree.append(a, move nested) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut sibling = sized(50.0, 20.0)
+  sibling.float = Float.Left
+  let c = run tree.append(rootId, move sibling) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 7.0, "ordinary parent excludes descendant float from its auto height")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 7.0, "nested float starts at its containing block content top")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.x == 60.0, "later sibling float packs beside nested float in same BFC")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 7.0, "later float respects nested earlier float source-order floor")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 42.0, "BFC root contains descendant float bottom margin edge")
+}
+
+// CSS 2.2 §§8.3.1 and 9.5.2: discovery of collapsed margins changes
+// the shared-context origin before clearance is committed. Retries must not
+// retain speculative floats or treat them as earlier source siblings.
+test effect fn blockCollapsedOriginReplaysInheritedClearanceOnceCommitted() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut floated = sized(60.0, 50.0)
+  floated.float = Float.Left
+  let a = run tree.append(rootId, move floated) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut wrapper = Style.make()
+  wrapper.margin.top = Dimension.px(5.0)
+  let b = run tree.append(rootId, move wrapper) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut first = sized(10.0, 10.0)
+  first.margin.top = Dimension.px(20.0)
+  let c = run tree.append(b, move first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut clear = sized(10.0, 10.0)
+  clear.clear = Clear.Both
+  let d = run tree.append(b, move clear) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut nested = sized(20.0, 15.0)
+  nested.float = Float.Left
+  let e = run tree.append(b, move nested) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).location.y == 0.0, "earlier float origin is unaffected by descendant retries")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).location.y == 20.0, "first descendant margin moves ordinary parent origin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 0.0, "first margin is collapsed outside parent")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(d.index)).location.y == 30.0, "clearance is recomputed against final parent origin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.height == 40.0, "parent height reflects final clearance rather than trial origin")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(e.index)).location.x == 0.0, "speculative float is not retained as an exclusion")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(e.index)).location.y == 40.0, "committed nested float follows cleared block")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 75.0, "root contains only the committed descendant geometry")
+}
+
+// CSS 2.2 §§9.4.1 and 10.6.7: independent contexts isolate their floats,
+// including floats overflowing a specified block height.
+test effect fn blockIndependentContextDoesNotLeakOverflowingFloats() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut flowRoot = sized(100.0, 10.0)
+  flowRoot.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  let a = run tree.append(rootId, move flowRoot) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut nested = sized(40.0, 60.0)
+  nested.float = Float.Left
+  let b = run tree.append(a, move nested) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut sibling = sized(20.0, 5.0)
+  sibling.float = Float.Left
+  let c = run tree.append(rootId, move sibling) |> Effect.provideMut<Allocator>(&mut allocator)
+  let layouts = run arrange(&tree, 200.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(a.index)).size.height == 10.0, "specified height is not enlarged by internal float overflow")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.height == 60.0, "independent context still lays out overflowing float")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.x == 0.0, "outer float does not see independent descendant exclusion")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(c.index)).location.y == 10.0, "outer float starts after independent context border box")
+  run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.height == 15.0, "root contains only floats participating in its own BFC")
+}
+
+// Flexbox 1 §4 and Display 3 §2.7: a flex item's float is inapplicable,
+// and blockification is distinct from its independent formatting context.
+test effect fn blockifiedItemIgnoresFloatButPreservesExplicitShrinkRequest() -> () ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut item = Style.make()
+  item.display = Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.FlowRoot }
+  item.float = Float.Left
+  let mut tree = run Tree.make(move item) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootId = tree.root()
+  let mut child = sized(30.0, 10.0)
+  child.margin.top = Dimension.px(10.0)
+  let childId = run tree.append(rootId, move child) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut layouts = LayoutTree.make()
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootBox = constructed.firstBySource.get(rootId.index)
+  run layouts.prepare(constructed.boxes.length()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut measure = FixedMeasure {}
+  let mut input = Input.make(OptionalSize.none())
+  input.blockify = true
+  input.blockRoot = true
+  input.availableWidth = AvailableSpace.definite(200.0)
+  let mut pass = run LayoutPass.make(layouts.boxes.asMutSlice(), &mut layouts.fragments, constructed.sources) |> Effect.provideMut<Allocator>(&mut allocator)
+  let filled = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(filled.size.width == 200.0, "inapplicable float does not force item shrink-to-fit")
+  run Testing.expect(pass.boxes[constructed.firstBySource.get(childId.index)].location.y == 10.0, "blockified flow-root still has independent flex-item contents")
+  input.shrinkToFit = true
+  pass.fragments.rollback(0)
+  let shrunk = run layoutNode(&constructed, &mut pass, &mut measure, rootBox, input) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop pass
+  layouts.fragments.resolveLocations()
+  layouts.adopt(move constructed)
+  run Testing.expect(shrunk.size.width == 30.0, "explicit hypothetical cross-size shrink-to-fit request remains effective")
+}

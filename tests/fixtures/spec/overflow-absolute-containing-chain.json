@@ -1,0 +1,79 @@
+{
+  "name": "overflow-absolute-containing-chain",
+  "kind": "spec",
+  "features": [
+    "scrollable-overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollable-overflow-calculation",
+    "https://drafts.csswg.org/css-overflow-3/#scroll-origin",
+    "https://drafts.csswg.org/css-position-3/#relative-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "position": "relative"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 50,
+          "height": 50,
+          "marginLeft": 20,
+          "marginTop": 10,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 20,
+          "height": 20,
+          "position": "absolute",
+          "insetLeft": 250,
+          "insetTop": 180
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 270,
+        "scrollableOverflowHeight": 200
+      },
+      {
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 50,
+        "scrollableOverflowHeight": 50
+      },
+      {
+        "x": 230,
+        "y": 170,
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 20,
+        "scrollableOverflowHeight": 20
+      }
+    ],
+    "viewportOverflow": {
+      "x": 0,
+      "y": 0,
+      "width": 270,
+      "height": 200
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "name": "inline-cloned-decoration-fit",
+  "kind": "spec",
+  "features": [
+    "inline-fragments",
+    "box-decoration-break"
+  ],
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visuren.html#inline-formatting",
+    "https://drafts.csswg.org/css-break-3/#valdef-box-decoration-break-clone"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 90
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "padding": {
+            "left": 5,
+            "right": 7,
+            "top": 2,
+            "bottom": 3
+          },
+          "border": 1,
+          "boxDecorationBreak": "clone"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "height": 40
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 7,
+            "width": 54,
+            "height": 7
+          },
+          {
+            "x": 0,
+            "y": 17,
+            "width": 54,
+            "height": 7
+          },
+          {
+            "x": 0,
+            "y": 27,
+            "width": 54,
+            "height": 7
+          },
+          {
+            "x": 0,
+            "y": 37,
+            "width": 54,
+            "height": 7
+          }
+        ]
+      },
+      {
+        "x": 6,
+        "y": -7
+      },
+      {
+        "x": 6,
+        "y": 3
+      },
+      {
+        "x": 6,
+        "y": 13
+      },
+      {
+        "x": 6,
+        "y": 23
+      }
+    ]
+  }
+}

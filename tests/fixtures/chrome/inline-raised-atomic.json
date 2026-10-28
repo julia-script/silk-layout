@@ -1,0 +1,12 @@
+{
+  "name": "inline-raised-atomic",
+  "kind": "chrome",
+  "features": ["inline-fragments", "vertical-align"],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"width": 100}},
+      {"parent": 0, "style": {"display": "inline-block", "width": 20, "height": 10, "verticalAlign": 5}}
+    ]
+  }
+}

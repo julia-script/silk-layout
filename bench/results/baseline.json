@@ -1,0 +1,48 @@
+{
+  "method": "native adapter wall time; one warmup excluded; median",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "silk": "0.1.0-dev.20+10a8c67813a1",
+  "runs": 7,
+  "workloads": {
+    "block-1000": {
+      "median_ms": 163.200583,
+      "nodes": 1001,
+      "root": [
+        600,
+        10000
+      ]
+    },
+    "flex-grow-1000": {
+      "median_ms": 196.989458,
+      "nodes": 1001,
+      "root": [
+        1000,
+        20
+      ]
+    },
+    "flex-wrap-1000": {
+      "median_ms": 209.84875,
+      "nodes": 1001,
+      "root": [
+        500,
+        630
+      ]
+    },
+    "nested-100": {
+      "median_ms": 36.383291,
+      "nodes": 101,
+      "root": [
+        500,
+        200
+      ]
+    },
+    "measured-500": {
+      "median_ms": 101.186667,
+      "nodes": 501,
+      "root": [
+        1000,
+        840
+      ]
+    }
+  }
+}

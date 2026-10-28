@@ -1,0 +1,61 @@
+{
+  "name": "inline-opposite-synthetic-baselines",
+  "kind": "spec",
+  "features": [
+    "inline-fragments",
+    "writing-mode",
+    "baselines"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 50,
+          "height": 100,
+          "writingMode": "sideways-rl"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 20,
+          "writingMode": "sideways-lr"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 4,
+          "height": 20,
+          "writingMode": "sideways-rl"
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#baseline-export",
+    "https://drafts.csswg.org/css-inline-3/#baseline-synthesis-box"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "firstBaseline": 4,
+        "lastBaseline": 4
+      },
+      {
+        "x": 36
+      },
+      {
+        "x": 46
+      }
+    ]
+  }
+}

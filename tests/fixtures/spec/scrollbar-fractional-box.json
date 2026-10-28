@@ -1,0 +1,74 @@
+{
+  "name": "scrollbar-fractional-box",
+  "kind": "spec",
+  "features": [
+    "scrollbars",
+    "fractional-geometry"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollbar-sizing"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "scrollbars": {
+      "auto": {
+        "horizontal": 12,
+        "vertical": 15,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      },
+      "thin": {
+        "horizontal": 6,
+        "vertical": 8,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100.5,
+          "height": 100.5,
+          "overflowX": "scroll",
+          "overflowY": "scroll"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100.5,
+        "height": 100.5,
+        "contentWidth": 85.5,
+        "contentHeight": 88.5,
+        "scrollbarGutterTop": 0,
+        "scrollbarGutterRight": 15,
+        "scrollbarGutterBottom": 12,
+        "scrollbarGutterLeft": 0,
+        "horizontalScrollbar": true,
+        "verticalScrollbar": true
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 85.5,
+        "height": 10
+      }
+    ]
+  }
+}

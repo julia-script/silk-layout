@@ -1,0 +1,42 @@
+{
+  "name": "border-box",
+  "kind": "spec",
+  "features": [
+    "box-sizing",
+    "block"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 100,
+          "height": 60,
+          "padding": 10,
+          "border": 2,
+          "boxSizing": "border-box"
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-sizing-3/#box-sizing"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 60,
+        "contentWidth": 76,
+        "contentHeight": 36
+      }
+    ]
+  }
+}

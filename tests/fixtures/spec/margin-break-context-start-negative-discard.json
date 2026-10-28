@@ -1,0 +1,77 @@
+{
+  "name": "margin-break-context-start-negative-discard",
+  "kind": "spec",
+  "spec": [
+    "https://drafts.csswg.org/css-break-4/#break-margins"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": { "width": 100 }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "marginTop": -20,
+          "marginBreak": "discard"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 10,
+          "marginTop": 12,
+          "marginBreak": "keep"
+        }
+      }
+    ],
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 40
+        }
+      ],
+      "repeatStep": {
+        "x": 100,
+        "y": 0
+      }
+    }
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [{ "x": 0, "y": 0, "width": 100, "height": 22 }]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 12,
+            "width": 100,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 12,
+            "width": 100,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

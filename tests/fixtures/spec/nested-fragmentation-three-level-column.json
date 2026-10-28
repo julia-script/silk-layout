@@ -1,0 +1,252 @@
+{
+  "name": "nested-fragmentation-three-level-column",
+  "kind": "spec",
+  "features": [
+    "fragmentation",
+    "nested-contexts",
+    "break-propagation"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-break-4/#forced-breaks"
+  ],
+  "input": {
+    "viewport": {
+      "width": 300,
+      "height": 200
+    },
+    "fragmentation": {
+      "kind": "region",
+      "contexts": [
+        "page",
+        "column"
+      ],
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 50,
+          "y": 0,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 100,
+          "y": 0,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 150,
+          "y": 0,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 0,
+          "y": 100,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 50,
+          "y": 100,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 100,
+          "y": 100,
+          "width": 40,
+          "height": 30
+        },
+        {
+          "x": 150,
+          "y": 100,
+          "width": 40,
+          "height": 30
+        }
+      ],
+      "ancestors": [
+        [
+          {
+            "index": 0,
+            "x": 0,
+            "y": 0,
+            "width": 200,
+            "height": 30
+          },
+          {
+            "index": 0,
+            "x": 0,
+            "y": 0,
+            "width": 90,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "x": 0,
+            "y": 0,
+            "width": 200,
+            "height": 30
+          },
+          {
+            "index": 0,
+            "x": 0,
+            "y": 0,
+            "width": 90,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "x": 0,
+            "y": 0,
+            "width": 200,
+            "height": 30
+          },
+          {
+            "index": 1,
+            "x": 100,
+            "y": 0,
+            "width": 90,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "x": 0,
+            "y": 0,
+            "width": 200,
+            "height": 30
+          },
+          {
+            "index": 1,
+            "x": 100,
+            "y": 0,
+            "width": 90,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 1,
+            "x": 0,
+            "y": 100,
+            "width": 200,
+            "height": 30
+          },
+          {
+            "index": 2,
+            "x": 0,
+            "y": 100,
+            "width": 90,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 1,
+            "x": 0,
+            "y": 100,
+            "width": 200,
+            "height": 30
+          },
+          {
+            "index": 2,
+            "x": 0,
+            "y": 100,
+            "width": 90,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 1,
+            "x": 0,
+            "y": 100,
+            "width": 200,
+            "height": 30
+          },
+          {
+            "index": 3,
+            "x": 100,
+            "y": 100,
+            "width": 90,
+            "height": 30
+          }
+        ],
+        [
+          {
+            "index": 1,
+            "x": 0,
+            "y": 100,
+            "width": 200,
+            "height": 30
+          },
+          {
+            "index": 3,
+            "x": 100,
+            "y": 100,
+            "width": 90,
+            "height": 30
+          }
+        ]
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 10,
+          "breakAfter": "column"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 10,
+          "breakBefore": "auto"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 40,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 100,
+            "y": 0,
+            "width": 40,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

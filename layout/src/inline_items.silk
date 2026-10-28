@@ -1,0 +1,44 @@
+import silk.ownership { Copy }
+import geometry { FontMetrics, ResolvedEdges }
+import text { TextCursor }
+import style { TabSize }
+import silk.f64
+
+pub struct FontBox {
+  pub metrics: FontMetrics,
+  pub baseline: f64, pub height: f64, pub lineHeight: f64,
+  pub before: f64, pub after: f64,
+}
+impl Copy for FontBox {}
+
+pub struct Scope {
+  pub id: usize, pub parent: usize, pub group: usize,
+  pub font: FontBox, pub offset: f64,
+  pub inset: ResolvedEdges, pub border: ResolvedEdges, pub margin: ResolvedEdges,
+  pub phantomClone: bool,
+}
+impl Copy for Scope {}
+
+pub enum ItemKind { Open, Close, Atomic, Float, Anchor, Text }
+pub struct Item {
+  pub kind: ItemKind, pub level: u8, pub id: usize, pub scope: usize, pub group: usize, pub leaf: usize,
+  pub advance: f64, pub before: f64, pub after: f64, pub offset: f64,
+  pub lineLeftSpacing: f64,
+  pub start: TextCursor,
+}
+impl Copy for Item {}
+
+pub fn tabAdvance(size: TabSize, spaceAdvance: f64, zeroAdvance: f64, position: f64) -> f64 {
+  let mut spacing = 0.0
+  match size {
+    TabSize.Number { value } => { spacing = value * spaceAdvance }
+    TabSize.Length { value } => { spacing = value }
+  }
+  if spacing == 0.0 { return 0.0 }
+  let mut advance = f64.ceil(position / spacing) * spacing - position
+  if advance <= 0.0 { advance = advance + spacing }
+  // CSS Text uses the subsequent stop when the next is less than half a ch
+  // away, not an arbitrary integer number of spaces from the current glyph.
+  if advance < zeroAdvance * 0.5 { advance = advance + spacing }
+  return advance
+}

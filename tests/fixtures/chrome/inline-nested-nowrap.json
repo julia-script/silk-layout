@@ -1,0 +1,52 @@
+{
+  "name": "inline-nested-nowrap",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "textWrap": "nowrap"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "display": "inline-block",
+          "width": 40,
+          "height": 10
+        }
+      }
+    ]
+  }
+}

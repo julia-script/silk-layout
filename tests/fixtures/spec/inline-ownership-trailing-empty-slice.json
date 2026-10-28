@@ -1,0 +1,29 @@
+{
+  "name": "inline-ownership-trailing-empty-slice",
+  "kind": "spec",
+  "features": ["inline-fragments", "bidi-ordering", "box-decoration-break"],
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#line-breaking-box-edges",
+    "https://www.w3.org/TR/CSS22/visuren.html#inline-formatting",
+    "https://drafts.csswg.org/css-break-3/#valdef-box-decoration-break-slice"
+  ],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"width": 25}},
+      {"parent": 0, "style": {"display": "inline", "unicodeBidi": "embed", "padding": {"left": 3, "right": 4}}},
+      {"parent": 1, "style": {"display": "inline-block", "width": 20, "height": 10}},
+      {"parent": 1, "style": {"display": "inline"}},
+      {"parent": 0, "style": {"display": "inline-block", "width": 20, "height": 10}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"height": 20},
+      {"rects": [{"x": 0, "y": 10, "width": 27, "height": 0}]},
+      {"rects": [{"x": 3, "y": 0, "width": 20, "height": 10}]},
+      {"rects": [{"x": 23, "y": 10, "width": 0, "height": 0}]},
+      {"rects": [{"x": 0, "y": 10, "width": 20, "height": 10}]}
+    ]
+  }
+}

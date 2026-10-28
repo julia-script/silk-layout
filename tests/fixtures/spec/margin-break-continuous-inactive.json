@@ -1,0 +1,74 @@
+{
+  "name": "margin-break-continuous-inactive",
+  "kind": "spec",
+  "spec": [
+    "https://drafts.csswg.org/css-break-4/#break-margins"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "paddingTop": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 10,
+          "marginTop": 12,
+          "marginBottom": 7,
+          "marginBreak": "discard"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 10,
+          "marginTop": 5,
+          "marginBottom": 4,
+          "marginBreak": "keep"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 44
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 13,
+            "width": 100,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 30,
+            "width": 100,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

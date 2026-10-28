@@ -1,0 +1,45 @@
+{
+  "name": "flex-order",
+  "kind": "chrome",
+  "features": [
+    "flex",
+    "order"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 150,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "order": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "order": -1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "order": 2
+        }
+      }
+    ]
+  }
+}

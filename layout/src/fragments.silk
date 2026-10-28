@@ -1,0 +1,198 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import geometry { Point, Size, Rect, ResolvedEdges, BaselineSet }
+import tree { NO_NODE }
+
+pub enum FragmentKind { Box, Inline, Text, Line }
+pub struct FragmentId { pub index: usize }
+impl Copy for FragmentId {}
+
+pub enum TextFragmentKind { Glyphs, Tab, SegmentBreak }
+pub struct TextFragment {
+  pub sourceStart: usize, pub sourceEnd: usize,
+  pub fontKey: usize, pub shapeKey: usize, pub bidiLevel: u8,
+  pub kind: TextFragmentKind,
+}
+impl Copy for TextFragment {}
+
+pub struct Fragment {
+  pub box: usize, pub source: usize, pub kind: FragmentKind,
+  pub fragmentainer: usize,
+  pub parent: usize, pub firstChild: usize, pub lastChild: usize,
+  pub previousSibling: usize, pub nextSibling: usize,
+  pub previousForBox: usize, pub nextForBox: usize,
+  // Normal physical geometry; rectangles are relative to the border origin.
+  pub location: Point, pub size: Size,
+  pub contentRect: Rect, pub paddingRect: Rect,
+  pub layoutBounds: Rect, pub scrollableOverflow: Rect,
+  pub visualOffset: Point,
+  pub worldLocation: Point,
+  // Logical block offsets in the owning box's writing mode.
+  pub firstBaselines: BaselineSet, pub lastBaselines: BaselineSet,
+  pub hasFirstBaseline: bool, pub hasLastBaseline: bool,
+  pub usedMargin: ResolvedEdges,
+  // Physical top=1, right=2, bottom=4, left=8.
+  pub decorationEdges: u8,
+  pub first: bool, pub last: bool,
+  pub phantom: bool, pub repeated: bool, pub overflowOnly: bool,
+  // No backgrounds, borders, shadows, or own scrollable overflow. Inline
+  // interruptions retain source/containing geometry; anonymous Line anchors
+  // only retain ancestry and pass through descendant overflow.
+  pub nonpainting: bool,
+  // An ancestry/containing-block carrier, not a generated source rectangle.
+  pub positioningShell: bool,
+  pub textData: usize,
+}
+impl Copy for Fragment {}
+impl Fragment {
+  pub fn make(box: usize, source: usize, kind: FragmentKind) -> Fragment {
+    return Fragment {
+      box: box, source: source, kind: kind, fragmentainer: 0,
+      parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE,
+      previousSibling: NO_NODE, nextSibling: NO_NODE,
+      previousForBox: NO_NODE, nextForBox: NO_NODE,
+      location: Point { x: 0.0, y: 0.0 }, size: Size.zero(),
+      contentRect: Rect.zero(), paddingRect: Rect.zero(),
+      layoutBounds: Rect.zero(), scrollableOverflow: Rect.zero(),
+      visualOffset: Point { x: 0.0, y: 0.0 },
+      worldLocation: Point { x: 0.0, y: 0.0 },
+      firstBaselines: BaselineSet.zero(), lastBaselines: BaselineSet.zero(),
+      hasFirstBaseline: false, hasLastBaseline: false,
+      usedMargin: ResolvedEdges.zero(), decorationEdges: 15,
+      first: true, last: true, phantom: false, repeated: false, overflowOnly: false,
+      nonpainting: false, positioningShell: false,
+      textData: NO_NODE,
+    }
+  }
+}
+
+pub struct FragmentArena {
+  pub values: List<Fragment>,
+  pub texts: List<TextFragment>,
+  firstByBox: List<usize>, lastByBox: List<usize>,
+}
+impl FragmentArena {
+  pub fn make() -> FragmentArena {
+    return FragmentArena {
+      values: List<Fragment>.make(),
+      texts: List<TextFragment>.make(),
+      firstByBox: List<usize>.make(), lastByBox: List<usize>.make(),
+    }
+  }
+
+  // A full reset invalidates every fragment ID and checkpoint, retaining capacity.
+  pub effect fn prepare(self: &mut Self, boxCount: usize) ! OutOfMemoryError ? &mut Allocator {
+    self.values.clear()
+    self.texts.clear()
+    self.firstByBox.clear()
+    self.lastByBox.clear()
+    run self.firstByBox.reserveExact(boxCount)
+    run self.lastByBox.reserveExact(boxCount)
+    let mut box: usize = 0
+    while box < boxCount {
+      run self.firstByBox.append(NO_NODE)
+      run self.lastByBox.append(NO_NODE)
+      box = box + 1
+    }
+  }
+
+  // The parent must already exist; box must be prepared or NO_NODE.
+  // Arena-owned links replace incoming links. Geometry and content remain authored values.
+  pub effect fn append(self: &mut Self, fragment: Fragment) -> FragmentId ! OutOfMemoryError ? &mut Allocator {
+    let index = self.values.length()
+    let mut value = move fragment
+    let parent = value.parent
+    let box = value.box
+    let mut previousSibling = NO_NODE
+    let mut previousForBox = NO_NODE
+    if parent != NO_NODE { previousSibling = self.values.asSlice()[parent].lastChild }
+    if box != NO_NODE { previousForBox = self.lastByBox.get(box) }
+    value.firstChild = NO_NODE
+    value.lastChild = NO_NODE
+    value.previousSibling = previousSibling
+    value.nextSibling = NO_NODE
+    value.previousForBox = previousForBox
+    value.nextForBox = NO_NODE
+    // Link only after allocation succeeds, leaving the arena unchanged on failure.
+    run self.values.append(move value)
+    let values = self.values.asMutSlice()
+    if parent != NO_NODE {
+      if previousSibling == NO_NODE { values[parent].firstChild = index }
+      else { values[previousSibling].nextSibling = index }
+      values[parent].lastChild = index
+    }
+    if box != NO_NODE {
+      if previousForBox == NO_NODE { self.firstByBox.set(box, index) }
+      else { values[previousForBox].nextForBox = index }
+      self.lastByBox.set(box, index)
+    }
+    return FragmentId { index: index }
+  }
+
+  pub effect fn appendText(self: &mut Self, fragment: Fragment, text: TextFragment) -> FragmentId ! OutOfMemoryError ? &mut Allocator {
+    // Reserve both arenas before publishing either half of the association.
+    run self.values.reserve(1)
+    run self.texts.reserve(1)
+    let mut value = fragment
+    value.textData = self.texts.length()
+    run self.texts.append(text)
+    return run self.append(value)
+  }
+
+  pub fn checkpoint(self: &Self) -> usize { return self.values.length() }
+
+  // Undo appends in reverse order, including links held by surviving fragments.
+  // This does not undo caller edits to geometry of fragments before the checkpoint.
+  pub fn rollback(self: &mut Self, checkpoint: usize) {
+    let mut index = self.values.length()
+    while index > checkpoint {
+      index = index - 1
+      let text = self.values.asSlice()[index].textData
+      if text != NO_NODE { self.texts.truncate(text) }
+      let values = self.values.asMutSlice()
+      let parent = values[index].parent
+      let previousSibling = values[index].previousSibling
+      let box = values[index].box
+      let previousForBox = values[index].previousForBox
+      if parent != NO_NODE {
+        values[parent].lastChild = previousSibling
+        if previousSibling == NO_NODE { values[parent].firstChild = NO_NODE }
+        else { values[previousSibling].nextSibling = NO_NODE }
+      }
+      if box != NO_NODE {
+        self.lastByBox.set(box, previousForBox)
+        if previousForBox == NO_NODE { self.firstByBox.set(box, NO_NODE) }
+        else { values[previousForBox].nextForBox = NO_NODE }
+      }
+    }
+    self.values.truncate(checkpoint)
+  }
+  // Parents precede children in the arena. Resolve final visual coordinates
+  // once, rather than repeatedly walking ancestors for source-bound queries.
+  pub fn resolveLocations(self: &mut Self) {
+    let values = self.values.asMutSlice()
+    let mut index: usize = 0
+    while index < values.length {
+      // Text ownership is finalized from accepted links. Speculative emission
+      // must not clear a surviving earlier fragment's last flag.
+      if values[index].kind == FragmentKind.Text && values[index].box != NO_NODE {
+        values[index].first = values[index].previousForBox == NO_NODE
+        values[index].last = values[index].nextForBox == NO_NODE
+      }
+      let parent = values[index].parent
+      let mut x = values[index].location.x + values[index].visualOffset.x
+      let mut y = values[index].location.y + values[index].visualOffset.y
+      if parent != NO_NODE {
+        x = x + values[parent].worldLocation.x
+        y = y + values[parent].worldLocation.y
+      }
+      values[index].worldLocation = Point { x: x, y: y }
+      index = index + 1
+    }
+  }
+
+  pub fn first(self: &Self, box: usize) -> usize { return self.firstByBox.get(box) }
+  pub fn last(self: &Self, box: usize) -> usize { return self.lastByBox.get(box) }
+  pub fn get(self: &Self, id: FragmentId) -> &Fragment { return &self.values.asSlice()[id.index] }
+}

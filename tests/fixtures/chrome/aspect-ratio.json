@@ -1,0 +1,30 @@
+{
+  "name": "aspect-ratio",
+  "kind": "chrome",
+  "features": [
+    "block",
+    "aspect-ratio"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 80,
+          "aspectRatio": 2
+        }
+      }
+    ]
+  }
+}

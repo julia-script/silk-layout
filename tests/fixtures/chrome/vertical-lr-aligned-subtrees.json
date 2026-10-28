@@ -1,0 +1,68 @@
+{
+  "name": "vertical-lr-aligned-subtrees",
+  "kind": "chrome",
+  "features": [
+    "inline-fragments",
+    "vertical-align",
+    "writing-mode"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 50,
+          "height": 100,
+          "writingMode": "vertical-lr"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 20,
+          "writingMode": "vertical-lr"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "writingMode": "vertical-lr",
+          "verticalAlign": "top"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "display": "inline-block",
+          "width": 4,
+          "height": 20,
+          "writingMode": "vertical-lr"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "writingMode": "vertical-lr",
+          "verticalAlign": "bottom"
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "display": "inline-block",
+          "width": 2,
+          "height": 20,
+          "writingMode": "vertical-lr"
+        }
+      }
+    ]
+  }
+}

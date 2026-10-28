@@ -1,0 +1,310 @@
+{
+  "format": 1,
+  "specs": {
+    "css-2025": {
+      "url": "https://drafts.csswg.org/css-2025/",
+      "resolved": "https://drafts.csswg.org/css-2025/",
+      "sha256": "32ba1cbc62acc22e0d5fadb9858644e63d0abcef1fc4253dac7f32c373265d4e"
+    },
+    "css-align-3": {
+      "url": "https://drafts.csswg.org/css-align-3/",
+      "resolved": "https://drafts.csswg.org/css-align-3/",
+      "sha256": "5b6c6ae1704635520508b63c9df107e9dd6e414d5783ac0851523c22624755b2"
+    },
+    "css-backgrounds-3": {
+      "url": "https://drafts.csswg.org/css-backgrounds-3/",
+      "resolved": "https://drafts.csswg.org/css-backgrounds-3/",
+      "sha256": "ed5b3786bbc6b11b23e7c17578e9e3eff5c5e9facbd388ae008ffc82a0dbaae0"
+    },
+    "css-box-3": {
+      "url": "https://drafts.csswg.org/css-box-3/",
+      "resolved": "https://drafts.csswg.org/css-box-3/",
+      "sha256": "0b03cccf0bc123147c114d27d09e715650f6bf42c6841b14444b79e11e0a80ed"
+    },
+    "css-break-3": {
+      "url": "https://drafts.csswg.org/css-break-3/",
+      "resolved": "https://drafts.csswg.org/css-break-3/",
+      "sha256": "bb62fd81d00da5d21088f401223d0d13383ff8925459b53d4024a9239c040335"
+    },
+    "css-break-4": {
+      "url": "https://drafts.csswg.org/css-break-4/",
+      "resolved": "https://drafts.csswg.org/css-break-4/",
+      "sha256": "dcf2a4ca02a2e9a7a03ea67326d7278dc6837ece5e636acbc9965dab86633175"
+    },
+    "css-cascade-4": {
+      "url": "https://drafts.csswg.org/css-cascade-4/",
+      "resolved": "https://drafts.csswg.org/css-cascade-4/",
+      "sha256": "1d7120c7fff7f8276c8bef576e467d48812a406283467607f3b59d9322296fc4"
+    },
+    "css-contain-2": {
+      "url": "https://drafts.csswg.org/css-contain-2/",
+      "resolved": "https://drafts.csswg.org/css-contain-2/",
+      "sha256": "4a6241a5883cb8927a1c13411182e822c2f48302822ffac2e2a566579697f0cc"
+    },
+    "css-display-3": {
+      "url": "https://drafts.csswg.org/css-display-3/",
+      "resolved": "https://drafts.csswg.org/css-display-3/",
+      "sha256": "21a41cd83ba9546c1f93b43065ff0837f4bbf445488130e4503decc7ed71724f"
+    },
+    "css-display-4": {
+      "url": "https://drafts.csswg.org/css-display-4/",
+      "resolved": "https://drafts.csswg.org/css-display-4/",
+      "sha256": "2035110f66131eacb21fd22db0ec33c789acc77355f7134a94d41898eebed3bc"
+    },
+    "css-flexbox-1": {
+      "url": "https://drafts.csswg.org/css-flexbox-1/",
+      "resolved": "https://drafts.csswg.org/css-flexbox-1/",
+      "sha256": "962b4b78bbee77a925aab57235925a3c2e2e508e2e695a09ef85b137311147b8"
+    },
+    "css-fonts-4": {
+      "url": "https://drafts.csswg.org/css-fonts-4/",
+      "resolved": "https://drafts.csswg.org/css-fonts-4/",
+      "sha256": "6962c3c79c19b481e3f5148c690dd804663916948ddeec78f66ead88faed2ad9"
+    },
+    "css-gaps-1": {
+      "url": "https://drafts.csswg.org/css-gaps-1/",
+      "resolved": "https://drafts.csswg.org/css-gaps-1/",
+      "sha256": "614d12c783d247486a65e1a12b632444c9b052a60370430c4c4b6187df790ccc"
+    },
+    "css-images-3": {
+      "url": "https://drafts.csswg.org/css-images-3/",
+      "resolved": "https://drafts.csswg.org/css-images-3/",
+      "sha256": "8b80455110e5abff8aef9065db21eb2be1e99ae30565c4c28b4482d6b0748a0b"
+    },
+    "css-inline-3": {
+      "url": "https://drafts.csswg.org/css-inline-3/",
+      "resolved": "https://drafts.csswg.org/css-inline-3/",
+      "sha256": "49342509adcefad62861a7c76b6e50247227b67ac0b84f55275b62e9070547ff"
+    },
+    "css-logical-1": {
+      "url": "https://drafts.csswg.org/css-logical-1/",
+      "resolved": "https://drafts.csswg.org/css-logical-1/",
+      "sha256": "9147d5bf497f309990ba9832a5a0ca00e17ef709a9a99e6bc273aa302a262b8f"
+    },
+    "css-multicol-1": {
+      "url": "https://drafts.csswg.org/css-multicol-1/",
+      "resolved": "https://drafts.csswg.org/css-multicol-1/",
+      "sha256": "2ab3723c19e0074bcc70d017a62e63ee30cdefe2965b7f76e00605bfd9195500"
+    },
+    "css-overflow-3": {
+      "url": "https://drafts.csswg.org/css-overflow-3/",
+      "resolved": "https://drafts.csswg.org/css-overflow-3/",
+      "sha256": "c7efcd1cbfe5b4a9fd79bbde633f55b21bd1057de20459e7a41d7375b5c7dd2c"
+    },
+    "css-overflow-4": {
+      "url": "https://drafts.csswg.org/css-overflow-4/",
+      "resolved": "https://drafts.csswg.org/css-overflow-4/",
+      "sha256": "1a8f55c87bec722371660b5015b92b0de01157c81e8dd7941447f5b63f0d448f"
+    },
+    "css-page-3": {
+      "url": "https://drafts.csswg.org/css-page-3/",
+      "resolved": "https://drafts.csswg.org/css-page-3/",
+      "sha256": "e8a415c038995be8b57c2018fb4fa04dd715fe9a37052ca881d4054d8d9ba0f5"
+    },
+    "css-position-3": {
+      "url": "https://drafts.csswg.org/css-position-3/",
+      "resolved": "https://drafts.csswg.org/css-position-3/",
+      "sha256": "fcc780ccbdfbbb6074f8c8499ff924b96b8e5352ceb0848d67235c47a0c25e67"
+    },
+    "css-position-4": {
+      "url": "https://drafts.csswg.org/css-position-4/",
+      "resolved": "https://drafts.csswg.org/css-position-4/",
+      "sha256": "0e6c95f6592106f33e2ca5cfb563327c01ad15e220efab51eff840107c915f1e"
+    },
+    "css-pseudo-4": {
+      "url": "https://drafts.csswg.org/css-pseudo-4/",
+      "resolved": "https://drafts.csswg.org/css-pseudo-4/",
+      "sha256": "8f0ef52b6761550796c9ba82fcd7a07c35dda8d0ef417f24c72fd1e3c44bcd3f"
+    },
+    "css-scrollbars-1": {
+      "url": "https://drafts.csswg.org/css-scrollbars-1/",
+      "resolved": "https://drafts.csswg.org/css-scrollbars-1/",
+      "sha256": "165ecaa2f4cb9c2bd9fe70f2697abdec03a079d82fac0a1091a06a1681e35e18"
+    },
+    "css-shapes-1": {
+      "url": "https://drafts.csswg.org/css-shapes-1/",
+      "resolved": "https://drafts.csswg.org/css-shapes-1/",
+      "sha256": "a9727368212c34531902c4dd6365ceaf7b9b4a4faeb323c969a9cc7c6b184bd5"
+    },
+    "css-sizing-3": {
+      "url": "https://drafts.csswg.org/css-sizing-3/",
+      "resolved": "https://drafts.csswg.org/css-sizing-3/",
+      "sha256": "6499512676e2e755cd7c67c5335a30e4bb8f9883cd223f246351dc9704ce9f10"
+    },
+    "css-sizing-4": {
+      "url": "https://drafts.csswg.org/css-sizing-4/",
+      "resolved": "https://drafts.csswg.org/css-sizing-4/",
+      "sha256": "18c06ef46d3be2ae7fb732f2dab033ff6115a75a24aca23028c1865c3f311d5a"
+    },
+    "css-text-3": {
+      "url": "https://drafts.csswg.org/css-text-3/",
+      "resolved": "https://drafts.csswg.org/css-text-3/",
+      "sha256": "5e1fcc7cff3f2950094f95a0bda08a9b069d43569fd5058942ae2068f7265ce8"
+    },
+    "css-text-4": {
+      "url": "https://drafts.csswg.org/css-text-4/",
+      "resolved": "https://drafts.csswg.org/css-text-4/",
+      "sha256": "07d08d533458184a4fcdad55fe9eb28ac1f79471ca54e7b96e5044d982cf7950"
+    },
+    "css-transforms-1": {
+      "url": "https://drafts.csswg.org/css-transforms-1/",
+      "resolved": "https://drafts.csswg.org/css-transforms-1/",
+      "sha256": "f32ac6269249cfeb2a4e94a7bf2330086253aecd4ec215bae835b2192e8a67a1"
+    },
+    "css-values-3": {
+      "url": "https://drafts.csswg.org/css-values-3/",
+      "resolved": "https://drafts.csswg.org/css-values-3/",
+      "sha256": "3adcc1b7d89bfdef3ea797a9e814402953730b8f9106c9ca4b2818dd24fdd217"
+    },
+    "css-values-4": {
+      "url": "https://drafts.csswg.org/css-values-4/",
+      "resolved": "https://drafts.csswg.org/css-values-4/",
+      "sha256": "9da266040f153cb9d5595f9d46e5cddfcdf16873bd40e70bb215d117c2c1df60"
+    },
+    "css-will-change-1": {
+      "url": "https://drafts.csswg.org/css-will-change-1/",
+      "resolved": "https://drafts.csswg.org/css-will-change-1/",
+      "sha256": "8c64166c6004c0dc921308c28e74b9b9cfded2e9a05663046e80dbd6565a28ca"
+    },
+    "css-writing-modes-4": {
+      "url": "https://drafts.csswg.org/css-writing-modes-4/",
+      "resolved": "https://drafts.csswg.org/css-writing-modes-4/",
+      "sha256": "981fa46e59db955ecdeb3a30789ce7cb7121a3b815ae9c752331cab56978b50f"
+    },
+    "css21-box": {
+      "url": "https://www.w3.org/TR/2011/REC-CSS2-20110607/box.html",
+      "resolved": "https://www.w3.org/TR/2011/REC-CSS2-20110607/box.html",
+      "sha256": "8875bbcdefe6edc0d14fbd4a8d336b1062d2feb60aa65985bef60e86c530d99f"
+    },
+    "css21-conform": {
+      "url": "https://www.w3.org/TR/2011/REC-CSS2-20110607/conform.html",
+      "resolved": "https://www.w3.org/TR/2011/REC-CSS2-20110607/conform.html",
+      "sha256": "de58593b67d7256eaa72fc33b956c6838cd0e9fa1670d0a0e5feb8079b4ce572"
+    },
+    "css21-errata": {
+      "url": "https://www.w3.org/Style/css2-updates/REC-CSS2-20110607-errata.html",
+      "resolved": "https://www.w3.org/Style/css2-updates/REC-CSS2-20110607-errata.html",
+      "sha256": "36b37eee597352e0e077a839eb2e9a02de55f89e9916fd385276678a71fe0428"
+    },
+    "css21-page": {
+      "url": "https://www.w3.org/TR/2011/REC-CSS2-20110607/page.html",
+      "resolved": "https://www.w3.org/TR/2011/REC-CSS2-20110607/page.html",
+      "sha256": "984664616bba69b3ef8a2fbbfb8da02fc67f250349fab495d39d5d1ddbbe7a2f"
+    },
+    "css21-tables": {
+      "url": "https://www.w3.org/TR/2011/REC-CSS2-20110607/tables.html",
+      "resolved": "https://www.w3.org/TR/2011/REC-CSS2-20110607/tables.html",
+      "sha256": "201812dd6e3c9ce9133afbc8c5ac576c7033514b6748f764aa111cc563036dc1"
+    },
+    "css21-text": {
+      "url": "https://www.w3.org/TR/2011/REC-CSS2-20110607/text.html",
+      "resolved": "https://www.w3.org/TR/2011/REC-CSS2-20110607/text.html",
+      "sha256": "467a8857ae69f2b325394ea400d14bd1280f85956c0a2e7deabc39e612b1380f"
+    },
+    "css21-visudet": {
+      "url": "https://www.w3.org/TR/2011/REC-CSS2-20110607/visudet.html",
+      "resolved": "https://www.w3.org/TR/2011/REC-CSS2-20110607/visudet.html",
+      "sha256": "12e8bc0e6b7c96d81c85f40690f296333342c0babe26ecee1fbf8a1fbd7f3834"
+    },
+    "css21-visufx": {
+      "url": "https://www.w3.org/TR/2011/REC-CSS2-20110607/visufx.html",
+      "resolved": "https://www.w3.org/TR/2011/REC-CSS2-20110607/visufx.html",
+      "sha256": "2bc674cb7ab0dcd094adf970d83b8339021d66a0c473be6575049af60aa51a05"
+    },
+    "css21-visuren": {
+      "url": "https://www.w3.org/TR/2011/REC-CSS2-20110607/visuren.html",
+      "resolved": "https://www.w3.org/TR/2011/REC-CSS2-20110607/visuren.html",
+      "sha256": "3f334c530cf450f6964062e5badccc3e9f4fed9589917a0e62c6be10dabc72a4"
+    },
+    "css22-box": {
+      "url": "https://www.w3.org/TR/CSS22/box.html",
+      "resolved": "https://www.w3.org/TR/CSS22/box.html",
+      "sha256": "613d975ea38dd36a6a8157ab623c4236fa26ef947ca7d71e3e430ef5030b6eab"
+    },
+    "css22-conform": {
+      "url": "https://www.w3.org/TR/CSS22/conform.html",
+      "resolved": "https://www.w3.org/TR/CSS22/conform.html",
+      "sha256": "ae3f5c86595f7da1ef47adcd1212117064389bcc26e4a73430ff3562ab81bfb7"
+    },
+    "css22-page": {
+      "url": "https://www.w3.org/TR/CSS22/page.html",
+      "resolved": "https://www.w3.org/TR/CSS22/page.html",
+      "sha256": "5c5d0a2bc494d5f168b73080b5b4e7d12016d8f0b871c262c29131f87ca61df1"
+    },
+    "css22-tables": {
+      "url": "https://www.w3.org/TR/CSS22/tables.html",
+      "resolved": "https://www.w3.org/TR/CSS22/tables.html",
+      "sha256": "a57bee3e57104001442a313f695fd2e0aff808d9fb56f6e5655a1a3256b9e05e"
+    },
+    "css22-text": {
+      "url": "https://www.w3.org/TR/CSS22/text.html",
+      "resolved": "https://www.w3.org/TR/CSS22/text.html",
+      "sha256": "1285623c2d79b25ece5bbcc56ba733f065b2650d11686ad9d6beca0f290f2cd2"
+    },
+    "css22-visudet": {
+      "url": "https://www.w3.org/TR/CSS22/visudet.html",
+      "resolved": "https://www.w3.org/TR/CSS22/visudet.html",
+      "sha256": "254bb76539cdde3070f7b0821dc9154efdc9b332a89e532359c6a8fd9d9dc732"
+    },
+    "css22-visufx": {
+      "url": "https://www.w3.org/TR/CSS22/visufx.html",
+      "resolved": "https://www.w3.org/TR/CSS22/visufx.html",
+      "sha256": "53ba65a9614291757db9226143885f859af22e8bdafa9bcf3b6ec07b79126fdf"
+    },
+    "css22-visuren": {
+      "url": "https://www.w3.org/TR/CSS22/visuren.html",
+      "resolved": "https://www.w3.org/TR/CSS22/visuren.html",
+      "sha256": "ba92467c598e3d04179dc26bebcd8817395688d3dc93fbfdae34b7e82218ec68"
+    },
+    "cssom-view": {
+      "url": "https://drafts.csswg.org/cssom-view/",
+      "resolved": "https://drafts.csswg.org/cssom-view/",
+      "sha256": "2348fcdf20c3c32a068769439d747b306ba7652a7c18450830ae54780b26be56"
+    },
+    "html-rendering": {
+      "url": "https://html.spec.whatwg.org/multipage/rendering.html",
+      "resolved": "https://html.spec.whatwg.org/multipage/rendering.html",
+      "sha256": "549065ed4d0b2e212ae18e9fc9133d13e42436fb1e52d3cfcae0ead83b18aa3c"
+    },
+    "svg2-coordinates": {
+      "url": "https://www.w3.org/TR/SVG2/coords.html",
+      "resolved": "https://www.w3.org/TR/SVG2/coords.html",
+      "sha256": "2ec3740e09f4d6164c78e46cd0d8c51e3cc02e04dc8063c3a0ca5454139b9fa7"
+    },
+    "unicode-uax11": {
+      "url": "https://www.unicode.org/reports/tr11/tr11-46.html",
+      "resolved": "https://www.unicode.org/reports/tr11/tr11-46.html",
+      "sha256": "2c60f3da0010870eaa4d9665a4bbae3e473c016c82d27bb508ea075cbf2afa7a"
+    },
+    "unicode-uax14": {
+      "url": "https://www.unicode.org/reports/tr14/tr14-57.html",
+      "resolved": "https://www.unicode.org/reports/tr14/tr14-57.html",
+      "sha256": "296df5332aefe695b4951b511288b118bc6a7b43db7fadfd60f6062096acc7c0"
+    },
+    "unicode-uax24": {
+      "url": "https://www.unicode.org/reports/tr24/tr24-41.html",
+      "resolved": "https://www.unicode.org/reports/tr24/tr24-41.html",
+      "sha256": "009e2e6db21ac136223966d3fb8d146c527e7f7714a22231ad3b812ad7827ded"
+    },
+    "unicode-uax29": {
+      "url": "https://www.unicode.org/reports/tr29/tr29-49.html",
+      "resolved": "https://www.unicode.org/reports/tr29/tr29-49.html",
+      "sha256": "60fb49ee640a154d9e40468306c6b283edcef73be3af5ede778107b4787bdec8"
+    },
+    "unicode-uax44": {
+      "url": "https://www.unicode.org/reports/tr44/tr44-38.html",
+      "resolved": "https://www.unicode.org/reports/tr44/tr44-38.html",
+      "sha256": "d951c7cf4f697c238e7a96ab891cf27fdf0b1d94454aa0071a9d5b0d3a0e1ab4"
+    },
+    "unicode-uax50": {
+      "url": "https://www.unicode.org/reports/tr50/tr50-35.html",
+      "resolved": "https://www.unicode.org/reports/tr50/tr50-35.html",
+      "sha256": "e8662f3394d20212beaa1862b505582cee5383c4b502a46966e317967f7bc65e"
+    },
+    "unicode-uax9": {
+      "url": "https://www.unicode.org/reports/tr9/tr9-52.html",
+      "resolved": "https://www.unicode.org/reports/tr9/tr9-52.html",
+      "sha256": "3c281b38800bad85b16bf3a169b8cb693d8a2dbceb60903feb26e68a2659ee8a"
+    }
+  }
+}

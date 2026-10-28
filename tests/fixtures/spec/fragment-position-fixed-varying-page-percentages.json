@@ -1,0 +1,19 @@
+{
+  "name": "fragment-position-fixed-varying-page-percentages",
+  "kind": "spec",
+  "spec": ["https://drafts.csswg.org/css-position-3/#def-cb", "https://drafts.csswg.org/css-break-3/#transforms"],
+  "input": {
+    "viewport": {"width": 300, "height": 200},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 100, "height": 50}, {"x": 150, "y": 100, "width": 100, "height": 80}]},
+    "nodes": [
+      {"parent": null, "style": {"height": 100}},
+      {"parent": 0, "style": {"position": "fixed", "insetTop": 0, "insetLeft": 0, "width": 20, "height": {"percent": 1}}},
+      {"parent": 1, "style": {"position": "relative", "insetTop": {"percent": 0.5}, "width": 5, "height": 5}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 100, "height": 50}, {"x": 150, "y": 100, "width": 100, "height": 50}]},
+    {"rects": [{"x": 0, "y": 0, "width": 20, "height": 50}, {"x": 150, "y": 100, "width": 20, "height": 80}]},
+    {"rects": [{"x": 0, "y": 25, "width": 5, "height": 5}, {"x": 150, "y": 140, "width": 5, "height": 5}]}
+  ]}
+}

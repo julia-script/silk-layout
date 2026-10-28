@@ -1,0 +1,113 @@
+{
+  "name": "flex-anonymous-text-sequence",
+  "kind": "spec",
+  "features": [
+    "source-text",
+    "inline-fragments",
+    "text-measurement"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#white-space-processing",
+    "https://drafts.csswg.org/css-inline-3/#line-layout",
+    "https://drafts.csswg.org/css-flexbox-1/#flex-items"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      },
+      {
+        "fontSize": 6,
+        "ascent": 4,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 4,
+        "capHeight": 4,
+        "subscriptOffset": 1,
+        "superscriptOffset": 2,
+        "baselines": {
+          "alphabetic": 4,
+          "ideographic": 6,
+          "central": 3,
+          "mathematical": 3
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 60,
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 0,
+        "text": "ab "
+      },
+      {
+        "parent": 0,
+        "text": "cd"
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "text": "  \n"
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "height": 10,
+        "firstBaseline": 8
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 15,
+        "height": 10
+      },
+      {
+        "x": 15,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 25,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "width": 0,
+        "height": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "name": "inline-justify-unexpandable-fallback",
+  "kind": "spec",
+  "features": [
+    "inline-fragments",
+    "justification"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#text-align-last-property",
+    "https://drafts.csswg.org/css-text-3/#expanding-text",
+    "https://drafts.csswg.org/css-text-3/#justify-limits"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 40,
+          "textAlign": "justify",
+          "textAlignLast": "center"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 30,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "height": 20
+      },
+      {
+        "x": 5,
+        "y": 0
+      },
+      {
+        "x": 10,
+        "y": 10
+      }
+    ]
+  }
+}

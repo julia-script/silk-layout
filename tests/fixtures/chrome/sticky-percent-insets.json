@@ -1,0 +1,50 @@
+{
+  "name": "sticky-percent-insets-chrome",
+  "kind": "chrome",
+  "features": [
+    "scroll-state",
+    "position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 200,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        },
+        "scrollOffset": {
+          "x": 30,
+          "y": 50
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 400,
+          "height": 300
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 100,
+          "height": 20,
+          "position": "sticky",
+          "insetLeft": {
+            "percent": 0.1
+          },
+          "insetTop": {
+            "percent": 0.1
+          }
+        }
+      }
+    ]
+  }
+}

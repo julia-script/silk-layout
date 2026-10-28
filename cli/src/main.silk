@@ -1,0 +1,510 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.bytes { Bytes }
+import silk.slice { Slice }
+import silk.string { String }
+import silk.option { Option }
+import silk.json_value { Json, Value }
+import silk.json_scanner { JsonError }
+import silk.json_codec { Serialize }
+import silk.json_output { JsonOptions }
+import silk.os_standard_input { OsStandardInput }
+import silk.standard_input { StandardInput, StreamReadError }
+import silk.os_writer { StdoutWriter, StderrWriter }
+import silk.writer { Writer, WriterError }
+import silk.i32
+import layout.lib as Engine
+import layout.lib { OptionalSize, NaturalDimensions, Point, ScrollbarMetrics, Tree, NodeId, LayoutTree, InvalidNode }
+import layout.lib { Layout, Rect, Size, ResolvedEdges, BoxKind, FragmentKind, FontMetrics, Measurement, BaselineSet, WritingMode, TextOrientation }
+import layout.lib { TextError, TextFragmentKind }
+import silk.usize
+import protocol as P
+import protocol { ProtocolError }
+import styles as Styles
+import measurement as FixtureMeasurement
+import measurement { Fixture, Fixtures }
+import fragment_input as FragmentInput
+import layout.lib { FragmentationError }
+
+// Read until EOF, not until a newline or the first partial transport read.
+effect fn readDocument() -> Bytes
+  ! StreamReadError | OutOfMemoryError
+  ? &mut StandardInput | &mut Allocator {
+  let mut bytes = Bytes.make()
+  let mut buffer: [u8; 4096] = [0; 4096]
+  while true {
+    let outcome = run StandardInput.receive(&mut buffer)
+    let count = StandardInput.count(&outcome)
+    run bytes.append(Slice.view<u8>(&buffer, 0, count))
+    if StandardInput.isEndOfInput(&outcome) { return move bytes }
+  }
+  return move bytes
+}
+
+effect fn field<T: Serialize>(name: string, value: &T)
+  ! JsonError | WriterError ? &mut Writer {
+  let options = JsonOptions.compact()
+  run Writer.writeString(",\"")
+  run Writer.writeString(name)
+  run Writer.writeString("\":")
+  run Json.serialize(value, &options)
+}
+
+effect fn indexField(name: string, value: usize)
+  ! JsonError | WriterError ? &mut Writer {
+  run Writer.writeString(",\"")
+  run Writer.writeString(name)
+  run Writer.writeString("\":")
+  if value == usize.MAX { run Writer.writeString("null") }
+  else {
+    let options = JsonOptions.compact()
+    run Json.serialize(&value, &options)
+  }
+}
+
+effect fn writeRect(rect: Rect) ! JsonError | WriterError ? &mut Writer {
+  let options = JsonOptions.compact()
+  run Writer.writeString("{\"x\":")
+  run Json.serialize(&rect.x, &options)
+  run field("y", &rect.y)
+  run field("width", &rect.width)
+  run field("height", &rect.height)
+  run Writer.writeString("}")
+}
+
+effect fn geometryKey(name: string) ! WriterError ? &mut Writer {
+  run Writer.writeString(",\"")
+  run Writer.writeString(name)
+  run Writer.writeString("\":")
+}
+effect fn rectField(name: string, rect: Rect) ! JsonError | WriterError ? &mut Writer {
+  run geometryKey(name)
+  run writeRect(rect)
+}
+effect fn pointField(name: string, point: Point) ! JsonError | WriterError ? &mut Writer {
+  run geometryKey(name)
+  run Writer.writeString("{\"x\":")
+  run Json.serialize(&point.x, &JsonOptions.compact())
+  run field("y", &point.y)
+  run Writer.writeString("}")
+}
+effect fn sizeField(name: string, size: Size) ! JsonError | WriterError ? &mut Writer {
+  run geometryKey(name)
+  run Writer.writeString("{\"width\":")
+  run Json.serialize(&size.width, &JsonOptions.compact())
+  run field("height", &size.height)
+  run Writer.writeString("}")
+}
+effect fn edgesField(name: string, edges: ResolvedEdges) ! JsonError | WriterError ? &mut Writer {
+  run geometryKey(name)
+  run Writer.writeString("{\"top\":")
+  run Json.serialize(&edges.top, &JsonOptions.compact())
+  run field("right", &edges.right)
+  run field("bottom", &edges.bottom)
+  run field("left", &edges.left)
+  run Writer.writeString("}")
+}
+effect fn baselinesField(name: string, baselines: BaselineSet) ! JsonError | WriterError ? &mut Writer {
+  run geometryKey(name)
+  run Writer.writeString("{\"alphabetic\":")
+  run Json.serialize(&baselines.alphabetic, &JsonOptions.compact())
+  run field("ideographic", &baselines.ideographic)
+  run field("central", &baselines.central)
+  run field("mathematical", &baselines.mathematical)
+  run field("xMiddle", &baselines.xMiddle)
+  run field("textOver", &baselines.textOver)
+  run field("textUnder", &baselines.textUnder)
+  run Writer.writeString("}")
+}
+effect fn scrollbarField(metrics: ScrollbarMetrics) ! JsonError | WriterError ? &mut Writer {
+  run geometryKey("scrollbarMetrics")
+  run Writer.writeString("{\"horizontal\":")
+  run Json.serialize(&metrics.horizontal, &JsonOptions.compact())
+  run field("vertical", &metrics.vertical)
+  run field("overlay", &metrics.overlay)
+  run field("horizontalOnTop", &metrics.horizontalOnTop)
+  run field("verticalOnLeft", &metrics.verticalOnLeft)
+  run Writer.writeString("}")
+}
+
+effect fn writeUsed(box: &Layout) ! JsonError | WriterError ? &mut Writer {
+  run field("contentWidth", &box.contentSize.width)
+  run field("contentHeight", &box.contentSize.height)
+  run field("scrollbarGutterTop", &box.scrollbarGutter.top)
+  run field("scrollbarGutterRight", &box.scrollbarGutter.right)
+  run field("scrollbarGutterBottom", &box.scrollbarGutter.bottom)
+  run field("scrollbarGutterLeft", &box.scrollbarGutter.left)
+  run field("horizontalScrollbar", &box.horizontalScrollbar)
+  run field("verticalScrollbar", &box.verticalScrollbar)
+  run field("measurementOffsetX", &box.measurementOffset.x)
+  run field("measurementOffsetY", &box.measurementOffset.y)
+  run field("scrollableOverflowX", &box.scrollableOverflow.x)
+  run field("scrollableOverflowY", &box.scrollableOverflow.y)
+  run field("scrollableOverflowWidth", &box.scrollableOverflow.width)
+  run field("scrollableOverflowHeight", &box.scrollableOverflow.height)
+  run field("hasFirstBaseline", &box.hasFirstBaseline)
+  run field("hasLastBaseline", &box.hasLastBaseline)
+}
+
+effect fn writeSourceUsed(box: &Layout, mode: WritingMode, orientation: TextOrientation) ! JsonError | WriterError ? &mut Writer {
+  run writeUsed(box)
+  run field("firstBaseline", &box.firstBaselines.forContext(mode, orientation))
+  run field("lastBaseline", &box.lastBaselines.forContext(mode, orientation))
+}
+
+fn boxKind(kind: BoxKind) -> string<'static> {
+  if kind == BoxKind.Block { return "block" }
+  if kind == BoxKind.Flex { return "flex" }
+  if kind == BoxKind.Inline { return "inline" }
+  if kind == BoxKind.Text { return "text" }
+  return "inline-formatting"
+}
+
+fn measurementKind(kind: Measurement) -> string<'static> {
+  if kind == Measurement.Content { return "content" }
+  if kind == Measurement.Natural { return "natural" }
+  return "none"
+}
+
+fn fragmentKind(kind: FragmentKind) -> string<'static> {
+  if kind == FragmentKind.Box { return "box" }
+  if kind == FragmentKind.Inline { return "inline" }
+  if kind == FragmentKind.Text { return "text" }
+  return "line"
+}
+
+effect fn writeOutput(tree: &Tree, output: &LayoutTree)
+  ! InvalidNode | JsonError | WriterError ? &mut Writer {
+  let options = JsonOptions.compact()
+  let fragments = output.fragments.values.asSlice()
+  let nodes = output.boxNodes.asSlice()
+  let boxes = output.boxes.asSlice()
+  run Writer.writeString("{\"schemaVersion\":3,\"sources\":[")
+  let mut source: usize = 0
+  while source < tree.nodes.length() {
+    if source != 0 { run Writer.writeString(",") }
+    let first = output.firstBySource.get(source)
+    let mut bounds = run output.sourceBounds(NodeId { index: source })
+    let mut parent = tree.nodes.asSlice()[source].parent
+    while parent != usize.MAX && output.firstBySource.get(parent) == usize.MAX {
+      parent = tree.nodes.asSlice()[parent].parent
+    }
+    if first != usize.MAX && parent != usize.MAX {
+      let origin = run output.sourceBounds(NodeId { index: parent })
+      bounds.x = bounds.x - origin.x
+      bounds.y = bounds.y - origin.y
+    }
+    run Writer.writeString("{\"x\":")
+    run Json.serialize(&bounds.x, &options)
+    run field("y", &bounds.y)
+    run field("width", &bounds.width)
+    run field("height", &bounds.height)
+    let sourceNode = &tree.nodes.asSlice()[source]
+    let mut kind = "element"
+    match move sourceNode.text() {
+      Option<string>.Some { value } => { kind = "text"
+        run field("text", &value) }
+      Option<string>.None => {}
+    }
+    run field("kind", &kind)
+    run indexField("firstBox", first)
+    run Writer.writeString(",\"rects\":[")
+    let mut rects = run output.sourceRects(NodeId { index: source })
+    let mut count: usize = 0
+    while true {
+      let rect = match move rects.next() {
+        Option<Rect>.Some { value } => value
+        Option<Rect>.None => { break }
+      }
+      if count != 0 { run Writer.writeString(",") }
+      run writeRect(rect)
+      count = count + 1
+    }
+    run Writer.writeString("]")
+    if first == usize.MAX {
+      let empty = Layout.zero()
+      let style = &tree.styles.asSlice()[sourceNode.styleIndex]
+      run writeSourceUsed(&empty, style.writingMode, style.textOrientation)
+    } else if nodes[first].nextContinuation == usize.MAX && count == 1
+      && (nodes[first].kind == BoxKind.Block || nodes[first].kind == BoxKind.Flex) {
+      let node = &nodes[first]
+      let style = &tree.styles.asSlice()[tree.nodes.asSlice()[node.styleOwner].styleIndex]
+      let mut mode = style.writingMode
+      let mut orientation = style.textOrientation
+      if node.anonymousStyle != usize.MAX {
+        mode = output.anonymousStyles.asSlice()[node.anonymousStyle].writingMode
+        orientation = output.anonymousStyles.asSlice()[node.anonymousStyle].textOrientation
+      }
+      run writeSourceUsed(&boxes[first], mode, orientation)
+    }
+    run Writer.writeString("}")
+    source = source + 1
+  }
+  run Writer.writeString("],\"boxes\":[")
+  let mut index: usize = 0
+  while index < boxes.length {
+    if index != 0 { run Writer.writeString(",") }
+    let box = &boxes[index]
+    let node = &nodes[index]
+    run Writer.writeString("{\"x\":")
+    run Json.serialize(&box.location.x, &options)
+    run field("y", &box.location.y)
+    run field("width", &box.size.width)
+    run field("height", &box.size.height)
+    run field("kind", &boxKind(node.kind))
+    run indexField("source", node.source)
+    run indexField("styleOwner", node.styleOwner)
+    run indexField("anonymousStyle", node.anonymousStyle)
+    run indexField("parent", node.parent)
+    run indexField("firstChild", node.firstChild)
+    run indexField("lastChild", node.lastChild)
+    run indexField("nextSibling", node.nextSibling)
+    run indexField("previousContinuation", node.previousContinuation)
+    run indexField("nextContinuation", node.nextContinuation)
+    run indexField("firstFragment", output.fragments.first(index))
+    run indexField("lastFragment", output.fragments.last(index))
+    run field("firstForSource", &node.firstForSource)
+    run field("lastForSource", &node.lastForSource)
+    run field("anonymousBlock", &node.anonymousBlock)
+    run field("blockify", &node.blockify)
+    run field("independentRoot", &node.independentRoot)
+    run field("measurement", &measurementKind(node.measurement))
+    run field("measureKey", &node.measureKey)
+    run pointField("scrollOffset", node.scrollOffset)
+    run writeUsed(box)
+    run baselinesField("firstBaselines", box.firstBaselines)
+    run baselinesField("lastBaselines", box.lastBaselines)
+    run field("widthDefinite", &box.widthDefinite)
+    run field("heightDefinite", &box.heightDefinite)
+    run field("preferredRatio", &box.preferredRatio)
+    run field("ratioBorderBox", &box.ratioBorderBox)
+    run edgesField("usedMargin", box.usedMargin)
+    run field("marginTopPositive", &box.marginTopPositive)
+    run field("marginTopNegative", &box.marginTopNegative)
+    run field("marginBottomPositive", &box.marginBottomPositive)
+    run field("marginBottomNegative", &box.marginBottomNegative)
+    run field("collapsesThrough", &box.collapsesThrough)
+    run field("hasClearance", &box.hasClearance)
+    run rectField("contentRect", box.contentRect())
+    run rectField("paddingRect", box.paddingRect())
+    run rectField("flowOverflow", box.normalFlowOverflow())
+    run field("hasBox", &box.hasBox())
+    run field("acceptsScrollbars", &box.acceptsScrollbars())
+    run scrollbarField(box.getScrollbarMetrics())
+    run Writer.writeString("}")
+    index = index + 1
+  }
+  run Writer.writeString("],\"fragments\":[")
+  index = 0
+  while index < fragments.length {
+    if index != 0 { run Writer.writeString(",") }
+    let fragment = &fragments[index]
+    run Writer.writeString("{\"kind\":")
+    run Json.serialize(&fragmentKind(fragment.kind), &options)
+    run indexField("source", fragment.source)
+    run indexField("box", fragment.box)
+    run indexField("fragmentainer", fragment.fragmentainer)
+    run indexField("parent", fragment.parent)
+    run indexField("firstChild", fragment.firstChild)
+    run indexField("lastChild", fragment.lastChild)
+    run indexField("previousSibling", fragment.previousSibling)
+    run indexField("nextSibling", fragment.nextSibling)
+    run indexField("previousForBox", fragment.previousForBox)
+    run indexField("nextForBox", fragment.nextForBox)
+    run pointField("location", fragment.location)
+    run pointField("visualOffset", fragment.visualOffset)
+    run pointField("worldLocation", fragment.worldLocation)
+    run sizeField("size", fragment.size)
+    run rectField("contentRect", fragment.contentRect)
+    run rectField("paddingRect", fragment.paddingRect)
+    run rectField("layoutBounds", fragment.layoutBounds)
+    run rectField("scrollableOverflow", fragment.scrollableOverflow)
+    run baselinesField("firstBaselines", fragment.firstBaselines)
+    run baselinesField("lastBaselines", fragment.lastBaselines)
+    run field("hasFirstBaseline", &fragment.hasFirstBaseline)
+    run field("hasLastBaseline", &fragment.hasLastBaseline)
+    run edgesField("usedMargin", fragment.usedMargin)
+    run field("decorationEdges", &fragment.decorationEdges)
+    run field("first", &fragment.first)
+    run field("last", &fragment.last)
+    run field("phantom", &fragment.phantom)
+    run field("nonpainting", &fragment.nonpainting)
+    run field("repeated", &fragment.repeated)
+    run field("overflowOnly", &fragment.overflowOnly)
+    run field("positioningShell", &fragment.positioningShell)
+    run indexField("textData", fragment.textData)
+    run Writer.writeString("}")
+    index = index + 1
+  }
+  run Writer.writeString("],\"texts\":[")
+  index = 0
+  while index < output.fragments.texts.length() {
+    if index != 0 { run Writer.writeString(",") }
+    let text = output.fragments.texts.get(index)
+    run Writer.writeString("{\"sourceStart\":")
+    run Json.serialize(&text.sourceStart, &options)
+    run field("sourceEnd", &text.sourceEnd)
+    run field("fontKey", &text.fontKey)
+    run field("shapeKey", &text.shapeKey)
+    run field("bidiLevel", &text.bidiLevel)
+    let kind = match text.kind {
+      TextFragmentKind.Glyphs => "glyphs"
+      TextFragmentKind.Tab => "tab"
+      TextFragmentKind.SegmentBreak => "segment-break"
+    }
+    run field("kind", &kind)
+    run Writer.writeString("}")
+    index = index + 1
+  }
+  run Writer.writeString("],\"viewportOverflow\":")
+  run writeRect(output.viewportOverflow)
+  run Writer.writeString("}\n")
+  run Writer.flush()
+}
+
+effect fn parseScrollOffset(value: &Value) -> Point ! ProtocolError {
+  run P.fields(value, &["x", "y"])
+  let x = run P.number(run P.required(value, "x"))
+  let y = run P.number(run P.required(value, "y"))
+  if x - x != 0.0 || y - y != 0.0 { fail P.invalid("expected finite scroll offsets") }
+  return Point { x: x, y: y }
+}
+
+effect fn execute(document: &Value)
+  ! ProtocolError | OutOfMemoryError | InvalidNode | JsonError | WriterError | TextError | FragmentationError
+  ? &mut Allocator | &mut Writer {
+  run P.fields(document, &["viewport", "viewportScrollOffset", "scrollbars", "fonts", "nodes", "fragmentation"])
+  let viewportValue = run P.required(document, "viewport")
+  run P.fields(viewportValue, &["width", "height"])
+  let viewport = OptionalSize.definite(
+    run P.nonnegative(run P.required(viewportValue, "width")),
+    run P.nonnegative(run P.required(viewportValue, "height"))
+  )
+  let nodes = run P.array(run P.required(document, "nodes"))
+  if nodes.length == 0 { fail P.invalid("nodes must contain a root node") }
+  let root = run P.item(&nodes[0])
+  run P.fields(root, &["parent", "style", "measure", "natural", "scrollOffset"])
+  if !P.isNull(run P.required(root, "parent")) { fail P.invalid("nodes[0].parent must be null") }
+  let rootStyle = run Styles.parse(run P.required(root, "style"))
+  let mut tree = run Tree.make(move rootStyle)
+  if P.has(document, "viewportScrollOffset") {
+    tree.viewportScrollOffset = run parseScrollOffset(run P.required(document, "viewportScrollOffset"))
+  }
+  let mut fixtures = Fixtures {
+    values: List<Fixture>.make(), objects: List<NaturalDimensions>.make(),
+    fonts: List<FontMetrics>.make(),
+    autoScrollbars: ScrollbarMetrics.zero(), thinScrollbars: ScrollbarMetrics.zero(),
+  }
+  run fixtures.fonts.append(FontMetrics.zero())
+  if P.has(document, "fonts") {
+    let fonts = run P.array(run P.required(document, "fonts"))
+    let mut font: usize = 0
+    while font < fonts.length {
+      run fixtures.fonts.append(run FixtureMeasurement.parseFont(run P.item(&fonts[font])))
+      font = font + 1
+    }
+  }
+  if P.has(document, "scrollbars") {
+    let scrollbars = run P.required(document, "scrollbars")
+    run P.fields(scrollbars, &["auto", "thin"])
+    fixtures.autoScrollbars = run FixtureMeasurement.parseScrollbars(run P.required(scrollbars, "auto"))
+    fixtures.thinScrollbars = run FixtureMeasurement.parseScrollbars(run P.required(scrollbars, "thin"))
+  }
+  let mut index: usize = 0
+  while index < nodes.length {
+    let node = run P.item(&nodes[index])
+    let isText = P.has(node, "text")
+    if isText {
+      run P.fields(node, &["parent", "text"])
+      if index == 0 { fail P.invalid("root must be an element") }
+    } else {
+      run P.fields(node, &["parent", "style", "measure", "natural", "scrollOffset"])
+      if P.has(node, "measure") && P.has(node, "natural") { fail P.invalid("measure and natural are mutually exclusive") }
+    }
+    if index > 0 {
+      let parentIndex = run P.integer(run P.required(node, "parent"))
+      if parentIndex < 0 { fail P.invalid("parent must be a preceding node index") }
+      let parent = i32.toUsize(parentIndex)
+      if parent >= index { fail P.invalid("parent must be a preceding node index") }
+      if isText {
+        let text = run String.copy(run P.text(run P.required(node, "text")))
+        let id = run tree.appendText(NodeId { index: parent }, move text)
+        drop id
+      } else {
+        let style = run Styles.parse(run P.required(node, "style"))
+        let id = run tree.append(NodeId { index: parent }, move style)
+        drop id
+      }
+    }
+    if tree.styles.asSlice()[tree.nodes.asSlice()[index].styleIndex].fontKey >= fixtures.fonts.length() {
+      fail P.invalid("fontKey does not identify a supplied font")
+    }
+    if P.has(node, "scrollOffset") {
+      run tree.setScrollOffset(NodeId { index: index }, run parseScrollOffset(run P.required(node, "scrollOffset")))
+    }
+    if P.has(node, "measure") {
+      let fixture = run FixtureMeasurement.parse(run P.required(node, "measure"))
+      let key = fixtures.values.length()
+      run fixtures.values.append(fixture)
+      run tree.setMeasurement(NodeId { index: index }, key)
+    }
+    if P.has(node, "natural") {
+      let natural = run FixtureMeasurement.parseNatural(run P.required(node, "natural"))
+      let key = fixtures.objects.length()
+      run fixtures.objects.append(natural)
+      run tree.setNaturalMeasurement(NodeId { index: index }, key)
+    }
+    index = index + 1
+  }
+  let mut output = LayoutTree.make()
+  if P.has(document, "fragmentation") {
+    let request = run FragmentInput.parse(run P.required(document, "fragmentation"))
+    run Engine.computeFragmented<Fixtures>(&tree, &mut output, &mut fixtures, viewport, request.view())
+  } else {
+    run Engine.compute<Fixtures>(&tree, &mut output, &mut fixtures, viewport)
+  }
+  run writeOutput(&tree, &output)
+}
+
+effect fn application() -> i32
+  ! StreamReadError | OutOfMemoryError | JsonError | WriterError | ProtocolError | InvalidNode | TextError | FragmentationError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut input = OsStandardInput.make()
+  let mut output = StdoutWriter.make()
+  let bytes = run readDocument()
+    |> Effect.provideMut<StandardInput>(&mut input)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let document = run Json.parse(bytes.asSlice())
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run execute(&document)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<Writer>(&mut output)
+  return 0
+}
+
+effect fn reportFragmentation(error: FragmentationError) ! WriterError | JsonError ? &mut Writer {
+  run Writer.writeString("silk-layout: FragmentationError at frame ")
+  run Json.serialize(&error.frame, &JsonOptions.compact())
+  run Writer.writeString(": ")
+  run Writer.writeString(error.message)
+  run Writer.writeString("\n")
+}
+
+effect fn fragmentationFailed(error: FragmentationError) -> i32 {
+  let mut stderr = StderrWriter.make()
+  let reported = run reportFragmentation(error)
+    |> Effect.provideMut<Writer>(&mut stderr) |> Effect.result
+  drop reported
+  return 1
+}
+
+effect fn failed(error: StreamReadError | OutOfMemoryError | JsonError | WriterError | ProtocolError | InvalidNode | TextError) -> i32 {
+  drop error
+  drop P.invalid("request failed: malformed JSON, invalid protocol, unsupported text, allocation, or I/O failure")
+  return 1
+}
+
+pub fn main() -> i32 {
+  return run application() |> Effect.catch<FragmentationError>(effect fn(error: FragmentationError) -> i32 { return run fragmentationFailed(error) }) |> Effect.catchAll(failed)
+}

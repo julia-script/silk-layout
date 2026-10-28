@@ -1,0 +1,34 @@
+{
+  "name": "calc-dimension",
+  "kind": "chrome",
+  "features": [
+    "block",
+    "percentage",
+    "calc"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 200
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": {
+            "length": 10,
+            "percent": 0.5
+          },
+          "height": 20
+        }
+      }
+    ]
+  }
+}

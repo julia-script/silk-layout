@@ -1,0 +1,48 @@
+{
+  "name": "scrollbar-auto-axis-feedback-chrome",
+  "kind": "chrome",
+  "features": [
+    "scrollbars",
+    "scrollbar-gutter"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "scrollbars": {
+      "auto": {
+        "horizontal": 12,
+        "vertical": 15,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      },
+      "thin": {
+        "horizontal": 6,
+        "vertical": 8,
+        "overlay": false,
+        "horizontalOnTop": false,
+        "verticalOnLeft": false
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "overflowX": "auto",
+          "overflowY": "auto"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "height": 101
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "name": "text-indent-blank-first",
+  "kind": "spec",
+  "features": [
+    "text-indent"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 30,
+          "fontKey": 1,
+          "textIndent": 10,
+          "whiteSpaceCollapse": "preserve-breaks"
+        }
+      },
+      {
+        "parent": 0,
+        "text": "\n"
+      },
+      {
+        "parent": 0,
+        "text": "A"
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#text-indent-property",
+    "https://drafts.csswg.org/css-sizing-3/#intrinsic-sizes",
+    "https://drafts.csswg.org/css-pseudo-4/#first-formatted-line"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "height": 20
+      },
+      {
+        "x": 10,
+        "y": 0,
+        "width": 0,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 5,
+        "height": 10
+      }
+    ]
+  }
+}

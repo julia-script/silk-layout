@@ -1,0 +1,74 @@
+{
+  "name": "measured-float-lines-chrome",
+  "kind": "chrome",
+  "features": [
+    "block",
+    "float",
+    "measurement",
+    "line-boxes"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flow-root"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "float": "left",
+          "width": 70,
+          "height": 30
+        }
+      },
+      {
+        "parent": 1,
+        "style": {},
+        "measure": {
+          "minWidth": 50,
+          "maxWidth": 50,
+          "height": 10,
+          "firstBaseline": 8
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "flow-root"
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "float": "left",
+          "width": 70,
+          "height": 30
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "padding": 10
+        },
+        "measure": {
+          "minWidth": 50,
+          "maxWidth": 50,
+          "height": 10,
+          "firstBaseline": 8
+        }
+      }
+    ]
+  }
+}

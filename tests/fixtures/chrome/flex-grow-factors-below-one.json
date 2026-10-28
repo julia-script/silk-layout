@@ -1,0 +1,41 @@
+{
+  "name": "flex-grow-factors-below-one",
+  "kind": "chrome",
+  "features": [
+    "flex",
+    "grow",
+    "factors-below-one"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 200,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 0.25,
+          "minWidth": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 0.25,
+          "minWidth": 0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "text-bidi-control-whitespace",
+  "kind": "spec",
+  "features": ["source-text", "whitespace", "bidi-controls"],
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#white-space-phase-1",
+    "https://drafts.csswg.org/css-text-3/#white-space-phase-2",
+    "https://drafts.csswg.org/css-inline-3/#phantom-line-box"
+  ],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "fonts": [{
+      "fontSize": 10, "ascent": 8, "descent": 2, "lineGap": 0,
+      "xHeight": 5, "capHeight": 7, "subscriptOffset": 2, "superscriptOffset": 3,
+      "baselines": {"alphabetic": 8, "ideographic": 10, "central": 5, "mathematical": 5}
+    }],
+    "nodes": [
+      {"parent": null, "style": {"width": 100, "fontKey": 1}},
+      {"parent": 0, "style": {"fontKey": 1}},
+      {"parent": 1, "text": "a \u200e b"},
+      {"parent": 0, "style": {"fontKey": 1}},
+      {"parent": 3, "text": "\u200e"},
+      {"parent": 0, "style": {"fontKey": 1}},
+      {"parent": 5, "text": " \u200e "}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"width": 100, "height": 30},
+      {"y": 0, "height": 10},
+      {"x": 0, "y": 0, "width": 15, "height": 10},
+      {"y": 10, "height": 10},
+      {"x": 0, "y": 0, "width": 0, "height": 10},
+      {"y": 20, "height": 10},
+      {"x": 0, "y": 0, "width": 0, "height": 10}
+    ]
+  }
+}

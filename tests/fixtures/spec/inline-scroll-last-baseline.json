@@ -1,0 +1,62 @@
+{
+  "name": "inline-scroll-last-baseline",
+  "kind": "spec",
+  "features": [
+    "inline-fragments",
+    "baselines"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#baseline-export",
+    "https://drafts.csswg.org/css-inline-3/#baseline-source"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 20,
+          "margin": {
+            "bottom": 10
+          },
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "height": 30,
+        "firstBaseline": 20
+      },
+      {
+        "hasFirstBaseline": false,
+        "hasLastBaseline": true,
+        "lastBaseline": 20
+      },
+      {
+        "y": 15
+      }
+    ]
+  }
+}

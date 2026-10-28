@@ -1,0 +1,105 @@
+{
+  "name": "text-tab-half-ch",
+  "kind": "spec",
+  "features": [
+    "source-text",
+    "inline-fragments",
+    "preserved-whitespace"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 40,
+          "fontKey": 1,
+          "whiteSpaceCollapse": "preserve",
+          "textWrap": "nowrap",
+          "tabSize": {
+            "length": 10
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 9,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "text": "\t"
+      },
+      {
+        "parent": 0,
+        "text": "A"
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#white-space-processing",
+    "https://drafts.csswg.org/css-text-3/#white-space-phase-2",
+    "https://drafts.csswg.org/css-text-3/#tab-size-property"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "height": 12
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 9,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 9,
+            "y": 2,
+            "width": 11,
+            "height": 10
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 20,
+            "y": 2,
+            "width": 5,
+            "height": 10
+          }
+        ]
+      }
+    ]
+  }
+}

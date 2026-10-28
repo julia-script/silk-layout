@@ -1,0 +1,89 @@
+{
+  "name": "text-indent-float-percentage",
+  "kind": "spec",
+  "features": [
+    "text-indent"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "fontKey": 1,
+          "textIndent": {
+            "percent": 0.2
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "float": "left",
+          "width": 30,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "text": "aaaa bbbb "
+      },
+      {
+        "parent": 0,
+        "text": "cccc"
+      }
+    ]
+  },
+  "spec": [
+    "https://drafts.csswg.org/css-text-3/#text-indent-property",
+    "https://drafts.csswg.org/css-sizing-3/#intrinsic-sizes",
+    "https://drafts.csswg.org/css-pseudo-4/#first-formatted-line"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 20
+      },
+      {
+        "x": 50,
+        "y": 0,
+        "width": 45,
+        "height": 10
+      },
+      {
+        "x": 30,
+        "y": 10,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "flex-zero-minimum",
+  "kind": "chrome",
+  "features": [
+    "flex",
+    "automatic-minimum",
+    "intrinsic-measure"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "minWidth": 0
+        },
+        "measure": {
+          "minWidth": 80,
+          "maxWidth": 80,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "minWidth": 0
+        },
+        "measure": {
+          "minWidth": 80,
+          "maxWidth": 80,
+          "height": 20
+        }
+      }
+    ]
+  }
+}

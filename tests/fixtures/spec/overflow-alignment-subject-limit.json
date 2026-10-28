@@ -1,0 +1,97 @@
+{
+  "name": "overflow-alignment-subject-limit",
+  "kind": "spec",
+  "features": [
+    "scrollable-overflow"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrollable-overflow-calculation",
+    "https://drafts.csswg.org/css-overflow-3/#scroll-origin",
+    "https://drafts.csswg.org/css-align-3/#overflow-scroll-position",
+    "https://drafts.csswg.org/css-position-3/#relative-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 100,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 100,
+          "height": 100,
+          "justifyContent": "center",
+          "position": "relative",
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 200,
+          "height": 20,
+          "flexShrink": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 10,
+          "position": "absolute",
+          "insetLeft": -90,
+          "insetTop": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 10,
+          "position": "absolute",
+          "insetLeft": 250,
+          "insetTop": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "scrollableOverflowX": -50,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 320,
+        "scrollableOverflowHeight": 100
+      },
+      {
+        "x": -50,
+        "y": 0,
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 200,
+        "scrollableOverflowHeight": 20
+      },
+      {
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 20,
+        "scrollableOverflowHeight": 10
+      },
+      {
+        "scrollableOverflowX": 0,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowWidth": 20,
+        "scrollableOverflowHeight": 10
+      }
+    ],
+    "viewportOverflow": {
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 100
+    }
+  }
+}

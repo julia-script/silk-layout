@@ -1,0 +1,40 @@
+{
+  "name": "absolute-padding-box",
+  "kind": "chrome",
+  "features": [
+    "absolute",
+    "positioning",
+    "padding",
+    "border"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "position": "relative",
+          "width": 200,
+          "height": 100,
+          "padding": 10,
+          "border": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "insetLeft": 0,
+          "insetTop": 0,
+          "width": {
+            "percent": 0.5
+          },
+          "height": 20
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "name": "inline-nonatomic-dimensions",
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 300
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline",
+          "width": 99,
+          "height": 88
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 20
+        }
+      }
+    ]
+  },
+  "kind": "chrome",
+  "features": [
+    "inline-fragments"
+  ]
+}

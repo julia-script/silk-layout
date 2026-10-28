@@ -1,0 +1,407 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.option { Option }
+import geometry { Layout, Point, Rect, Size }
+import style { Direction, WritingMode }
+import fragmentation { Fragmentainer, Fragmentainers, FragmentAncestor, FragmentationError, ResumeStore, FlowCursor }
+import silk.testing { Testing, AssertionError }
+import style { BreakBetween, BreakInside }
+import breaks { FragmentainerKind, PageSide, BreakRelaxation, BreakKinds, ForcedBreaks, FractionalProgress, avoidsBetween, avoidsInside, allowsBoundary, allowsLineBreak, nextRelaxation }
+import fragments { FragmentArena, FragmentKind, TextFragment, TextFragmentKind }
+import layout_pass { LayoutPass }
+import tree { Node, NO_NODE }
+
+fn close(actual: f64, expected: f64) -> bool {
+  return actual > expected - 0.000001 && actual < expected + 0.000001
+}
+
+test effect fn forcedKindsCombineWithoutErasingSide() ! AssertionError<'static> {
+  let mut forced = ForcedBreaks.none()
+  forced.add(BreakBetween.Left, FragmentainerKind.Column, true)
+  forced.add(BreakBetween.Column, FragmentainerKind.Column, true)
+  forced.add(BreakBetween.Region, FragmentainerKind.Column, true)
+  forced.add(BreakBetween.Page, FragmentainerKind.Column, true)
+  forced.add(BreakBetween.Avoid, FragmentainerKind.Column, true)
+  forced.add(BreakBetween.Auto, FragmentainerKind.Column, true)
+  run Testing.expect(forced.kinds.page && forced.kinds.column && forced.kinds.region, "mixed forced kinds all survive")
+  run Testing.expect(forced.side == PageSide.Left, "later generic page, avoidance and auto do not erase a side requirement")
+  forced.add(BreakBetween.Right, FragmentainerKind.Column, true)
+  run Testing.expect(forced.side == PageSide.Right && forced.kinds.column && forced.kinds.region, "latest side wins without losing other forced kinds")
+  forced.add(BreakBetween.Left, FragmentainerKind.Column, true)
+  run Testing.expect(forced.side == PageSide.Left, "side precedence follows order, not fixed left/right priority")
+}
+
+test effect fn rectoAndVersoFollowCallerPageProgression() ! AssertionError<'static> {
+  let mut forced = ForcedBreaks.none()
+  forced.add(BreakBetween.Recto, FragmentainerKind.Page, true)
+  run Testing.expect(forced.side == PageSide.Right && forced.kinds.page, "recto is right in right-recto progression")
+  forced.add(BreakBetween.Verso, FragmentainerKind.Page, true)
+  run Testing.expect(forced.side == PageSide.Left, "later verso replaces recto")
+  forced.add(BreakBetween.Recto, FragmentainerKind.Page, false)
+  run Testing.expect(forced.side == PageSide.Left, "recto is left in left-recto progression")
+  forced.add(BreakBetween.Verso, FragmentainerKind.Page, false)
+  forced.add(BreakBetween.Page, FragmentainerKind.Page, false)
+  run Testing.expect(forced.side == PageSide.Right, "verso is right and generic page preserves it")
+}
+
+test effect fn inactiveForcesCannotOverrideAvoidance() ! AssertionError<'static> {
+  let columns = BreakKinds { page: false, column: true, region: false }
+  let mut forced = ForcedBreaks.none()
+  forced.add(BreakBetween.Left, FragmentainerKind.Column, true)
+  forced.add(BreakBetween.Region, FragmentainerKind.Column, true)
+  let inactive = forced.active(columns)
+  run Testing.expect(!inactive.kinds.any() && inactive.side == PageSide.Any, "missing matching contexts remove forces and page side")
+  run Testing.expect(!allowsBoundary(forced, columns, FragmentainerKind.Column, true, BreakRelaxation.Strict), "inactive forces cannot beat column avoidance")
+  forced.add(BreakBetween.Column, FragmentainerKind.Column, true)
+  let effective = forced.active(columns)
+  run Testing.expect(effective.kinds.column && !effective.kinds.page && !effective.kinds.region, "only active requested kinds remain")
+  run Testing.expect(allowsBoundary(forced, columns, FragmentainerKind.Column, true, BreakRelaxation.Strict), "active forced break beats avoidance")
+  run Testing.expect(!allowsBoundary(forced, columns, FragmentainerKind.Page, false, BreakRelaxation.Avoidance), "relaxation cannot activate a missing context")
+  run Testing.expect(!allowsBoundary(forced, BreakKinds.none(), FragmentainerKind.Column, false, BreakRelaxation.Strict), "continuous context has no fragmentation boundary")
+}
+
+test effect fn enclosingForcedKindOverridesInnerAvoidance() ! AssertionError<'static> {
+  let active = BreakKinds { page: true, column: true, region: true }
+  let mut forced = ForcedBreaks.none()
+  forced.add(BreakBetween.Page, FragmentainerKind.Column, true)
+  run Testing.expect(allowsBoundary(forced, active, FragmentainerKind.Column, true, BreakRelaxation.Strict), "forced outer page break crosses inner column avoidance")
+  forced.add(BreakBetween.Region, FragmentainerKind.Column, true)
+  let effective = forced.active(active)
+  run Testing.expect(effective.kinds.page && effective.kinds.region && !effective.kinds.column, "crossing inner contexts does not invent a requested column force")
+}
+
+test effect fn genericForcedBreaksDistinguishInnermostFromAllContexts() ! AssertionError<'static> {
+  let active = BreakKinds { page: true, column: true, region: false }
+  let mut nearest = ForcedBreaks.none()
+  nearest.add(BreakBetween.Always, FragmentainerKind.Column, true)
+  let inner = nearest.active(active)
+  run Testing.expect(inner.kinds.column && !inner.kinds.page && !inner.kinds.region, "always targets the immediately containing context")
+  nearest.add(BreakBetween.Right, FragmentainerKind.Column, true)
+  nearest.add(BreakBetween.Always, FragmentainerKind.Column, true)
+  let combined = nearest.active(active)
+  run Testing.expect(combined.kinds.column && combined.kinds.page && combined.side == PageSide.Right, "always preserves independently requested outer breaks and page sides")
+  let mut all = ForcedBreaks.none()
+  all.add(BreakBetween.Left, FragmentainerKind.Column, true)
+  all.add(BreakBetween.All, FragmentainerKind.Column, true)
+  let outer = all.active(active)
+  run Testing.expect(outer.kinds.column && outer.kinds.page && !outer.kinds.region && outer.side == PageSide.Left, "all crosses every active context without inventing an inactive context or replacing a page side")
+  run Testing.expect(!all.active(BreakKinds.none()).kinds.any(), "generic forces remain inactive in continuous media")
+}
+
+test effect fn avoidanceMatchesOnlyItsFragmentainerKind() ! AssertionError<'static> {
+  run Testing.expect(avoidsBetween(BreakBetween.Avoid, FragmentainerKind.Page) && avoidsBetween(BreakBetween.Avoid, FragmentainerKind.Column) && avoidsBetween(BreakBetween.Avoid, FragmentainerKind.Region), "generic boundary avoidance applies to all kinds")
+  run Testing.expect(avoidsBetween(BreakBetween.AvoidPage, FragmentainerKind.Page) && !avoidsBetween(BreakBetween.AvoidPage, FragmentainerKind.Column), "page avoidance does not forbid a column break")
+  run Testing.expect(avoidsBetween(BreakBetween.AvoidColumn, FragmentainerKind.Column) && !avoidsBetween(BreakBetween.AvoidColumn, FragmentainerKind.Region), "column avoidance is kind-specific")
+  run Testing.expect(avoidsBetween(BreakBetween.AvoidRegion, FragmentainerKind.Region) && !avoidsBetween(BreakBetween.AvoidRegion, FragmentainerKind.Page), "region avoidance is kind-specific")
+  run Testing.expect(!avoidsBetween(BreakBetween.Auto, FragmentainerKind.Page) && !avoidsBetween(BreakBetween.Page, FragmentainerKind.Page), "auto and forced values are not avoidance")
+  run Testing.expect(avoidsInside(BreakInside.Avoid, FragmentainerKind.Page) && avoidsInside(BreakInside.Avoid, FragmentainerKind.Column) && avoidsInside(BreakInside.Avoid, FragmentainerKind.Region), "generic inside avoidance applies to all kinds")
+  run Testing.expect(avoidsInside(BreakInside.AvoidPage, FragmentainerKind.Page) && !avoidsInside(BreakInside.AvoidPage, FragmentainerKind.Column), "inside page avoidance is kind-specific")
+  run Testing.expect(avoidsInside(BreakInside.AvoidColumn, FragmentainerKind.Column) && !avoidsInside(BreakInside.AvoidColumn, FragmentainerKind.Region), "inside column avoidance is kind-specific")
+  run Testing.expect(avoidsInside(BreakInside.AvoidRegion, FragmentainerKind.Region) && !avoidsInside(BreakInside.AvoidRegion, FragmentainerKind.Page) && !avoidsInside(BreakInside.Auto, FragmentainerKind.Page), "inside region avoidance and auto retain their meanings")
+}
+
+test effect fn lineConstraintsRelaxBeforeAvoidance() ! AssertionError<'static> {
+  let strict = BreakRelaxation.Strict
+  let lines = nextRelaxation(strict)
+  let avoidance = nextRelaxation(lines)
+  run Testing.expect(lines == BreakRelaxation.Lines && avoidance == BreakRelaxation.Avoidance && nextRelaxation(avoidance) == avoidance, "relaxation is ordered and terminal")
+  run Testing.expect(allowsLineBreak(2, 3, 2, 3, false, strict), "exact orphan and widow thresholds permit a line break")
+  run Testing.expect(!allowsLineBreak(1, 3, 2, 3, false, strict) && !allowsLineBreak(2, 2, 2, 3, false, strict), "each line-count constraint independently forbids a break")
+  run Testing.expect(allowsLineBreak(1, 1, 2, 3, false, lines), "first relaxation drops both line-count constraints")
+  run Testing.expect(!allowsLineBreak(2, 3, 2, 3, true, strict) && !allowsLineBreak(1, 1, 2, 3, true, lines), "first relaxation retains inside avoidance")
+  run Testing.expect(allowsLineBreak(1, 1, 2, 3, true, avoidance), "second relaxation drops avoidance too")
+  run Testing.expect(!allowsLineBreak(0, 3, 2, 3, false, avoidance) && !allowsLineBreak(3, 0, 2, 3, false, avoidance), "relaxation cannot create a between-lines point at a block edge")
+  let pages = BreakKinds { page: true, column: false, region: false }
+  run Testing.expect(!allowsBoundary(ForcedBreaks.none(), pages, FragmentainerKind.Page, true, lines) && allowsBoundary(ForcedBreaks.none(), pages, FragmentainerKind.Page, true, avoidance), "boundary avoidance also survives the line-only stage")
+  run Testing.expect(allowsBoundary(ForcedBreaks.none(), pages, FragmentainerKind.Page, false, strict), "unconstrained boundary is eligible without relaxation")
+}
+
+test effect fn fractionalProgressMatchesVaryingPageExample() ! AssertionError<'static> {
+  // CSS Break 3 §5.1: top calc(150% + 30px), height calc(100% - 10px),
+  // with page heights 400, 200, 600. Arithmetic expectations are unrounded.
+  let mut top = FractionalProgress.make()
+  let mut height = FractionalProgress.make()
+  run Testing.expect(top.remaining == 1.0 && top.resolve(1.5 * 400.0 + 30.0) == 630.0, "progress begins at the entire resolved extent")
+  let firstTop = top.consume(1.5 * 400.0 + 30.0, 400.0)
+  run Testing.expect(firstTop == 400.0 && close(top.remaining, 23.0 / 63.0), "first page stores remaining percentage rather than 230 pixels")
+  let secondTop = top.consume(1.5 * 200.0 + 30.0, 200.0)
+  run Testing.expect(close(secondTop, 120.47619047619048) && top.remaining == 0.0, "new page resolves remaining top fraction against 330 pixels")
+  let secondHeight = height.consume(200.0 - 10.0, 200.0 - secondTop)
+  run Testing.expect(close(secondHeight, 79.52380952380952) && close(height.remaining, 1.0 - secondHeight / 190.0), "height starts independently and retains its percentage")
+  run Testing.expect(close(height.resolve(600.0 - 10.0), 343.0576441102757), "third page re-resolves remaining height against 590 pixels")
+  let thirdHeight = height.consume(600.0 - 10.0, 600.0)
+  run Testing.expect(close(thirdHeight, 343.0576441102757) && height.remaining == 0.0, "third page completes the remaining height")
+}
+
+test effect fn fractionalProgressPreservesRemainderAcrossPartialConsumption() ! AssertionError<'static> {
+  let mut progress = FractionalProgress.make()
+  let first = progress.consume(100.0, 25.0)
+  let blocked = progress.consume(200.0, 0.0)
+  run Testing.expect(first == 25.0 && blocked == 0.0 && progress.remaining == 0.75 && progress.resolve(200.0) == 150.0, "no available space preserves fractional progress")
+  let second = progress.consume(200.0, 50.0)
+  run Testing.expect(second == 50.0 && progress.remaining == 0.5, "consumption divides by full new extent, not remaining extent")
+  let third = progress.consume(80.0, 40.0)
+  run Testing.expect(third == 40.0 && progress.remaining == 0.0, "exact fit finishes")
+  let repeated = progress.consume(300.0, 500.0)
+  run Testing.expect(repeated == 0.0 && progress.resolve(300.0) == 0.0, "completed progress cannot restart on another page")
+}
+
+test effect fn zeroExtentCompletesWithoutAvailableSpace() ! AssertionError<'static> {
+  let mut empty = FractionalProgress.make()
+  let used = empty.consume(0.0, 0.0)
+  run Testing.expect(used == 0.0 && empty.remaining == 0.0, "zero extent completes without dividing by zero")
+  let mut shrinking = FractionalProgress.make()
+  let first = shrinking.consume(100.0, 25.0)
+  let zero = shrinking.consume(0.0, 50.0)
+  run Testing.expect(first == 25.0 && zero == 0.0 && shrinking.remaining == 0.0, "a remaining extent that resolves to zero completes on this page")
+  let mut small = FractionalProgress.make()
+  let smallUsed = small.consume(0.000000000001, 1.0)
+  run Testing.expect(smallUsed == 0.000000000001 && small.remaining == 0.0, "positive subpixel extents are consumed without an epsilon cutoff")
+}
+
+fn hostFrames<'a>(rects: &'a [Rect]) -> Fragmentainers<'a> {
+  return Fragmentainers {
+    rects: Option<&'a [Rect]>.Some { value: rects }, repeatStep: Option<Point>.None,
+    contexts: Option<&'a [FragmentainerKind]>.None, ancestors: Option<&'a [FragmentAncestor]>.None,
+    kind: FragmentainerKind.Column, writingMode: WritingMode.HorizontalTb,
+    direction: Direction.Ltr, firstPageRight: true, rectoOnRight: true,
+  }
+}
+
+test effect fn fragmentainerPresentationDoesNotChangeFlowExtent() ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut rects = List<Rect>.make()
+  run rects.append(Rect { x: 20.0, y: 30.0, width: 120.0, height: 300.0 }) |> Effect.provideMut<Allocator>(&mut allocator)
+  run rects.append(Rect { x: 200.0, y: 30.0, width: 80.0, height: 200.0 }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut sequence = hostFrames(rects.asSlice())
+  sequence.repeatStep = Option<Point>.Some { value: Point { x: -100.0, y: 0.0 } }
+  sequence.kind = FragmentainerKind.Page
+  sequence.writingMode = WritingMode.VerticalRl
+  sequence.direction = Direction.Rtl
+  sequence.rectoOnRight = false
+  match sequence.get(3) {
+    Option<Fragmentainer>.Some { value: frame } => {
+      run Testing.expect(frame.rect.x == 0.0 && frame.rect.y == 30.0 && frame.rect.height == 200.0, "host repeat translates the final geometry, not the initial one")
+      run Testing.expect(frame.blockExtent == 80.0 && frame.side == PageSide.Left, "vertical flow extent and page side are independent of host placement")
+    }
+    Option<Fragmentainer>.None => { run Testing.expect(false, "explicit repeating tail supplies later fragmentainers") }
+  }
+  sequence.repeatStep = Option<Point>.None
+  match sequence.get(2) {
+    Option<Fragmentainer>.Some { value: frame } => {
+      drop frame
+      run Testing.expect(false, "finite sequence must not silently repeat its last frame")
+    }
+    Option<Fragmentainer>.None => {}
+  }
+  let mut emptyRects = List<Rect>.make()
+  run emptyRects.append(Rect { x: 0.0, y: 0.0, width: 0.0, height: 10.0 }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut empty = hostFrames(emptyRects.asSlice())
+  empty.writingMode = WritingMode.VerticalRl
+  match empty.get(0) {
+    Option<Fragmentainer>.Some { value: frame } => {
+      run Testing.expect(frame.rect.width == 0.0 && frame.blockExtent == 1.0 && frame.side == PageSide.Any, "progress floor does not overwrite physical geometry or invent a page side")
+    }
+    Option<Fragmentainer>.None => { run Testing.expect(false, "zero physical extent is still a supplied fragmentainer") }
+  }
+}
+
+test effect fn rejectedCandidatesRestoreNestedAndAcceptedProgress() ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = ResumeStore.make()
+  let mut scratch = List<Layout>.make()
+  run store.prepare(2) |> Effect.provideMut<Allocator>(&mut allocator)
+  let outer = store.checkpoint()
+  let mut first = store.get(0)
+  first.started = true
+  run store.set(0, first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let inner = store.checkpoint()
+  first.normalComplete = true
+  run store.set(0, first) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut second = store.get(1)
+  second.contentComplete = true
+  run store.set(1, second) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.restore(inner, scratch.asMutSlice())
+  run Testing.expect(store.get(0).started && !store.get(0).normalComplete && !store.get(1).contentComplete, "rejecting a nested candidate preserves only enclosing progress")
+  first = store.get(0)
+  first.cursor = FlowCursor.Block { nextChild: 7 }
+  run store.set(0, first) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.close(inner)
+  store.restore(outer, scratch.asMutSlice())
+  run Testing.expect(!store.get(0).started && !store.get(1).contentComplete, "enclosing rejection also discards a committed nested retry")
+  store.close(outer)
+  first = store.get(0)
+  first.started = true
+  run store.set(0, first) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.acceptFrame()
+  let nextFrame = store.checkpoint()
+  second = store.get(1)
+  second.contentComplete = true
+  run store.set(1, second) |> Effect.provideMut<Allocator>(&mut allocator)
+  first.started = false
+  run store.set(0, first) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.restore(nextFrame, scratch.asMutSlice())
+  store.close(nextFrame)
+  run Testing.expect(store.get(0).started && !store.get(1).contentComplete, "reused journal indices cannot erase accepted earlier-frame progress")
+}
+
+test effect fn fragmentPublicationAndRejectedLookaheadPreserveEarlierGeometry() ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut layouts = List<Layout>.make()
+  let mut id: usize = 0
+  while id < 4 {
+    run layouts.append(Layout.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
+    id = id + 1
+  }
+  let mut arena = FragmentArena.make()
+  run arena.prepare(4) |> Effect.provideMut<Allocator>(&mut allocator)
+  let sources: [Node; 0] = []
+  let mut pass = run LayoutPass.make(layouts.asMutSlice(), &mut arena, &sources) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.beginFrame(0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let firstBoxValue = pass.fragment(0, 0, FragmentKind.Box)
+  let firstBox = run pass.fragments.append(firstBoxValue) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.beginPublication(0, firstBox.index, firstBox.index) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut box = Layout.zero()
+  box.location = Point { x: 1.0, y: 2.0 }
+  box.size = Size { width: 10.0, height: 20.0 }
+  run pass.store(0, box, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  let firstLineStart = pass.fragments.checkpoint()
+  run pass.beginPublication(1, NO_NODE, firstLineStart) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut line = pass.fragment(1, NO_NODE, FragmentKind.Line)
+  line.parent = firstBox.index
+  line.location.y = 6.0
+  let firstLine = run pass.fragments.append(line) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.firstLine(1, firstLine.index) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut lineLayout = Layout.zero()
+  lineLayout.location.y = 10.0
+  run pass.store(1, lineLayout, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.setStaticAnchor(2, firstLine.index, Rect { x: 3.0, y: 4.0, width: 0.0, height: 10.0 }, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut text = pass.fragment(3, 3, FragmentKind.Text)
+  text.parent = firstLine.index
+  let firstText = run pass.fragments.appendText(text, TextFragment { sourceStart: 0, sourceEnd: 1, fontKey: 0, shapeKey: 0, bidiLevel: 0, kind: TextFragmentKind.Glyphs }) |> Effect.provideMut<Allocator>(&mut allocator)
+  pass.resumes.acceptFrame()
+  let checkpoint = pass.checkpoint()
+  run pass.beginFrame(1) |> Effect.provideMut<Allocator>(&mut allocator)
+  let secondBoxValue = pass.fragment(0, 0, FragmentKind.Box)
+  let secondBox = run pass.fragments.append(secondBoxValue) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.beginPublication(0, secondBox.index, secondBox.index) |> Effect.provideMut<Allocator>(&mut allocator)
+  box.location = Point { x: 3.0, y: 4.0 }
+  box.size = Size { width: 30.0, height: 40.0 }
+  run pass.store(0, box, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  let secondLineStart = pass.fragments.checkpoint()
+  run pass.beginPublication(1, NO_NODE, secondLineStart) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.store(1, Layout.zero(), false) |> Effect.provideMut<Allocator>(&mut allocator)
+  line = pass.fragment(1, NO_NODE, FragmentKind.Line)
+  line.parent = secondBox.index
+  line.location.y = 7.0
+  let secondLine = run pass.fragments.append(line) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.firstLine(1, secondLine.index) |> Effect.provideMut<Allocator>(&mut allocator)
+  lineLayout.location.y = 20.0
+  run pass.store(1, lineLayout, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  run pass.setStaticAnchor(2, secondLine.index, Rect.zero(), false) |> Effect.provideMut<Allocator>(&mut allocator)
+  text = pass.fragment(3, 3, FragmentKind.Text)
+  text.parent = secondLine.index
+  drop run pass.fragments.appendText(text, TextFragment { sourceStart: 1, sourceEnd: 2, fontKey: 0, shapeKey: 0, bidiLevel: 0, kind: TextFragmentKind.Glyphs }) |> Effect.provideMut<Allocator>(&mut allocator)
+  pass.fragments.resolveLocations()
+  run Testing.expect(pass.fragments.values.asSlice()[firstBox.index].size.width == 10.0 && pass.fragments.values.asSlice()[secondBox.index].size.width == 30.0, "publishing a continuation must not overwrite the first box fragment")
+  run Testing.expect(pass.fragments.values.asSlice()[firstLine.index].location.y == 16.0 && pass.fragments.values.asSlice()[secondLine.index].location.y == 27.0, "placing current lines must not translate earlier fragmentainers")
+  run Testing.expect(pass.fragments.values.asSlice()[secondLine.index].fragmentainer == 1 && !pass.fragments.values.asSlice()[firstText.index].last, "accepted links identify the current fragmentainer and continued text")
+  pass.restoreCheckpoint(checkpoint)
+  pass.closeCheckpoint(checkpoint)
+  pass.fragments.resolveLocations()
+  run Testing.expect(pass.frame == 0 && pass.boxes[0].size.width == 10.0 && pass.boxes[1].location.y == 10.0, "rejected lookahead restores scalar geometry and frame selection")
+  run Testing.expect(pass.publication(0) == firstBox.index && pass.staticAnchor(2).parentFragment == firstLine.index && pass.staticAnchor(2).inlineLevel, "rejected lookahead restores publication and static-anchor identity")
+  run Testing.expect(pass.fragments.values.asSlice()[firstText.index].last && pass.fragments.values.asSlice()[firstText.index].nextForBox == NO_NODE, "rolled-back text cannot leave the surviving source continuation unterminated")
+}
+
+test effect fn nestedContextRoutingUsesIdentityRatherThanKindBits() ! OutOfMemoryError | AssertionError<'static> | FragmentationError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let rects: [Rect; 4] = [
+    Rect { x: 0.0, y: 0.0, width: 40.0, height: 30.0 },
+    Rect { x: 50.0, y: 0.0, width: 40.0, height: 30.0 },
+    Rect { x: 0.0, y: 100.0, width: 60.0, height: 40.0 },
+    Rect { x: 70.0, y: 100.0, width: 60.0, height: 40.0 },
+  ]
+  let contexts: [FragmentainerKind; 1] = [FragmentainerKind.Page]
+  let ancestors: [FragmentAncestor; 4] = [
+    FragmentAncestor { index: 0, rect: Rect { x: 0.0, y: 0.0, width: 100.0, height: 30.0 } },
+    FragmentAncestor { index: 0, rect: Rect { x: 0.0, y: 0.0, width: 100.0, height: 30.0 } },
+    FragmentAncestor { index: 1, rect: Rect { x: 0.0, y: 100.0, width: 140.0, height: 40.0 } },
+    FragmentAncestor { index: 1, rect: Rect { x: 0.0, y: 100.0, width: 140.0, height: 40.0 } },
+  ]
+  let mut layouts: [Layout; 0] = []
+  let sources: [Node; 0] = []
+  let mut arena = FragmentArena.make()
+  let mut pass = run LayoutPass.make(&mut layouts, &mut arena, &sources) |> Effect.provideMut<Allocator>(&mut allocator)
+  pass.frames = Fragmentainers {
+    rects: Option<&[Rect]>.Some { value: &rects }, contexts: Option<&[FragmentainerKind]>.Some { value: &contexts },
+    ancestors: Option<&[FragmentAncestor]>.Some { value: &ancestors }, repeatStep: Option<Point>.None,
+    kind: FragmentainerKind.Column, writingMode: WritingMode.HorizontalTb,
+    direction: Direction.Ltr, firstPageRight: true, rectoOnRight: true,
+  }
+  run pass.frames.validate()
+  pass.frame = 0
+  let mut force = ForcedBreaks.none()
+  force.add(BreakBetween.Always, pass.frames.kind, true)
+  run Testing.expect((run pass.nextFrame(force)) == 1, "always advances only the leaf context")
+  force.add(BreakBetween.Page, pass.frames.kind, true)
+  run Testing.expect((run pass.nextFrame(force)) == 2, "combined page and column forces cross the page boundary")
+  force.add(BreakBetween.Right, pass.frames.kind, true)
+  force.add(BreakBetween.Left, pass.frames.kind, true)
+  run Testing.expect((run pass.nextFrame(force)) == 2, "latest side uses page identity, not the even leaf index")
+  run Testing.expect(!pass.frames.boundaryKinds(0).page && pass.frames.boundaryKinds(1).page, "avoid-page applies only at outer transitions")
+  force.add(BreakBetween.Right, pass.frames.kind, true)
+  let exhausted = run pass.nextFrame(force)
+    |> Effect.map(fn(value: usize) -> bool { drop value
+      return false })
+    |> Effect.catch<FragmentationError>(effect fn(error: FragmentationError) -> bool { return error.frame == 4 })
+  run Testing.expect(exhausted, "a finite sequence cannot silently fabricate a required right page")
+  pass.frames.repeatStep = Option<Point>.Some { value: Point { x: 0.0, y: 100.0 } }
+  run Testing.expect((run pass.nextFrame(force)) == 4, "the repeat tail advances all ancestors without searching an unchanged page")
+  match pass.frames.page(4) {
+    Option<FragmentAncestor>.Some { value } => {
+      run Testing.expect(value.index == 2 && value.rect.y == 200.0 && value.rect.width == 140.0, "repeated page geometry translates the last ancestor and advances its ordinal")
+    }
+    Option<FragmentAncestor>.None => { run Testing.expect(false, "repeating nested frames retain page ancestry") }
+  }
+  pass.frames.kind = FragmentainerKind.Page
+  force = ForcedBreaks.none()
+  force.add(BreakBetween.Page, pass.frames.kind, true)
+  run Testing.expect((run pass.nextFrame(force)) == 1, "typed page selects the nearest of two page contexts")
+  force.add(BreakBetween.All, pass.frames.kind, true)
+  run Testing.expect((run pass.nextFrame(force)) == 2, "all preserves repeated context identities, crossing both page contexts")
+}
+
+test effect fn hostAncestryValidationRejectsChangingIdentityGeometry() ! AssertionError<'static> | FragmentationError {
+  let rects: [Rect; 2] = [
+    Rect { x: 0.0, y: 0.0, width: 40.0, height: 30.0 },
+    Rect { x: 500.0, y: 0.0, width: 40.0, height: 30.0 },
+  ]
+  let contexts: [FragmentainerKind; 1] = [FragmentainerKind.Page]
+  let contextSlice: &[FragmentainerKind] = &contexts
+  let ancestors: [FragmentAncestor; 2] = [
+    FragmentAncestor { index: 0, rect: Rect { x: 0.0, y: 0.0, width: 100.0, height: 30.0 } },
+    FragmentAncestor { index: 0, rect: Rect { x: 0.0, y: 0.0, width: 200.0, height: 30.0 } },
+  ]
+  let mut frames = Fragmentainers {
+    rects: Option<&[Rect]>.Some { value: &rects }, contexts: Option.Some { value: contextSlice },
+    ancestors: Option<&[FragmentAncestor]>.Some { value: &ancestors }, repeatStep: Option<Point>.None,
+    kind: FragmentainerKind.Column, writingMode: WritingMode.HorizontalTb,
+    direction: Direction.Ltr, firstPageRight: true, rectoOnRight: true,
+  }
+  let changed = run frames.validate()
+    |> Effect.map(fn(value: ()) -> bool { drop value
+      return false })
+    |> Effect.catch<FragmentationError>(effect fn(error: FragmentationError) -> bool { return error.frame == 1 })
+  run Testing.expect(changed, "an unchanged ancestor ordinal cannot acquire different geometry")
+  frames = hostFrames(&rects)
+  frames.contexts = Option.Some { value: contextSlice }
+  let missing = run frames.validate()
+    |> Effect.map(fn(value: ()) -> bool { drop value
+      return false })
+    |> Effect.catch<FragmentationError>(effect fn(error: FragmentationError) -> bool { return error.frame == 0 })
+  run Testing.expect(missing, "host validation rejects missing ancestry before layout can index it")
+  frames = hostFrames(&rects)
+  run frames.validate()
+}

@@ -1,0 +1,57 @@
+{
+  "name": "none-root",
+  "kind": "spec",
+  "features": [
+    "display-none",
+    "box-generation",
+    "root",
+    "margin"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-display-3/#box-generation"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "none",
+          "margin": 20,
+          "padding": 7,
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 20
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0
+      }
+    ]
+  }
+}

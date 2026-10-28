@@ -1,0 +1,28 @@
+{
+  "name": "fragmentation-flex-parallel-forced",
+  "kind": "spec",
+  "features": ["fragmentation", "flex", "parallel-flows"],
+  "spec": ["https://drafts.csswg.org/css-flexbox-1/#pagination", "https://drafts.csswg.org/css-break-3/#parallel-flows"],
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "fragmentation": {"kind": "column", "frames": [{"x": 0, "y": 0, "width": 100, "height": 50}, {"x": 100, "y": 0, "width": 100, "height": 50}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "flex", "alignItems": "flex-start"}},
+      {"parent": 0, "style": {"width": 50, "flexShrink": 0}},
+      {"parent": 1, "style": {"height": 20}},
+      {"parent": 1, "style": {"height": 20, "breakBefore": "column"}},
+      {"parent": 0, "style": {"width": 50, "flexShrink": 0}},
+      {"parent": 4, "style": {"height": 20}},
+      {"parent": 4, "style": {"height": 20}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 100, "height": 50}, {"x": 100, "y": 0, "width": 100, "height": 20}]},
+    {"rects": [{"x": 0, "y": 0, "width": 50, "height": 50}, {"x": 100, "y": 0, "width": 50, "height": 20}]},
+    {"rects": [{"x": 0, "y": 0, "width": 50, "height": 20}]},
+    {"rects": [{"x": 100, "y": 0, "width": 50, "height": 20}]},
+    {"rects": [{"x": 50, "y": 0, "width": 50, "height": 40}]},
+    {"rects": [{"x": 50, "y": 0, "width": 50, "height": 20}]},
+    {"rects": [{"x": 50, "y": 20, "width": 50, "height": 20}]}
+  ]}
+}

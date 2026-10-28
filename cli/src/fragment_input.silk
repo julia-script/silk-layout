@@ -1,0 +1,137 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.i32
+import silk.json_value { Value }
+import silk.list { List }
+import silk.option { Option }
+import layout.lib { Fragmentainers, FragmentAncestor, FragmentationError, FragmentainerKind, Rect, Point, WritingMode, Direction }
+import protocol as P
+import protocol { ProtocolError }
+
+pub struct FragmentRequest {
+  rects: List<Rect>,
+  contexts: List<FragmentainerKind>,
+  ancestors: List<FragmentAncestor>,
+  repeatStep: Option<Point>,
+  kind: FragmentainerKind,
+  writingMode: WritingMode,
+  direction: Direction,
+  firstPageRight: bool,
+  rectoOnRight: bool,
+}
+impl FragmentRequest {
+  pub fn view<'a>(self: &'a Self) -> Fragmentainers<'a> {
+    let repeatStep = match &self.repeatStep {
+      Option<Point>.Some { value } => Option<Point>.Some { value: value }
+      Option<Point>.None => Option<Point>.None
+    }
+    return Fragmentainers {
+      rects: Option.Some { value: self.rects.asSlice() }, repeatStep: move repeatStep,
+      contexts: Option.Some { value: self.contexts.asSlice() },
+      ancestors: Option.Some { value: self.ancestors.asSlice() },
+      kind: self.kind, writingMode: self.writingMode, direction: self.direction,
+      firstPageRight: self.firstPageRight, rectoOnRight: self.rectoOnRight,
+    }
+  }
+}
+
+effect fn pageSide(value: &Value) -> bool ! ProtocolError {
+  let name = run P.text(value)
+  if name == "right" { return true }
+  if name == "left" { return false }
+  fail P.invalid("fragmentation page side must be left or right")
+}
+
+effect fn contextKind(value: &Value) -> FragmentainerKind ! ProtocolError {
+  let name = run P.text(value)
+  if name == "page" { return FragmentainerKind.Page }
+  if name == "column" { return FragmentainerKind.Column }
+  if name == "region" { return FragmentainerKind.Region }
+  fail P.invalid("fragmentation context kind must be page, column, or region")
+}
+
+pub effect fn parse(value: &Value) -> FragmentRequest
+  ! ProtocolError | OutOfMemoryError ? &mut Allocator {
+  run P.fields(value, &["kind", "frames", "repeatStep", "writingMode", "direction", "firstPage", "recto", "contexts", "ancestors"])
+  let kind = run contextKind(run P.required(value, "kind"))
+  let frames = run P.array(run P.required(value, "frames"))
+  if frames.length == 0 { fail P.invalid("fragmentation.frames must be nonempty") }
+  let mut result = FragmentRequest {
+    rects: List<Rect>.make(), repeatStep: Option<Point>.None, kind: kind,
+    contexts: List<FragmentainerKind>.make(), ancestors: List<FragmentAncestor>.make(),
+    writingMode: WritingMode.HorizontalTb, direction: Direction.Ltr,
+    firstPageRight: true, rectoOnRight: true,
+  }
+  run result.rects.reserveExact(frames.length)
+  let mut index: usize = 0
+  while index < frames.length {
+    let frame = run P.item(&frames[index])
+    run P.fields(frame, &["x", "y", "width", "height"])
+    run result.rects.append(Rect {
+      x: run P.finite(run P.required(frame, "x")),
+      y: run P.finite(run P.required(frame, "y")),
+      width: run P.nonnegative(run P.required(frame, "width")),
+      height: run P.nonnegative(run P.required(frame, "height")),
+    })
+    index = index + 1
+  }
+  if P.has(value, "contexts") != P.has(value, "ancestors") {
+    fail P.invalid("fragmentation contexts and ancestors must be supplied together")
+  }
+  if P.has(value, "contexts") {
+    let contexts = run P.array(run P.required(value, "contexts"))
+    let mut depth: usize = 0
+    while depth < contexts.length {
+      run result.contexts.append(run contextKind(run P.item(&contexts[depth])))
+      depth = depth + 1
+    }
+    let rows = run P.array(run P.required(value, "ancestors"))
+    if rows.length != frames.length { fail P.invalid("fragmentation ancestors must have one row per frame") }
+    index = 0
+    while index < rows.length {
+      let row = run P.array(run P.item(&rows[index]))
+      if row.length != contexts.length { fail P.invalid("fragmentation ancestor rows must match contexts") }
+      depth = 0
+      while depth < row.length {
+        let entry = run P.item(&row[depth])
+        run P.fields(entry, &["index", "x", "y", "width", "height"])
+        let ordinal = run P.integer(run P.required(entry, "index"))
+        if ordinal < 0 { fail P.invalid("fragmentation ancestor index must be nonnegative") }
+        run result.ancestors.append(FragmentAncestor { index: i32.toUsize(ordinal), rect: Rect {
+          x: run P.finite(run P.required(entry, "x")), y: run P.finite(run P.required(entry, "y")),
+          width: run P.nonnegative(run P.required(entry, "width")), height: run P.nonnegative(run P.required(entry, "height")),
+        } })
+        depth = depth + 1
+      }
+      index = index + 1
+    }
+  }
+  if P.has(value, "repeatStep") {
+    let step = run P.required(value, "repeatStep")
+    run P.fields(step, &["x", "y"])
+    result.repeatStep = Option<Point>.Some { value: Point {
+      x: run P.finite(run P.required(step, "x")), y: run P.finite(run P.required(step, "y")),
+    } }
+  }
+  if P.has(value, "writingMode") {
+    let mode = run P.text(run P.required(value, "writingMode"))
+    if mode == "horizontal-tb" { result.writingMode = WritingMode.HorizontalTb }
+    else if mode == "vertical-rl" { result.writingMode = WritingMode.VerticalRl }
+    else if mode == "vertical-lr" { result.writingMode = WritingMode.VerticalLr }
+    else if mode == "sideways-rl" { result.writingMode = WritingMode.SidewaysRl }
+    else if mode == "sideways-lr" { result.writingMode = WritingMode.SidewaysLr }
+    else { fail P.invalid("invalid fragmentation.writingMode") }
+  }
+  if P.has(value, "direction") {
+    let direction = run P.text(run P.required(value, "direction"))
+    if direction == "ltr" { result.direction = Direction.Ltr }
+    else if direction == "rtl" { result.direction = Direction.Rtl }
+    else { fail P.invalid("invalid fragmentation.direction") }
+  }
+  if P.has(value, "firstPage") { result.firstPageRight = run pageSide(run P.required(value, "firstPage")) }
+  if P.has(value, "recto") { result.rectoOnRight = run pageSide(run P.required(value, "recto")) }
+  run result.view().validate() |> Effect.catch<FragmentationError>(effect fn(error: FragmentationError) -> () ! ProtocolError {
+    fail P.invalid(error.message)
+  })
+  return move result
+}

@@ -1,0 +1,48 @@
+{
+  "name": "sticky-scrolling-cb-direct-flow",
+  "kind": "chrome",
+  "features": [
+    "scroll-state",
+    "sticky-containing-block"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-position-3/#stickypos-insets",
+    "https://github.com/w3c/csswg-drafts/issues/2609"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        },
+        "scrollOffset": {
+          "x": 0,
+          "y": 150
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "height": 20,
+          "position": "sticky",
+          "insetTop": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 300
+        }
+      }
+    ]
+  }
+}

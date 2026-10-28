@@ -1,0 +1,72 @@
+{
+  "name": "flex-grow-factors-below-one",
+  "kind": "spec",
+  "features": [
+    "flex",
+    "grow",
+    "factors-below-one"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 200,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 0.25,
+          "minWidth": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 0.25,
+          "minWidth": 0
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 20,
+        "contentWidth": 200,
+        "contentHeight": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 75,
+        "height": 20,
+        "contentWidth": 75,
+        "contentHeight": 20
+      },
+      {
+        "x": 75,
+        "y": 0,
+        "width": 75,
+        "height": 20,
+        "contentWidth": 75,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

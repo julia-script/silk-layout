@@ -1,0 +1,2188 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.option { Option }
+import silk.string { String }
+import geometry { Layout, Measure, FontRequest, FontMetrics, BaselineSet, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, max, min }
+import style { Style, LineHeight, VerticalAlignKind, BaselineSource, WritingMode, TextOrientation, Direction, UnicodeBidi, TextAlign, TextWrap, BoxDecorationBreak, MarginBreak, Float, DisplayInside, DisplayOutside, DimensionKind, Position }
+import tree { Node, NO_NODE }
+import box_tree { BoxTree, BoxKind }
+import fragments { FragmentKind, TextFragment, TextFragmentKind }
+import axes { Axes }
+import context { Input, ResolvedBox, resolveBox, resolve, outOfFlow, UNBOUNDED }
+import engine { layoutNode }
+import bfc { BfcState, FloatBox, Band }
+import layout_pass { LayoutPass, FullBoxGeometry }
+import text { TextMeasure, TextError, TextToken, TextTokenKind, TextContext, TextCursor, TextRange, TextBreak, TextBreakKind, TextAnalysis, TextShapeRequest, TextRun }
+import inline_text as TextFlow
+import inline_bidi as Bidi
+import inline_items { FontBox, Scope, ItemKind, Item }
+import inline_visual as Visual
+import inline_visual { Line }
+import inline_prepared { PreparedInline }
+import fragmentation { FlowCursor, FragmentationError, BoundaryProbe }
+import breaks { BreakBoundary, BreakRelaxation, ForcedBreaks, allowsLineBreak }
+import fragment_box as FragmentBox
+
+fn fontBox<M: Measure>(measurer: &mut M, style: &Style) -> FontBox {
+  let metrics = Measure.font(&mut measurer, FontRequest { key: style.fontKey, writingMode: style.writingMode, textOrientation: style.textOrientation, direction: style.usedDirection() })
+  return fontBoxFromMetrics(metrics, style)
+}
+fn fontBoxFromMetrics(metrics: FontMetrics, style: &Style) -> FontBox {
+  let height = metrics.ascent + metrics.descent
+  let mut baseline = metrics.baselines.forContext(style.writingMode, style.textOrientation)
+  // Vertical-lr's line-over edge is opposite its block-start edge.
+  if style.writingMode == WritingMode.VerticalLr { baseline = height - baseline }
+  let mut lineHeight = height + metrics.lineGap
+  match style.lineHeight {
+    LineHeight.Normal => {}
+    LineHeight.Number { value } => { lineHeight = metrics.fontSize * value }
+    LineHeight.Length { value } => { lineHeight = value }
+  }
+  let leading = (lineHeight - height) / 2.0
+  return FontBox { metrics: metrics, baseline: baseline, height: height, lineHeight: lineHeight, before: baseline + leading, after: height - baseline + leading }
+}
+fn fontBaselines(font: &FontBox, mode: WritingMode) -> BaselineSet {
+  if mode == WritingMode.VerticalLr { return font.metrics.baselines.reversed(font.height) }
+  return font.metrics.baselines
+}
+fn alignmentBaseline(baselines: &BaselineSet, style: &Style, parent: &Style) -> f64 {
+  let kind = style.verticalAlign.kind
+  if kind == VerticalAlignKind.Middle {
+    if style.textOrientation == TextOrientation.Upright && style.usesCentralBaseline() { return baselines.central }
+    return baselines.xMiddle
+  }
+  if kind == VerticalAlignKind.TextTop { return baselines.textOver }
+  if kind == VerticalAlignKind.TextBottom { return baselines.textUnder }
+  return baselines.forContext(parent.writingMode, parent.textOrientation)
+}
+fn fontAlignmentOffset(font: &FontBox, style: &Style, parent: &Style) -> f64 {
+  if style.verticalAlign.kind == VerticalAlignKind.Top || style.verticalAlign.kind == VerticalAlignKind.Bottom { return 0.0 }
+  let mut baseline = alignmentBaseline(&font.metrics.baselines, style, parent)
+  if parent.writingMode == WritingMode.VerticalLr { baseline = font.height - baseline }
+  return baseline - font.baseline
+}
+fn lineAlignment(kind: VerticalAlignKind, mode: WritingMode) -> VerticalAlignKind {
+  // In vertical-lr, line-over is block-end rather than block-start.
+  if mode == WritingMode.VerticalLr {
+    if kind == VerticalAlignKind.Top { return VerticalAlignKind.Bottom }
+    if kind == VerticalAlignKind.Bottom { return VerticalAlignKind.Top }
+  }
+  return kind
+}
+fn alignmentShift(style: &Style, lineHeight: f64, parent: &FontBox, mode: WritingMode) -> f64 {
+  let kind = style.verticalAlign.kind
+  let mut over = -1.0
+  if mode == WritingMode.VerticalLr { over = 1.0 }
+  if kind == VerticalAlignKind.Shift { return over * resolve(style.verticalAlign.shift, lineHeight, true, 0.0) }
+  if kind == VerticalAlignKind.Sub { return -over * parent.metrics.subscriptOffset }
+  if kind == VerticalAlignKind.Super { return over * parent.metrics.superscriptOffset }
+  return 0.0
+}
+fn atomicBaseline(style: &Style, layout: &Layout, axes: Axes, margin: ResolvedEdges, parent: &Style) -> f64 {
+  let size = axes.size(layout.size)
+  let childAxes = Axes.make(style.writingMode)
+  let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && style.display.insideIs(DisplayInside.Flex))
+  let available = (first && layout.hasFirstBaseline) || (!first && layout.hasLastBaseline)
+  if childAxes.vertical == axes.vertical && available {
+    let mut baseline = 0.0
+    if first { baseline = alignmentBaseline(&layout.firstBaselines, style, parent) }
+    else { baseline = alignmentBaseline(&layout.lastBaselines, style, parent) }
+    if childAxes.reverseBlock != axes.reverseBlock { baseline = size.height - baseline }
+    return baseline
+  }
+  return marginBaseline(style, size, axes, margin, parent)
+}
+
+fn marginBaseline(style: &Style, size: Size, axes: Axes, margin: ResolvedEdges, parent: &Style) -> f64 {
+  let childAxes = Axes.make(style.writingMode)
+  // Inline3 A.3 synthesizes absent atomic baselines from the used margin box.
+  let mut reverseOver = parent.writingMode == WritingMode.VerticalLr
+  if childAxes.vertical == axes.vertical {
+    reverseOver = (style.writingMode == WritingMode.VerticalLr) != (childAxes.reverseBlock != axes.reverseBlock)
+  }
+  let mut over = -margin.top
+  let mut under = size.height + margin.bottom
+  if reverseOver { over = size.height + margin.bottom
+    under = -margin.top }
+  let baselines = BaselineSet.synthesized(over, under)
+  return alignmentBaseline(&baselines, style, parent)
+}
+
+struct AtomicData {
+  input: Input, size: Size, location: Point, margin: ResolvedEdges, deferred: bool, requested: ForcedBreaks,
+  usedTop: f64, usedBottom: f64, baseline: f64, baselineFromMargin: bool,
+}
+struct TextLeaf { font: usize, start: usize, end: usize, key: usize, kind: TextFragmentKind }
+impl Copy for TextLeaf {}
+struct TextFont { style: usize, key: usize, font: FontBox }
+struct TextCandidate {
+  items: List<Item>, texts: List<TextLeaf>, advance: f64, hanging: f64, hangingItems: usize, real: bool, visual: Line,
+}
+impl TextCandidate {
+  fn make() -> TextCandidate {
+    return TextCandidate { items: List<Item>.make(), texts: List<TextLeaf>.make(), advance: 0.0, hanging: 0.0, hangingItems: 0, real: false, visual: Line.make() }
+  }
+}
+struct Extent { alignment: VerticalAlignKind, active: bool, before: f64, after: f64, baseline: f64 }
+impl Copy for Extent {}
+impl Extent {
+  fn make(alignment: VerticalAlignKind) -> Extent {
+    return Extent { alignment: alignment, active: false, before: 0.0, after: 0.0, baseline: 0.0 }
+  }
+}
+fn include(extent: &mut Extent, before: f64, after: f64) {
+  if !extent.active { extent.before = before
+    extent.after = after
+    extent.active = true }
+  else { extent.before = max(extent.before, before)
+    extent.after = max(extent.after, after) }
+}
+fn effectiveTextAlign(style: &Style, last: bool) -> TextAlign {
+  if !last { return style.textAlign }
+  if style.textAlignLast != TextAlign.Auto { return style.textAlignLast }
+  if style.textAlign == TextAlign.Justify { return TextAlign.Start }
+  return style.textAlign
+}
+fn lineOffset(style: &Style, direction: Direction, remaining: f64, last: bool) -> f64 {
+  // CSS Text §6.1: overfull lines overflow their end edge, irrespective of
+  // the requested alignment or unexpandable-line fallback.
+  if remaining < 0.0 {
+    if direction == Direction.Rtl { return remaining }
+    return 0.0
+  }
+  let mut alignment = effectiveTextAlign(style, last)
+  if alignment == TextAlign.Justify {
+    alignment = style.textAlignLast
+    if alignment == TextAlign.Justify { alignment = TextAlign.Center }
+    else if alignment == TextAlign.Auto { alignment = TextAlign.Start }
+  }
+  if alignment == TextAlign.Center { return remaining / 2.0 }
+  if alignment == TextAlign.Right { return remaining }
+  if alignment == TextAlign.Left { return 0.0 }
+  if (alignment == TextAlign.End && direction == Direction.Ltr) || (alignment != TextAlign.End && direction == Direction.Rtl) { return remaining }
+  return 0.0
+}
+
+fn lineIndent(style: &Style, firstFormatted: bool, firstLine: bool, afterForced: bool, width: f64) -> f64 {
+  let indent = style.textIndent
+  let selected = (firstLine && (firstFormatted || indent.eachLine)) || (afterForced && indent.eachLine)
+  if selected == indent.hanging { return 0.0 }
+  return resolve(indent.value, width, true, 0.0)
+}
+
+fn indentBand(band: Band, indent: f64, rtl: bool) -> Band {
+  let mut result = band
+  if rtl {
+    result.right = result.right - indent
+    result.left = min(result.left, result.right)
+  } else {
+    result.left = result.left + indent
+    result.right = max(result.right, result.left)
+  }
+  return result
+}
+
+effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut List<Item>, atomics: &mut List<AtomicData>, scopes: &mut List<Scope>, extents: &mut List<Extent>, id: usize, parentScope: usize, input: Input, axes: Axes, mode: WritingMode) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let node = nodes.node(id)
+  let style = nodes.style(id)
+  let parent = scopes.get(parentScope)
+  let parentStyle = nodes.style(parent.id)
+  let mut item = Item { kind: ItemKind.Anchor, level: 0, id: id, scope: parentScope, group: parent.group, leaf: NO_NODE, advance: 0.0, before: 0.0, after: 0.0, offset: parent.offset, lineLeftSpacing: 0.0, start: TextCursor { unit: 0, offset: 0 } }
+  if node.kind == BoxKind.Text {
+    item.kind = ItemKind.Text
+    run items.append(item)
+    return
+  }
+  let resolved = axes.box(resolveBox(style, input))
+  if outOfFlow(style) { run items.append(item)
+    return }
+  if node.kind == BoxKind.Inline {
+    let edgeRtl = parentStyle.usedDirection() == Direction.Rtl
+    let font = fontBox(&mut measurer, style)
+    let index = scopes.length()
+    let mut group = parent.group
+    let mut offset = parent.offset
+      + fontAlignmentOffset(&parent.font, style, parentStyle)
+      - fontAlignmentOffset(&font, style, parentStyle)
+      + alignmentShift(style, font.lineHeight, &parent.font, mode)
+    if style.verticalAlign.kind == VerticalAlignKind.Top || style.verticalAlign.kind == VerticalAlignKind.Bottom {
+      group = extents.length()
+      run extents.append(Extent.make(lineAlignment(style.verticalAlign.kind, mode)))
+      offset = 0.0
+    }
+    run scopes.append(Scope { id: id, parent: parentScope, group: group, font: font, offset: offset, inset: resolved.inset, border: resolved.border, margin: resolved.margin, phantomClone: false })
+    item.kind = ItemKind.Open
+    item.scope = index
+    item.group = group
+    item.offset = offset
+    item.before = font.before
+    item.after = font.after
+    if node.firstForSource || style.boxDecorationBreak == BoxDecorationBreak.Clone {
+      item.advance = resolved.inset.left + resolved.margin.left
+      if edgeRtl { item.advance = resolved.inset.right + resolved.margin.right }
+    }
+    run items.append(item)
+    let mut child = node.firstChild
+    while child != NO_NODE {
+      run collect(nodes, &mut output, &mut measurer, &mut items, &mut atomics, &mut scopes, &mut extents, child, index, input, axes, mode)
+      child = nodes.node(child).nextSibling
+    }
+    item.kind = ItemKind.Close
+    item.advance = 0.0
+    if node.lastForSource || style.boxDecorationBreak == BoxDecorationBreak.Clone {
+      item.advance = resolved.inset.right + resolved.margin.right
+      if edgeRtl { item.advance = resolved.inset.left + resolved.margin.left }
+    }
+    run items.append(item)
+    return
+  }
+  item.kind = ItemKind.Atomic
+  if style.float != Float.None { item.kind = ItemKind.Float }
+  let mut childInput = input
+  childInput.parentWritingMode = parentStyle.writingMode
+  childInput.parentTextOrientation = parentStyle.textOrientation
+  childInput.performLayout = false
+  childInput.blockRoot = true
+  childInput.shrinkToFit = true
+  let layout = run layoutNode(nodes, &mut output, &mut measurer, id, childInput)
+  let mut baseline = 0.0
+  let mut baselineFromMargin = false
+  if item.kind == ItemKind.Atomic {
+    baseline = atomicBaseline(style, &layout, axes, resolved.margin, parentStyle)
+    let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && style.display.insideIs(DisplayInside.Flex))
+    baselineFromMargin = Axes.make(style.writingMode).vertical != axes.vertical || !((first && layout.hasFirstBaseline) || (!first && layout.hasLastBaseline))
+  }
+  item.leaf = atomics.length()
+  run atomics.append(AtomicData { input: childInput, size: layout.size, location: Point { x: 0.0, y: 0.0 }, margin: resolved.margin, usedTop: resolved.margin.top, usedBottom: resolved.margin.bottom, baseline: baseline, baselineFromMargin: baselineFromMargin, deferred: false, requested: ForcedBreaks.none() })
+  let size = axes.size(layout.size)
+  item.advance = size.width + resolved.margin.horizontal()
+  if item.kind == ItemKind.Float { run items.append(item)
+    return }
+  item.before = resolved.margin.top + baseline
+  item.after = size.height + resolved.margin.bottom - baseline
+  let mut lineHeight = parent.font.lineHeight
+  if style.verticalAlign.kind == VerticalAlignKind.Shift && (style.verticalAlign.shift.kind == DimensionKind.Percent || style.verticalAlign.shift.kind == DimensionKind.Calc) {
+    lineHeight = fontBox(&mut measurer, style).lineHeight
+  }
+  item.offset = parent.offset + fontAlignmentOffset(&parent.font, style, parentStyle)
+    + alignmentShift(style, lineHeight, &parent.font, mode)
+  if style.verticalAlign.kind == VerticalAlignKind.Top || style.verticalAlign.kind == VerticalAlignKind.Bottom {
+    item.group = extents.length()
+    item.offset = 0.0
+    run extents.append(Extent.make(lineAlignment(style.verticalAlign.kind, mode)))
+  }
+  run items.append(item)
+}
+
+fn lineExtents(items: &[Item], scopes: &[Scope], extents: &mut [Extent], start: usize, end: usize, real: bool) -> Size {
+  let mut index: usize = 0
+  while index < extents.length {
+    let alignment = extents[index].alignment
+    extents[index] = Extent.make(alignment)
+    index = index + 1
+  }
+  if real { include(&mut extents[0], scopes[0].font.before, scopes[0].font.after) }
+  index = start
+  while index < end {
+    let item = items[index]
+    if item.kind != ItemKind.Float && item.kind != ItemKind.Anchor {
+      include(&mut extents[item.group], item.before - item.offset, item.after + item.offset)
+      let mut scopeId = item.scope
+      while scopeId != 0 {
+        let scope = scopes[scopeId]
+        include(&mut extents[scope.group], scope.font.before - scope.offset, scope.font.after + scope.offset)
+        scopeId = scope.parent
+      }
+    }
+    index = index + 1
+  }
+  if !real { return Size.zero() }
+  let mut before = extents[0].before
+  let mut after = extents[0].after
+  index = 1
+  while index < extents.length {
+    let extent = extents[index]
+    if extent.active && extent.alignment == VerticalAlignKind.Bottom {
+      before = max(before, extent.before + extent.after - after)
+    }
+    index = index + 1
+  }
+  index = 1
+  while index < extents.length {
+    let extent = extents[index]
+    if extent.active && extent.alignment == VerticalAlignKind.Top {
+      after = max(after, extent.before + extent.after - before)
+    }
+    index = index + 1
+  }
+  let height = max(0.0, before + after)
+  extents[0].baseline = before
+  index = 1
+  while index < extents.length {
+    if extents[index].active {
+      if extents[index].alignment == VerticalAlignKind.Top { extents[index].baseline = extents[index].before }
+      else if extents[index].alignment == VerticalAlignKind.Bottom { extents[index].baseline = height - extents[index].after }
+    }
+    index = index + 1
+  }
+  return Size { width: before, height: height }
+}
+
+// Resolve boundary margins before fitting and baseline export. Only an atomic
+// margin edge that actually defines the line envelope adjoins the boundary.
+fn atomicLineMargins(nodes: &BoxTree, items: &mut [Item], atomics: &mut [AtomicData], scopes: &[Scope], extents: &mut [Extent], axes: Axes, input: Input, start: usize, end: usize, atStart: bool, atEnd: bool, real: bool) -> Size {
+  let mut index = start
+  while index < end {
+    let mut item = items[index]
+    if item.kind == ItemKind.Atomic {
+      let atomic = &atomics[item.leaf]
+      item.before = atomic.margin.top + atomic.baseline
+      item.after = axes.size(atomic.size).height + atomic.margin.bottom - atomic.baseline
+      let margin = atomic.margin
+      atomics[item.leaf].usedTop = margin.top
+      atomics[item.leaf].usedBottom = margin.bottom
+      items[index] = item
+    }
+    index = index + 1
+  }
+  let mut metrics = lineExtents(&items, scopes, &mut extents, start, end, real)
+  let mut changed = atStart || atEnd
+  while changed {
+    changed = false
+    index = start
+    while index < end {
+      let mut item = items[index]
+      if item.kind == ItemKind.Atomic {
+        let style = nodes.style(item.id)
+        if FragmentBox.applies(style, input.parentWritingMode) {
+          let atomic = &atomics[item.leaf]
+          let mut margin = atomic.margin
+          margin.top = atomic.usedTop
+          margin.bottom = atomic.usedBottom
+          let baseline = extents[item.group].baseline + item.offset
+          if atStart && baseline - item.before <= 0.0 && style.marginBreak != MarginBreak.Keep
+            && (style.marginBreak == MarginBreak.Discard || !input.fragmentation.contextStart && !input.fragmentation.forcedStart) { margin.top = 0.0 }
+          if atEnd && baseline + item.after >= metrics.height && style.marginBreak == MarginBreak.Discard { margin.bottom = 0.0 }
+          if margin.top != atomic.usedTop || margin.bottom != atomic.usedBottom {
+            let mut usedBaseline = atomic.baseline
+            if atomic.baselineFromMargin { usedBaseline = marginBaseline(style, axes.size(atomic.size), axes, margin, nodes.style(scopes[item.scope].id)) }
+            item.before = margin.top + usedBaseline
+            item.after = axes.size(atomic.size).height + margin.bottom - usedBaseline
+            atomics[item.leaf].usedTop = margin.top
+            atomics[item.leaf].usedBottom = margin.bottom
+            items[index] = item
+            changed = true
+          }
+        }
+      }
+      index = index + 1
+    }
+    if changed { metrics = lineExtents(&items, scopes, &mut extents, start, end, real) }
+  }
+  return metrics
+}
+
+struct Chunk { start: usize, end: usize, advance: f64, real: bool, breakBefore: bool }
+impl Copy for Chunk {}
+struct LineBox {
+  start: usize, end: usize, y: f64, left: f64, width: f64, advance: f64, hangingStart: f64,
+  height: f64, baseline: f64, real: bool, last: bool, direction: Direction, visual: Line,
+}
+struct Span { active: bool, next: usize, start: f64, end: f64, opened: bool, closed: bool, fragment: usize, origin: Point }
+impl Copy for Span {}
+impl Span {
+  fn make(fragment: usize) -> Span {
+    return Span { active: false, next: NO_NODE, start: 0.0, end: 0.0, opened: false, closed: false, fragment: fragment, origin: Point { x: 0.0, y: 0.0 } }
+  }
+}
+struct Spans { values: List<Span>, first: usize, last: usize }
+impl Spans {
+  fn reset(self: &mut Self, line: usize) {
+    let mut current = self.first
+    while current != NO_NODE {
+      let next = self.values.asSlice()[current].next
+      self.values.set(current, Span.make(NO_NODE))
+      current = next
+    }
+    self.first = NO_NODE
+    self.last = NO_NODE
+    self.values.set(0, Span.make(line))
+  }
+}
+fn canBreak(nodes: &BoxTree, scopes: &[Scope], first: usize, second: usize) -> bool {
+  let mut a = first
+  let mut b = second
+  while a != b {
+    if a > b { a = scopes[a].parent } else { b = scopes[b].parent }
+  }
+  return nodes.style(scopes[a].id).textWrap == TextWrap.Wrap
+}
+fn boundaryScope(items: &[Item], scopes: &[Scope], at: usize) -> usize {
+  if at == items.length { return 0 }
+  let item = items[at]
+  if item.kind == ItemKind.Open { return scopes[item.scope].parent }
+  return item.scope
+}
+fn cloneEdge(scope: Scope, leading: bool, rtl: bool) -> f64 {
+  if leading != rtl { return scope.inset.left + scope.margin.left }
+  return scope.inset.right + scope.margin.right
+}
+fn continuationEdges(nodes: &BoxTree, items: &[Item], scopes: &[Scope], at: usize, leading: bool, rtl: bool) -> f64 {
+  let mut current = boundaryScope(items, scopes, at)
+  let mut size = 0.0
+  while current != 0 {
+    let scope = scopes[current]
+    if nodes.style(scope.id).boxDecorationBreak == BoxDecorationBreak.Clone { size = size + cloneEdge(scope, leading, rtl) }
+    current = scope.parent
+  }
+  return size
+}
+effect fn chunksFor(nodes: &BoxTree, items: &[Item], scopes: &[Scope]) -> List<Chunk> ! OutOfMemoryError ? &mut Allocator {
+  let mut chunks = List<Chunk>.make()
+  let mut chunk = Chunk { start: 0, end: 0, advance: 0.0, real: false, breakBefore: false }
+  let mut atomic = false
+  let mut previousScope: usize = 0
+  let mut index: usize = 0
+  while index < items.length {
+    let item = items[index]
+    if atomic && (item.kind == ItemKind.Open || item.kind == ItemKind.Atomic)
+      && inlineBreakBoundary(items, scopes, index) == index
+      && canBreak(nodes, scopes, previousScope, item.scope) {
+      chunk.end = index
+      run chunks.append(chunk)
+      chunk = Chunk { start: index, end: index, advance: 0.0, real: false, breakBefore: true }
+      atomic = false
+    }
+    if item.kind != ItemKind.Float && item.kind != ItemKind.Anchor { chunk.advance = chunk.advance + item.advance }
+    if item.kind == ItemKind.Atomic { atomic = true
+      previousScope = item.scope
+      chunk.real = true }
+    if (item.kind == ItemKind.Open || item.kind == ItemKind.Close) && item.advance != 0.0 && !scopes[item.scope].phantomClone { chunk.real = true }
+    index = index + 1
+  }
+  if chunk.start < items.length { chunk.end = items.length
+    run chunks.append(chunk) }
+  return move chunks
+}
+
+struct SourceBoundary {
+  at: TextCursor, values: BreakBoundary, nextFloat: usize,
+}
+impl Copy for SourceBoundary {}
+struct SourceBoundaries {
+  events: List<SourceBoundary>, after: BreakBoundary, afterValid: bool,
+}
+
+fn sourceBoundaryCursor(items: &[Item], tokens: &[TextToken], scopes: &[Scope], at: usize) -> TextCursor {
+  let mut result = at
+  let mut current = boundaryScope(items, scopes, at)
+  let mut probe = at
+  // Keep first-content inline openings with the ensuing source, but never
+  // cross a float as soft text-break affinity deliberately does.
+  while current != 0 && probe > 0 {
+    let item = items[probe - 1]
+    if item.kind == ItemKind.Float || item.kind == ItemKind.Atomic
+      || item.kind == ItemKind.Text && TextFlow.length(&tokens[probe - 1]) != 0 && tokens[probe - 1].kind != TextTokenKind.Space { break }
+    probe = probe - 1
+    if item.kind == ItemKind.Open && item.scope == current {
+      result = probe
+      current = scopes[current].parent
+    }
+  }
+  return TextCursor { unit: result, offset: 0 }
+}
+
+// Class A float controls act at source adjacency, not at the exclusion's
+// bottom or at completion of its independent fragmented formatting context.
+effect fn sourceBoundaries<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], tokens: &[TextToken], scopes: &[Scope], atomics: &[AtomicData], input: Input) -> SourceBoundaries ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut result = SourceBoundaries { events: List<SourceBoundary>.make(), after: BreakBoundary.none(), afterValid: false }
+  let mut seen = false
+  let mut previousFloat = false
+  let mut after = input.fragmentation.sourceBoundary
+  let mut index: usize = 0
+  while index < items.length {
+    let item = items[index]
+    let floating = item.kind == ItemKind.Float
+    let substantive = floating || item.kind == ItemKind.Atomic || item.kind == ItemKind.Text && TextFlow.length(&tokens[index]) != 0 && tokens[index].kind != TextTokenKind.Space
+    if substantive {
+      let mut before = BreakBoundary.none()
+      let mut following = BreakBoundary.none()
+      if floating {
+        before = FragmentBox.boundary(nodes, item.id, true, input.fragmentation.kind, input.fragmentation.rectoOnRight)
+        following = FragmentBox.boundary(nodes, item.id, false, input.fragmentation.kind, input.fragmentation.rectoOnRight)
+        let state = output.resumes.get(item.id)
+        if state.started {
+          before.merge(state.before)
+          following.merge(state.after)
+        } else if nodes.node(item.id).dynamicBefore || nodes.node(item.id).dynamicAfter {
+          let checkpoint = output.checkpoint()
+          let mut probe = atomics[item.leaf].input
+          probe.performLayout = true
+          probe.fragmentation = input.fragmentation
+          probe.fragmentation.active = false
+          probe.fragmentation.marginEnd = false
+          probe.fragmentation.marginEndChosen = false
+          probe.fragmentation.sourceAdjacent = false
+          probe.fragmentation.sourceBoundary = BreakBoundary.none()
+          if nodes.node(item.id).dynamicBefore {
+            probe.fragmentation.boundaryProbe = BoundaryProbe.Before
+            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, probe)
+            before.merge(output.resumes.get(item.id).before)
+            output.restoreCheckpoint(checkpoint)
+          }
+          if nodes.node(item.id).dynamicAfter {
+            probe.fragmentation.boundaryProbe = BoundaryProbe.After
+            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, probe)
+            following.merge(output.resumes.get(item.id).after)
+            output.restoreCheckpoint(checkpoint)
+          }
+          output.closeCheckpoint(checkpoint)
+        }
+      }
+      if seen && (previousFloat || floating) || !seen && input.fragmentation.sourceAdjacent {
+        let mut values = after
+        values.merge(before)
+        if values.forced.kinds.any() || values.avoided.any() {
+          let mut at = sourceBoundaryCursor(items, tokens, scopes, index)
+          if !seen { at = TextCursor { unit: 0, offset: 0 } }
+          let mut nextFloat = NO_NODE
+          if floating { nextFloat = item.id }
+          run result.events.append(SourceBoundary { at: at, values: values, nextFloat: nextFloat })
+        }
+      }
+      after = following
+      previousFloat = floating
+      seen = true
+    }
+    index = index + 1
+  }
+  result.after = after
+  result.afterValid = previousFloat || !seen && input.fragmentation.sourceAdjacent
+  return move result
+}
+
+fn sourceAvoided(events: &[SourceBoundary], at: TextCursor, input: Input) -> bool {
+  let mut index: usize = 0
+  while index < events.length {
+    let event = events[index]
+    if at.before(event.at) { return false }
+    if event.at.equal(at) { return event.values.avoided.intersects(input.fragmentation.boundaryKinds) }
+    index = index + 1
+  }
+  return false
+}
+
+effect fn acknowledgeFloatBefore<'pass, 'source>(output: &mut LayoutPass<'pass, 'source>, id: usize) ! OutOfMemoryError ? &mut Allocator {
+  let mut state = output.resumes.get(id)
+  if !state.beforeHandled {
+    state.beforeHandled = true
+    run output.resumes.set(id, state)
+  }
+}
+
+fn floatRequest(atomic: &AtomicData, input: Input, blockInset: f64) -> Input {
+  let mut request = atomic.input
+  request.performLayout = true
+  request.fragmentation = input.fragmentation
+  request.fragmentation.sourceAdjacent = false
+  request.fragmentation.sourceBoundary = BreakBoundary.none()
+  request.fragmentation.offset = input.fragmentation.offset + blockInset + atomic.location.y
+  request.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || atomic.location.y > 0.0
+  request.fragmentation.marginStart = input.fragmentation.marginStart && blockInset == 0.0 && atomic.location.y - atomic.usedTop == 0.0
+  request.fragmentation.marginEnd = false
+  request.fragmentation.marginEndChosen = false
+  return request
+}
+
+effect fn placeFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], visual: &Line, atomics: &mut [AtomicData], start: usize, end: usize, bfc: &mut BfcState, origin: Point, width: f64, sourceY: f64, lineHeight: f64, axes: Axes, leading: f64, input: Input, blockInset: f64) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let fragmented = input.fragmentation.active && input.performLayout
+  let mut advance = leading
+  let mut index = start
+  while index < end {
+    let item = items[index]
+    if item.kind == ItemKind.Float {
+      let style = nodes.style(item.id)
+      let size = axes.size(atomics[item.leaf].size)
+      let mut margin = atomics[item.leaf].margin
+      atomics[item.leaf].deferred = false
+      atomics[item.leaf].requested = ForcedBreaks.none()
+      if fragmented {
+        let state = output.resumes.get(item.id)
+        let mut boundaryInput = input.fragmentation
+        boundaryInput.marginStart = input.fragmentation.marginStart && blockInset == 0.0 && sourceY == 0.0
+        margin.top = FragmentBox.startMargin(style, margin.top, state, boundaryInput, output.frames.writingMode)
+        if state.normalComplete { margin.top = 0.0
+          margin.bottom = 0.0 }
+        if state.notBeforeFrame > output.frame || bfc.deferred(style.float) || atomics[item.leaf].requested.kinds.any() {
+          atomics[item.leaf].deferred = true
+          if !state.normalComplete { bfc.pendingFloat = true }
+          bfc.defer(style.float)
+          index = index + 1
+          continue
+        }
+      }
+      atomics[item.leaf].usedTop = margin.top
+      let mut outerHeight = size.height + margin.vertical()
+      let mut y = max(sourceY, bfc.sourceFloor - origin.y)
+      y = max(y, bfc.clearFloor(style.clear, origin.y + y) - origin.y)
+      let mut band = bfc.band(origin, width, y, outerHeight)
+      let mut preceding = advance
+      let mut settled = false
+      while !settled {
+        if fragmented {
+          // Fit the real float stream before admitting its exclusion. Fixed
+          // normal height and continuing overflow are independent quantities.
+          atomics[item.leaf].location = Point { x: 0.0, y: y + margin.top }
+          let checkpoint = output.checkpoint()
+          run acknowledgeFloatBefore(&mut output, item.id)
+          let request = floatRequest(&atomics[item.leaf], input, blockInset)
+          let layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+          let state = output.resumes.get(item.id)
+          output.restoreCheckpoint(checkpoint)
+          output.closeCheckpoint(checkpoint)
+          if !state.normalComplete { bfc.pendingFloat = true }
+          if state.blocked || state.skipped {
+            atomics[item.leaf].deferred = true
+            atomics[item.leaf].requested = state.requested
+            bfc.defer(style.float)
+            break
+          }
+          let mut bottom = margin.bottom
+          if !state.normalComplete && style.boxDecorationBreak == BoxDecorationBreak.Slice { bottom = 0.0 }
+          outerHeight = axes.size(layout.size).height + margin.top + bottom
+          band = bfc.band(origin, width, y, outerHeight)
+        }
+        if item.advance + preceding <= band.right - band.left { settled = true }
+        else if preceding != 0.0 {
+          y = max(y, sourceY + lineHeight)
+          preceding = 0.0
+          band = bfc.band(origin, width, y, outerHeight)
+        } else if band.occupied && band.nextBottom > y {
+          y = band.nextBottom
+          band = bfc.band(origin, width, y, outerHeight)
+        } else { settled = true }
+      }
+      if !atomics[item.leaf].deferred {
+        let mut x = band.left
+        if style.float == Float.Right { x = band.right - item.advance }
+        atomics[item.leaf].location = Point { x: x + margin.left, y: y + margin.top }
+        run bfc.append(FloatBox { side: style.float, left: origin.x + x, right: origin.x + x + item.advance, top: origin.y + y, bottom: origin.y + y + outerHeight })
+        bfc.sourceFloor = max(bfc.sourceFloor, origin.y + y)
+      }
+    } else if item.kind != ItemKind.Anchor {
+      if visual.active { advance = advance + visual.positions.asSlice()[index - start].advance }
+      else { advance = advance + item.advance }
+    }
+    index = index + 1
+  }
+}
+
+effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, item: Item, atomic: &AtomicData, input: Input, blockInset: f64, parent: usize, point: Point, container: Size, axes: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if atomic.deferred {
+    if output.resumes.get(item.id).notBeforeFrame <= output.frame { run output.defer(item.id, atomic.requested) }
+    run output.enqueuePending(owner, item.id)
+    return
+  }
+  let checkpoint = output.checkpoint()
+  run acknowledgeFloatBefore(&mut output, item.id)
+  let previousParent = output.fragmentParent
+  output.fragmentParent = parent
+  let request = floatRequest(atomic, input, blockInset)
+  let mut layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+  let state = output.resumes.get(item.id)
+  if state.blocked || state.skipped {
+    output.restoreCheckpoint(checkpoint)
+    output.closeCheckpoint(checkpoint)
+    if output.resumes.get(item.id).notBeforeFrame <= output.frame { run output.defer(item.id, state.requested) }
+    run output.enqueuePending(owner, item.id)
+    return
+  }
+  layout.location = axes.physicalPoint(point, layout.size, container)
+  run output.store(item.id, layout, true)
+  if !state.contentComplete { run output.enqueuePending(owner, item.id) }
+  output.fragmentParent = previousParent
+  output.closeCheckpoint(checkpoint)
+}
+
+effect fn fitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, original: &[Item], atomics: &mut [AtomicData], input: Input, box: ResolvedBox, bfc: &mut BfcState, width: f64, axes: Axes) -> bool ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut current = output.resumes.get(owner).pendingFirst
+  let noVisual = Line.make()
+  let mut progress = false
+  while current != NO_NODE {
+    let mut index: usize = 0
+    while index < original.length && original[index].id != current { index = index + 1 }
+    if index == original.length || original[index].kind != ItemKind.Float {
+      fail FragmentationError { frame: output.frame, message: "Inline continuation queue contains a non-float box" }
+    }
+    run placeFloats(nodes, &mut output, &mut measurer, original, &noVisual, &mut atomics, index, index + 1, &mut bfc, input.bfcContentOrigin, width, 0.0, 0.0, axes, 0.0, input, box.inset.top)
+    progress = progress || !atomics[original[index].leaf].deferred
+    current = output.resumes.get(current).nextPending
+  }
+  return progress
+}
+
+effect fn emitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, original: &[Item], atomics: &[AtomicData], input: Input, box: ResolvedBox, container: Size, axes: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let last = output.resumes.get(owner).pendingLast
+  if last == NO_NODE { return }
+  while true {
+    let current = run output.popPending(owner)
+    let mut index: usize = 0
+    while index < original.length && original[index].id != current { index = index + 1 }
+    if index == original.length || original[index].kind != ItemKind.Float {
+      fail FragmentationError { frame: output.frame, message: "Inline continuation queue contains a non-float box" }
+    }
+    let item = original[index]
+    let atomic = &atomics[item.leaf]
+    let point = Point { x: box.inset.left + atomic.location.x, y: box.inset.top + atomic.location.y }
+    let parent = output.fragmentParent
+    run emitFloat(nodes, &mut output, &mut measurer, owner, item, atomic, input, box.inset.top, parent, point, container, axes)
+    if current == last { break }
+  }
+}
+
+fn floatPrefix(context: TextContext, original: &[Item], start: TextCursor, end: TextCursor) -> TextCursor {
+  if start.offset != 0 { return start }
+  let mut at = start.unit
+  let mut found = false
+  let mut result = start
+  while at < end.unit {
+    let item = original[at]
+    let token = &context.tokens[at]
+    if item.kind == ItemKind.Atomic { break }
+    if item.kind == ItemKind.Text && token.kind != TextTokenKind.Space && TextFlow.length(token) != 0 { break }
+    if item.kind == ItemKind.Float { found = true }
+    at = at + 1
+    if found { result = TextCursor { unit: at, offset: 0 } }
+  }
+  return result
+}
+
+fn middleClone(nodes: &BoxTree, id: usize) -> bool {
+  let node = nodes.node(id)
+  return !node.firstForSource && !node.lastForSource
+    && nodes.style(id).boxDecorationBreak == BoxDecorationBreak.Clone
+}
+fn suppressPhantomClones(nodes: &BoxTree, items: &mut [Item], scopes: &mut [Scope]) {
+  let mut candidate = false
+  let mut index: usize = 1
+  while index < scopes.length {
+    candidate = candidate || middleClone(nodes, scopes[index].id)
+    index = index + 1
+  }
+  if !candidate { return }
+  let mut retainGeometry = false
+  // Determine whether content would create a line before adding cloned
+  // interruption edges. Authored edges, preserved whitespace and bidi
+  // controls still count; floats and positioned anchors do not.
+  index = 0
+  while index < items.length {
+    let item = items[index]
+    if item.kind == ItemKind.Atomic { return }
+    if item.kind == ItemKind.Float || item.kind == ItemKind.Anchor { retainGeometry = true }
+    if item.kind == ItemKind.Text {
+      match Node.text(&nodes.sources[nodes.node(item.id).source]) {
+        Option<string>.Some { value } => {
+          if !TextFlow.isCollapsibleWhitespace(value, nodes.style(item.id).whiteSpaceCollapse) { return }
+        }
+        Option<string>.None => { return }
+      }
+    } else if (item.kind == ItemKind.Open || item.kind == ItemKind.Close) && !middleClone(nodes, item.id) {
+      let scope = scopes[item.scope]
+      let node = nodes.node(item.id)
+      retainGeometry = retainGeometry || (node.firstForSource && node.lastForSource)
+      if scope.inset.horizontal() != 0.0 || scope.inset.vertical() != 0.0
+        || scope.margin.left != 0.0 || scope.margin.right != 0.0
+        || scope.margin.top != 0.0 || scope.margin.bottom != 0.0 { return }
+    }
+    index = index + 1
+  }
+  index = 1
+  while index < scopes.length {
+    if middleClone(nodes, scopes[index].id) {
+      scopes[index].phantomClone = true
+      if retainGeometry {
+        // A phantom continuation can still own an empty inline or anchor.
+        // Retain its inline-axis geometry without painting cloned edges.
+        scopes[index].inset.top = 0.0
+        scopes[index].inset.bottom = 0.0
+        scopes[index].border.top = 0.0
+        scopes[index].border.bottom = 0.0
+        scopes[index].margin.top = 0.0
+        scopes[index].margin.bottom = 0.0
+      } else {
+        scopes[index].inset = ResolvedEdges.zero()
+        scopes[index].border = ResolvedEdges.zero()
+        scopes[index].margin = ResolvedEdges.zero()
+      }
+    }
+    index = index + 1
+  }
+  index = 0
+  while index < items.length {
+    let item = items[index]
+    if !retainGeometry && (item.kind == ItemKind.Open || item.kind == ItemKind.Close) && middleClone(nodes, item.id) { items[index].advance = 0.0 }
+    index = index + 1
+  }
+}
+
+pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: Input, physicalBox: ResolvedBox, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let axes = Axes.make(style.writingMode)
+  let box = axes.box(physicalBox)
+  let rtl = style.usedDirection() == Direction.Rtl
+  let rootFont = fontBox(&mut measurer, style)
+  let mut scopes = List<Scope>.make()
+  run scopes.append(Scope { id: id, parent: 0, group: 0, font: rootFont, offset: 0.0, inset: ResolvedEdges.zero(), border: ResolvedEdges.zero(), margin: ResolvedEdges.zero(), phantomClone: false })
+  let mut extents = List<Extent>.make()
+  run extents.append(Extent.make(VerticalAlignKind.Baseline))
+  let mut items = List<Item>.make()
+  let mut atomics = List<AtomicData>.make()
+  let mut childInput = Input.make(input.parent)
+  childInput.initialContainingBlock = input.initialContainingBlock
+  childInput.parentMaxSize = input.parentMaxSize
+  childInput.scrollportSize = input.scrollportSize
+  childInput.parentWritingMode = style.writingMode
+  childInput.parentTextOrientation = style.textOrientation
+  childInput.availableWidth = input.availableWidth
+  childInput.availableHeight = input.availableHeight
+  if physicalBox.size.widthDefinite { childInput.availableWidth = AvailableSpace.definite(max(0.0, physicalBox.size.width - physicalBox.inset.horizontal())) }
+  if physicalBox.size.heightDefinite { childInput.availableHeight = AvailableSpace.definite(max(0.0, physicalBox.size.height - physicalBox.inset.vertical())) }
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    run collect(nodes, &mut output, &mut measurer, &mut items, &mut atomics, &mut scopes, &mut extents, child, 0, childInput, axes, style.writingMode)
+    child = nodes.node(child).nextSibling
+  }
+  suppressPhantomClones(nodes, items.asMutSlice(), scopes.asMutSlice())
+  let rootBidi = paragraphBidi(nodes, id)
+  let mut needsAnalysis = rootBidi != UnicodeBidi.Normal
+  let mut needsVisual = false
+  let mut textIndex: usize = 0
+  while !needsAnalysis && textIndex < items.length() {
+    let item = items.get(textIndex)
+    if item.kind == ItemKind.Text { needsAnalysis = true }
+    else if item.kind == ItemKind.Open {
+      needsAnalysis = nodes.style(item.id).unicodeBidi != UnicodeBidi.Normal
+      let parentScope = scopes.asSlice()[item.scope].parent
+      needsVisual = needsVisual || nodes.style(scopes.asSlice()[parentScope].id).usedDirection() != style.usedDirection()
+    } else if item.kind == ItemKind.Atomic {
+      let itemStyle = nodes.style(item.id)
+      needsAnalysis = inlineReplaced(itemStyle)
+        && (itemStyle.unicodeBidi == UnicodeBidi.Embed || itemStyle.unicodeBidi == UnicodeBidi.BidiOverride)
+    }
+    textIndex = textIndex + 1
+  }
+  if needsAnalysis || needsVisual || (input.fragmentation.active && input.performLayout) {
+    return run layoutText(nodes, &mut output, &mut measurer, id, rootBidi, needsAnalysis, input, box, &mut bfc, items.asSlice(), &mut atomics, scopes.asSlice(), &mut extents)
+  }
+  let chunks = run chunksFor(nodes, items.asSlice(), scopes.asSlice())
+  let mut maximum = 0.0
+  let mut minimum = 0.0
+  let mut firstIntrinsic = true
+  let mut index: usize = 0
+  while index < chunks.length() {
+    let chunk = chunks.get(index)
+    let leading = continuationEdges(nodes, items.asSlice(), scopes.asSlice(), chunk.start, true, rtl)
+    let trailing = continuationEdges(nodes, items.asSlice(), scopes.asSlice(), chunk.end, false, rtl)
+    let indent = lineIndent(style, nodes.node(id).firstFormattedRun, firstIntrinsic, false, 0.0)
+    minimum = max(minimum, chunk.advance + leading + trailing + indent)
+    maximum = maximum + chunk.advance
+    if chunk.real { firstIntrinsic = false }
+    index = index + 1
+  }
+  if !firstIntrinsic {
+    maximum = max(0.0, maximum + lineIndent(style, nodes.node(id).firstFormattedRun, true, false, 0.0))
+  }
+  let mut hasFloats = false
+  index = 0
+  while index < items.length() {
+    let item = items.get(index)
+    if item.kind == ItemKind.Float { hasFloats = true
+      minimum = max(minimum, item.advance)
+      maximum = maximum + item.advance }
+    index = index + 1
+  }
+  let mut available = input.availableWidth
+  if axes.vertical { available = input.availableHeight }
+  let mut width = maximum
+  if available.kind == AvailableKind.MinContent { width = min(minimum, maximum) }
+  if box.size.widthDefinite { width = max(0.0, box.size.width - box.inset.horizontal()) }
+  else if available.kind == AvailableKind.Definite { width = max(0.0, available.value - box.inset.horizontal()) }
+  let mut lines = List<LineBox>.make()
+  let noVisual = Line.make()
+  let mut cursor = 0.0
+  let mut next: usize = 0
+  let mut allPhantom = true
+  while next < chunks.length() {
+    let indent = lineIndent(style, nodes.node(id).firstFormattedRun, allPhantom, false, width)
+    let first = next
+    let start = chunks.get(first).start
+    let leading = continuationEdges(nodes, items.asSlice(), scopes.asSlice(), start, true, rtl)
+    let checkpoint = bfc.checkpoint()
+    let sourceY = cursor
+    let mut advance = 0.0
+    let mut real = false
+    let mut end = start
+    let mut band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, 0.0), indent, rtl)
+    while next < chunks.length() {
+      let chunk = chunks.get(next)
+      let candidate = leading + advance + chunk.advance + continuationEdges(nodes, items.asSlice(), scopes.asSlice(), chunk.end, false, rtl)
+      let candidateReal = real || chunk.real
+      if bfc.count != 0 || hasFloats {
+        let metrics = lineExtents(items.asSlice(), scopes.asSlice(), extents.asMutSlice(), start, chunk.end, candidateReal)
+        bfc.restore(checkpoint)
+        if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, items.asSlice(), &noVisual, atomics.asMutSlice(), start, chunk.end, &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, input, box.inset.top) }
+        band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, rtl)
+        while next == first && candidate > band.right - band.left && band.occupied && band.nextBottom > cursor {
+          cursor = band.nextBottom
+          band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, rtl)
+        }
+      }
+      if next > first && chunk.breakBefore && candidate > band.right - band.left { break }
+      advance = advance + chunk.advance
+      real = candidateReal
+      end = chunk.end
+      next = next + 1
+    }
+    let metrics = lineExtents(items.asSlice(), scopes.asSlice(), extents.asMutSlice(), start, end, real)
+    bfc.restore(checkpoint)
+    if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, items.asSlice(), &noVisual, atomics.asMutSlice(), start, end, &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, input, box.inset.top) }
+    band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, rtl)
+    advance = leading + advance + continuationEdges(nodes, items.asSlice(), scopes.asSlice(), end, false, rtl)
+    run lines.append(LineBox { start: start, end: end, y: cursor, left: band.left, width: band.right - band.left, advance: advance, hangingStart: 0.0, height: metrics.height, baseline: metrics.width, real: real, last: next == chunks.length(), direction: style.usedDirection(), visual: Line.make() })
+    cursor = cursor + metrics.height
+    if real { allPhantom = false }
+  }
+  let mut result = Layout.zero()
+  let mut height = cursor + box.inset.vertical()
+  if box.size.heightDefinite { height = box.size.height }
+  result.size = axes.size(Size { width: width + box.inset.horizontal(), height: height })
+  result.contentSize = axes.size(Size { width: width, height: cursor })
+  result.collapsesThrough = allPhantom
+  let texts = List<TextLeaf>.make()
+  let fonts = List<TextFont>.make()
+  let mut spans = Spans { values: List<Span>.make(), first: NO_NODE, last: NO_NODE }
+  if input.performLayout {
+    run spans.values.reserveExact(scopes.length())
+    index = 0
+    while index < scopes.length() {
+      run spans.values.append(Span.make(NO_NODE))
+      index = index + 1
+    }
+  }
+  index = 0
+  let baselineOffsets = fontBaselines(&rootFont, style.writingMode).translated(-rootFont.baseline)
+  while index < lines.length() {
+    let line = &lines.asSlice()[index]
+    let lineBaselines = baselineOffsets.translated(line.baseline)
+    if line.real {
+      let exported = lineBaselines.translated(box.inset.top + line.y)
+      if !result.hasFirstBaseline { result.firstBaselines = exported
+        result.hasFirstBaseline = true }
+      result.lastBaselines = exported
+      result.hasLastBaseline = true
+    }
+    if input.performLayout {
+      run emitLine(nodes, &mut output, &mut measurer, items.asSlice(), atomics.asSlice(), texts.asSlice(), fonts.asSlice(), scopes.asSlice(), &mut extents, &mut spans, id, style, axes, box, result.size, line, lineBaselines, input)
+    }
+    index = index + 1
+  }
+  return result
+}
+
+fn cover(spans: &mut Spans, scopes: &[Scope], scope: usize, start: f64, end: f64) {
+  if scope == 0 { return }
+  cover(&mut spans, scopes, scopes[scope].parent, start, end)
+  let values = spans.values.asMutSlice()
+  if !values[scope].active {
+    if spans.last == NO_NODE { spans.first = scope }
+    else { values[spans.last].next = scope }
+    spans.last = scope
+    values[scope].active = true
+    values[scope].start = start
+  }
+  values[scope].end = end
+}
+fn startClones(nodes: &BoxTree, scopes: &[Scope], spans: &mut Spans, current: usize, rtl: bool) -> f64 {
+  if current == 0 { return 0.0 }
+  let scope = scopes[current]
+  let start = startClones(nodes, scopes, &mut spans, scope.parent, rtl)
+  if nodes.style(scope.id).boxDecorationBreak != BoxDecorationBreak.Clone { return start }
+  let end = start + cloneEdge(scope, true, rtl)
+  cover(&mut spans, scopes, current, start, end)
+  return end
+}
+effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], atomics: &[AtomicData], texts: &[TextLeaf], fonts: &[TextFont], scopes: &[Scope], extents: &mut List<Extent>, spans: &mut Spans, id: usize, style: &Style, axes: Axes, box: ResolvedBox, container: Size, line: &LineBox, lineBaselines: BaselineSet, input: Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let previousParent = output.fragmentParent
+  let physicalSize = axes.size(Size { width: line.width, height: line.height })
+  let mut fragment = output.fragment(id, NO_NODE, FragmentKind.Line)
+  fragment.parent = previousParent
+  fragment.location = axes.physicalPoint(Point { x: box.inset.left + line.left, y: box.inset.top + line.y }, physicalSize, container)
+  fragment.size = physicalSize
+  fragment.contentRect = Rect { x: 0.0, y: 0.0, width: physicalSize.width, height: physicalSize.height }
+  fragment.paddingRect = fragment.contentRect
+  fragment.layoutBounds = fragment.contentRect
+  fragment.scrollableOverflow = fragment.contentRect
+  fragment.firstBaselines = lineBaselines
+  fragment.lastBaselines = lineBaselines
+  fragment.hasFirstBaseline = line.real
+  fragment.hasLastBaseline = line.real
+  fragment.phantom = !line.real
+  let lineId = run output.fragments.append(fragment)
+  if output.frame != NO_NODE { run output.firstLine(id, lineId.index) }
+  drop lineExtents(items, scopes, extents.asMutSlice(), line.start, line.end, line.real)
+  spans.reset(lineId.index)
+  let mut index: usize = 0
+  let rtl = style.usedDirection() == Direction.Rtl
+  let mut leading = 0.0
+  let mut cursor = 0.0
+  if line.visual.active {
+    while spans.values.length() < line.visual.spans.length() { run spans.values.append(Span.make(NO_NODE)) }
+    spans.first = line.visual.firstSpan
+    index = 1
+    while index < line.visual.spans.length() {
+      let mut span = Span.make(NO_NODE)
+      span.active = true
+      span.next = line.visual.spans.asSlice()[index].next
+      if span.next == NO_NODE { spans.last = index }
+      spans.values.set(index, span)
+      index = index + 1
+    }
+  } else {
+    leading = startClones(nodes, scopes, &mut spans, boundaryScope(items, scopes, line.start), rtl)
+    cursor = leading
+    index = line.start
+    while index < line.end {
+      let item = items[index]
+      let mut end = cursor
+      if item.kind != ItemKind.Float && item.kind != ItemKind.Anchor { end = end + item.advance }
+      cover(&mut spans, scopes, item.scope, cursor, end)
+      if item.kind == ItemKind.Open { let values = spans.values.asMutSlice()
+        values[item.scope].opened = true }
+      if item.kind == ItemKind.Close { let values = spans.values.asMutSlice()
+        values[item.scope].closed = true }
+      cursor = end
+      index = index + 1
+    }
+    let mut closing = boundaryScope(items, scopes, line.end)
+    while closing != 0 {
+      let scope = scopes[closing]
+      if nodes.style(scope.id).boxDecorationBreak == BoxDecorationBreak.Clone {
+        let end = cursor + cloneEdge(scope, false, rtl)
+        cover(&mut spans, scopes, closing, cursor, end)
+        cursor = end
+      }
+      closing = scope.parent
+    }
+  }
+  let offset = lineOffset(style, line.direction, line.width - line.advance, line.last) - line.hangingStart
+  index = spans.first
+  while index != NO_NODE {
+    let mut span = spans.values.get(index)
+    let mut scopeIndex = index
+    let mut parentIndex: usize = 0
+    if line.visual.active {
+      let visual = &line.visual.spans.asSlice()[index]
+      scopeIndex = visual.scope
+      parentIndex = visual.parent
+      span.start = visual.start
+      span.end = visual.end
+      span.opened = visual.first
+      span.closed = visual.last
+    } else { parentIndex = scopes[scopeIndex].parent }
+    let scope = &scopes[scopeIndex]
+    if span.active && scope.id != NO_NODE {
+      let node = nodes.node(scope.id)
+      let clone = nodes.style(scope.id).boxDecorationBreak == BoxDecorationBreak.Clone
+      let startEdge = clone || (span.opened && node.firstForSource)
+      let endEdge = clone || (span.closed && node.lastForSource)
+      let mut lowEdge = startEdge
+      let mut highEdge = endEdge
+      if rtl { lowEdge = endEdge
+        highEdge = startEdge }
+      if line.visual.active {
+        let visual = &line.visual.spans.asSlice()[index]
+        lowEdge = visual.lowEdge
+        highEdge = visual.highEdge
+      }
+      let mut inset = scope.inset
+      let mut border = scope.border
+      let mut margin = scope.margin
+      margin.top = 0.0
+      margin.bottom = 0.0
+      if !lowEdge { inset.left = 0.0
+        border.left = 0.0
+        margin.left = 0.0 }
+      if !highEdge { inset.right = 0.0
+        border.right = 0.0
+        margin.right = 0.0 }
+      if !line.real {
+        inset.top = 0.0
+        inset.bottom = 0.0
+        border.top = 0.0
+        border.bottom = 0.0
+      }
+      let mut left = span.start
+      if rtl && !line.visual.active { left = line.advance - span.end }
+      let baseline = extents.get(scope.group).baseline + scope.offset
+      let mut logicalSize = Size { width: max(0.0, span.end - span.start - margin.horizontal()), height: scope.font.height + inset.vertical() }
+      let mut top = baseline - scope.font.baseline - inset.top
+      // Inline3 §2.3: phantom-line in-flow content has no layout or paint
+      // extent. Keep its zero-height source/positioning anchor, not a font box
+      // extending above an absent baseline.
+      if !line.real { logicalSize.height = 0.0
+        top = 0.0 }
+      let size = axes.size(logicalSize)
+      let origin = axes.physicalPoint(Point { x: offset + left + margin.left, y: top }, size, physicalSize)
+      let parent = spans.values.get(parentIndex)
+      let mut value = output.fragment(scope.id, node.source, FragmentKind.Inline)
+      value.parent = parent.fragment
+      value.location = Point { x: origin.x - parent.origin.x, y: origin.y - parent.origin.y }
+      value.size = size
+      let physicalInset = axes.physicalEdges(inset)
+      let physicalBorder = axes.physicalEdges(border)
+      value.contentRect = Rect { x: physicalInset.left, y: physicalInset.top, width: max(0.0, size.width - physicalInset.horizontal()), height: max(0.0, size.height - physicalInset.vertical()) }
+      value.paddingRect = Rect { x: physicalBorder.left, y: physicalBorder.top, width: max(0.0, size.width - physicalBorder.horizontal()), height: max(0.0, size.height - physicalBorder.vertical()) }
+      let layoutSize = axes.size(Size { width: logicalSize.width, height: scope.font.lineHeight })
+      let layoutOrigin = axes.physicalPoint(Point { x: 0.0, y: inset.top + scope.font.baseline - scope.font.before }, layoutSize, size)
+      value.layoutBounds = Rect { x: layoutOrigin.x, y: layoutOrigin.y, width: layoutSize.width, height: layoutSize.height }
+      value.scrollableOverflow = value.paddingRect
+      value.firstBaselines = fontBaselines(&scope.font, nodes.style(scope.id).writingMode).translated(inset.top)
+      value.lastBaselines = value.firstBaselines
+      value.hasFirstBaseline = true
+      value.hasLastBaseline = true
+      value.usedMargin = axes.physicalEdges(margin)
+      value.first = node.firstForSource && output.fragments.first(scope.id) == NO_NODE
+      value.last = node.lastForSource && span.closed
+      if line.visual.active {
+        value.first = span.opened
+        value.last = span.closed
+      }
+      value.phantom = !line.real
+      if !lowEdge {
+        if !axes.vertical { value.decorationEdges = value.decorationEdges - 8 }
+        else if axes.reverseLine { value.decorationEdges = value.decorationEdges - 4 }
+        else { value.decorationEdges = value.decorationEdges - 1 }
+      }
+      if !highEdge {
+        if !axes.vertical { value.decorationEdges = value.decorationEdges - 2 }
+        else if axes.reverseLine { value.decorationEdges = value.decorationEdges - 1 }
+        else { value.decorationEdges = value.decorationEdges - 4 }
+      }
+      if scope.phantomClone || !line.real {
+        value.nonpainting = true
+        value.decorationEdges = 0
+        value.layoutBounds = Rect.zero()
+        value.scrollableOverflow = Rect.zero()
+        value.hasFirstBaseline = false
+        value.hasLastBaseline = false
+      }
+      let emitted = run output.fragments.append(value)
+      if output.frame != NO_NODE && nodes.style(scope.id).position != Position.Static {
+        run output.rememberFragmentBox(scope.id, emitted.index, FullBoxGeometry { parent: input.parent, known: OptionalSize.none(), content: OptionalSize.none() })
+      }
+      let values = spans.values.asMutSlice()
+      values[index].fragment = emitted.index
+      values[index].origin = origin
+      let mut scalar = Layout.zero()
+      scalar.location = value.location
+      scalar.size = size
+      scalar.contentSize = Size { width: value.contentRect.width, height: value.contentRect.height }
+      scalar.usedMargin = value.usedMargin
+      scalar.setOverflowGeometry(value.contentRect, value.paddingRect, value.layoutBounds)
+      scalar.scrollableOverflow = value.scrollableOverflow
+      run output.store(scope.id, scalar, false)
+    }
+    index = span.next
+  }
+  if input.fragmentation.active {
+    // Float source order is independent of the line's visual bidi order.
+    index = line.start
+    while index < line.end {
+      let item = items[index]
+      if item.kind == ItemKind.Float {
+        let atomic = &atomics[item.leaf]
+        let parent = spans.values.get(0)
+        let point = Point { x: atomic.location.x - line.left, y: atomic.location.y - line.y }
+        run emitFloat(nodes, &mut output, &mut measurer, id, item, atomic, input, box.inset.top, parent.fragment, point, physicalSize, axes)
+      }
+      index = index + 1
+    }
+  }
+  cursor = leading
+  let mut precedingReal = false
+  index = line.start
+  let mut limit = line.end
+  if line.visual.active { limit = line.start + line.visual.order.length() }
+  while index < limit {
+    let mut logical = index
+    if line.visual.active { logical = line.start + line.visual.order.get(index - line.start) }
+    let item = items[logical]
+    if item.kind == ItemKind.Float && input.fragmentation.active {
+      index = index + 1
+      continue
+    }
+    let mut parentSpan = item.scope
+    let mut x = cursor
+    if line.visual.active {
+      let position = &line.visual.positions.asSlice()[logical - line.start]
+      x = position.x
+      parentSpan = position.span
+      precedingReal = position.precedingReal
+    } else if rtl { x = line.advance - cursor - item.advance }
+    if item.kind == ItemKind.Atomic || item.kind == ItemKind.Float {
+      let atomic = &atomics[item.leaf]
+      let mut request = atomic.input
+      request.performLayout = true
+      let mut parent = spans.values.get(parentSpan)
+      let mut margin = atomic.margin
+      if item.kind == ItemKind.Atomic { margin.top = atomic.usedTop
+        margin.bottom = atomic.usedBottom }
+      let mut point = Point { x: offset + x + item.lineLeftSpacing + margin.left, y: extents.get(item.group).baseline + item.offset - item.before + margin.top }
+      if item.kind == ItemKind.Float {
+        parent = spans.values.get(0)
+        point = Point { x: atomic.location.x - line.left, y: atomic.location.y - line.y }
+      }
+      output.fragmentParent = parent.fragment
+      let mut layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, request)
+      if item.kind == ItemKind.Atomic { layout.usedMargin = axes.physicalEdges(margin) }
+      let physical = axes.physicalPoint(point, layout.size, physicalSize)
+      layout.location = Point { x: physical.x - parent.origin.x, y: physical.y - parent.origin.y }
+      run output.store(item.id, layout, true)
+    } else if item.kind == ItemKind.Text {
+      let text = texts[item.leaf]
+      let font = &fonts[text.font].font
+      let parent = spans.values.get(parentSpan)
+      let size = axes.size(Size { width: max(0.0, item.advance), height: font.height })
+      let baseline = extents.get(item.group).baseline + item.offset
+      let point = axes.physicalPoint(Point { x: offset + x, y: baseline - font.baseline }, size, physicalSize)
+      let mut value = output.fragment(item.id, nodes.node(item.id).source, FragmentKind.Text)
+      value.parent = parent.fragment
+      value.location = Point { x: point.x - parent.origin.x, y: point.y - parent.origin.y }
+      value.size = size
+      value.contentRect = Rect { x: 0.0, y: 0.0, width: size.width, height: size.height }
+      value.paddingRect = value.contentRect
+      let layoutSize = axes.size(Size { width: max(0.0, item.advance), height: font.lineHeight })
+      let layoutPoint = axes.physicalPoint(Point { x: 0.0, y: font.baseline - font.before }, layoutSize, size)
+      value.layoutBounds = Rect { x: layoutPoint.x, y: layoutPoint.y, width: layoutSize.width, height: layoutSize.height }
+      value.scrollableOverflow = value.contentRect
+      value.firstBaselines = fontBaselines(font, style.writingMode)
+      value.lastBaselines = value.firstBaselines
+      value.hasFirstBaseline = true
+      value.hasLastBaseline = true
+      value.decorationEdges = 0
+      drop run output.fragments.appendText(value, TextFragment { sourceStart: text.start, sourceEnd: text.end, fontKey: fonts[text.font].key, shapeKey: text.key, bidiLevel: item.level, kind: text.kind })
+      let mut scalar = Layout.zero()
+      scalar.location = value.location
+      scalar.size = size
+      scalar.contentSize = size
+      scalar.setOverflowGeometry(value.contentRect, value.paddingRect, value.layoutBounds)
+      scalar.scrollableOverflow = value.scrollableOverflow
+      run output.store(item.id, scalar, false)
+    } else if item.kind == ItemKind.Anchor {
+      let inlineLevel = nodes.style(item.id).display.outsideIs(DisplayOutside.Inline)
+      let mut point = Point { x: offset + x, y: 0.0 }
+      let mut logicalSize = Size { width: 0.0, height: line.height }
+      if !inlineLevel {
+        point.x = -line.left
+        if precedingReal { point.y = line.height }
+        logicalSize = Size { width: axes.size(container).width - box.inset.horizontal(), height: 0.0 }
+      }
+      let size = axes.size(logicalSize)
+      let anchorOrigin = axes.physicalPoint(point, size, physicalSize)
+      let rect = Rect { x: anchorOrigin.x, y: anchorOrigin.y, width: size.width, height: size.height }
+      run output.setStaticAnchor(item.id, lineId.index, rect, inlineLevel)
+    }
+    if item.kind != ItemKind.Float && item.kind != ItemKind.Anchor {
+      cursor = cursor + item.advance
+      if item.kind == ItemKind.Atomic || item.kind == ItemKind.Text || item.advance != 0.0 { precedingReal = true }
+    }
+    index = index + 1
+  }
+  output.fragmentParent = previousParent
+}
+
+fn paragraphBidi(nodes: &BoxTree, id: usize) -> UnicodeBidi {
+  // Flow runs keep the originating block's root policy. An anonymous flex
+  // item's computed style is Normal, rather than the flex container's policy.
+  let parent = nodes.node(id).parent
+  if parent != NO_NODE { return nodes.style(parent).unicodeBidi }
+  return nodes.style(id).unicodeBidi
+}
+fn inlineReplaced(style: &Style) -> bool {
+  return style.replaced && style.display.outsideIs(DisplayOutside.Inline) && style.display.insideIs(DisplayInside.Flow)
+}
+fn shapingBarrier(nodes: &BoxTree, item: Item, scopes: &[Scope]) -> bool {
+  if item.kind != ItemKind.Open && item.kind != ItemKind.Close { return false }
+  let scope = &scopes[item.scope]
+  return scope.inset.horizontal() != 0.0 || scope.margin.left != 0.0 || scope.margin.right != 0.0 || nodes.style(item.id).verticalAlign.kind != VerticalAlignKind.Baseline
+}
+
+effect fn tokensFor<'a>(nodes: &BoxTree<'a>, items: &[Item], scopes: &[Scope]) -> List<TextToken<'a>> ! OutOfMemoryError | TextError ? &mut Allocator {
+  let mut result = List<TextToken<'a>>.make()
+  run result.reserveExact(items.length)
+  let mut index: usize = 0
+  while index < items.length {
+    let item = items[index]
+    let node = nodes.node(item.id)
+    let style = nodes.style(item.id)
+    let kind = match item.kind {
+      ItemKind.Text => TextTokenKind.Text
+      ItemKind.Atomic => TextTokenKind.Atomic
+      ItemKind.Float => TextTokenKind.Float
+      ItemKind.Anchor => TextTokenKind.Anchor
+      ItemKind.Open => TextTokenKind.Open
+      ItemKind.Close => TextTokenKind.Close
+    }
+    let mut value: string<'a> = ""
+    if item.kind == ItemKind.Text {
+      let source: &'a Node = &nodes.sources[node.source]
+      value = match move Node.text<'a>(source) {
+        Option<string<'a>>.Some { value: content } => content
+        Option<string<'a>>.None => { fail TextError { source: node.source, message: "Generated text box has no source text" } }
+      }
+    }
+    let barrier = shapingBarrier(nodes, item, scopes)
+    run result.append(TextToken { kind: kind, text: value, source: node.source, sourceStart: 0, sourceEnd: String.byteLength(value), fontKey: style.fontKey, writingMode: style.writingMode, textOrientation: style.textOrientation, direction: style.usedDirection(), unicodeBidi: style.unicodeBidi, replacedInline: inlineReplaced(style), whiteSpaceCollapse: style.whiteSpaceCollapse, textJustify: style.textJustify, shapingBarrier: barrier })
+    index = index + 1
+  }
+  return move result
+}
+
+effect fn textFont<M: Measure>(nodes: &BoxTree, measurer: &mut M, fonts: &mut List<TextFont>, scopes: &[Scope], item: Item, key: usize) -> usize ! OutOfMemoryError ? &mut Allocator {
+  let slot = nodes.node(item.id).anonymousStyle
+  let mut index: usize = 0
+  while index < fonts.length() {
+    let entry = &fonts.asSlice()[index]
+    if entry.style == slot && entry.key == key { return index }
+    index = index + 1
+  }
+  let style = nodes.style(item.id)
+  let parent = nodes.style(scopes[item.scope].id)
+  let mut metrics = scopes[item.scope].font.metrics
+  if key != parent.fontKey || style.writingMode != parent.writingMode || style.textOrientation != parent.textOrientation || style.usedDirection() != parent.usedDirection() {
+    metrics = Measure.font(&mut measurer, FontRequest { key: key, writingMode: style.writingMode, textOrientation: style.textOrientation, direction: style.usedDirection() })
+  }
+  let font = fontBoxFromMetrics(metrics, style)
+  run fonts.append(TextFont { style: slot, key: key, font: font })
+  return index
+}
+
+fn runUnit(value: TextRun) -> usize {
+  return match value {
+    TextRun.Text { unit, start: _, end: _, advance: _, fontKey: _, bidiLevel: _, shapeKey: _ } => unit
+    TextRun.Object { unit, bidiLevel: _, lineLeftSpacing: _, lineRightSpacing: _ } => unit
+  }
+}
+
+effect fn shapeCandidate<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, analysis: &TextAnalysis, visualPlan: &mut Visual.Plan, shapeText: bool, original: &[Item], scopes: &[Scope], fonts: &mut List<TextFont>, shaped: &mut List<TextRun>, result: &mut TextCandidate, start: TextCursor, end: TextCursor, hyphenated: bool, justificationSpace: f64, inlineOrigin: f64, hangingRanges: &[TextRange]) ! OutOfMemoryError | TextError ? &mut Allocator {
+  result.items.clear()
+  result.texts.clear()
+  result.advance = 0.0
+  result.hanging = 0.0
+  result.hangingItems = 0
+  result.real = false
+  shaped.clear()
+  let mut first = TextCursor { unit: context.tokens.length, offset: 0 }
+  let mut last = first
+  let mut found = false
+  let mut tabs = false
+  let mut preserved = false
+  let mut unit = start.unit
+  while unit < end.unit || (unit == end.unit && end.offset != 0) {
+    let token = &context.tokens[unit]
+    let mut low: usize = 0
+    tabs = tabs || token.kind == TextTokenKind.Tab
+    preserved = preserved || token.kind == TextTokenKind.PreservedSpace || token.kind == TextTokenKind.Tab
+    let mut high = TextFlow.length(token)
+    if unit == start.unit { low = start.offset }
+    if unit == end.unit { high = end.offset }
+    if token.kind != TextTokenKind.Space && high > low {
+      if !found { first = TextCursor { unit: unit, offset: low }
+        found = true }
+      last = TextCursor { unit: unit, offset: high }
+    }
+    unit = unit + 1
+  }
+  if found {
+    last = run TextFlow.checked(context.tokens, last)
+    if shapeText {
+      run TextMeasure.shape(&mut measurer, TextShapeRequest { context: context, analysis: analysis, start: first, end: last, hyphenated: hyphenated, justificationSpace: justificationSpace, hangingRanges: hangingRanges }, &mut shaped)
+    }
+  }
+  let mut next: usize = 0
+  unit = start.unit
+  while unit < end.unit || (unit == end.unit && end.offset != 0) {
+    let token = &context.tokens[unit]
+    let base = original[unit]
+    let mut coverage: usize = 0
+    let mut limit: usize = 0
+    if found && unit >= first.unit && (unit < last.unit || (unit == last.unit && last.offset != 0)) {
+      limit = TextFlow.length(token)
+      if unit == first.unit { coverage = first.offset }
+      if unit == last.unit { limit = last.offset }
+    }
+    let mut item = base
+    let mut object = false
+    if !shapeText && base.kind == ItemKind.Atomic {
+      object = true
+      item.level = analysis.levelAt(item.start)
+      coverage = limit
+    }
+    while next < shaped.length() && runUnit(shaped.get(next)) == unit {
+      match shaped.get(next) {
+        TextRun.Text { unit: _, start: low, end: high, advance, fontKey, bidiLevel, shapeKey } => {
+          if base.kind != ItemKind.Text || low != coverage || high <= low || high > limit || bidiLevel > 126 || advance - advance != 0.0 {
+            fail TextError { source: token.source, message: "Text service returned an invalid attributed run" }
+          }
+          if (token.kind == TextTokenKind.Tab || token.kind == TextTokenKind.SegmentBreak) && advance != 0.0 {
+            fail TextError { source: token.source, message: "Text service assigned glyph advance to an engine-positioned whitespace token" }
+          }
+          drop run TextFlow.checked(context.tokens, TextCursor { unit: unit, offset: low })
+          let runEnd = run TextFlow.checked(context.tokens, TextCursor { unit: unit, offset: high })
+          if analysis.boundaryAfter(TextCursor { unit: unit, offset: low }).before(runEnd) {
+            fail TextError { source: token.source, message: "Text service merged across a paragraph analysis boundary" }
+          }
+          let fontId = run textFont(nodes, &mut measurer, &mut fonts, scopes, base, fontKey)
+          let font = &fonts.asSlice()[fontId].font
+          let style = nodes.style(base.id)
+          let parent = &scopes[base.scope]
+          let parentStyle = nodes.style(parent.id)
+          item.advance = advance
+          item.before = font.before
+          item.after = font.after
+          item.offset = parent.offset + fontAlignmentOffset(&parent.font, style, parentStyle) - fontAlignmentOffset(font, style, parentStyle)
+          item.level = bidiLevel
+          item.start = TextCursor { unit: unit, offset: low }
+          item.leaf = result.texts.length()
+          let mut sourceStart = token.sourceStart + low
+          let mut sourceEnd = token.sourceStart + high
+          if token.kind == TextTokenKind.Space { sourceStart = token.sourceStart
+            sourceEnd = token.sourceEnd }
+          let mut kind = TextFragmentKind.Glyphs
+          if token.kind == TextTokenKind.Tab { kind = TextFragmentKind.Tab }
+          else if token.kind == TextTokenKind.SegmentBreak { kind = TextFragmentKind.SegmentBreak }
+          run result.texts.append(TextLeaf { font: fontId, start: sourceStart, end: sourceEnd, key: shapeKey, kind: kind })
+          run result.items.append(item)
+          result.advance = result.advance + advance
+          result.real = true
+          coverage = high
+        }
+        TextRun.Object { unit: _, bidiLevel, lineLeftSpacing, lineRightSpacing } => {
+          let advance = item.advance + lineLeftSpacing + lineRightSpacing
+          if base.kind != ItemKind.Atomic || object || bidiLevel > 126
+            || lineLeftSpacing < 0.0 || lineRightSpacing < 0.0
+            || lineLeftSpacing - lineLeftSpacing != 0.0 || lineRightSpacing - lineRightSpacing != 0.0
+            || advance - advance != 0.0 {
+            fail TextError { source: token.source, message: "Text service returned an invalid atomic run" }
+          }
+          object = true
+          item.level = bidiLevel
+          item.advance = advance
+          item.lineLeftSpacing = lineLeftSpacing
+          coverage = limit
+        }
+      }
+      next = next + 1
+    }
+    if coverage != limit || (base.kind == ItemKind.Atomic && !object) {
+      fail TextError { source: token.source, message: "Text service omitted paragraph content" }
+    }
+    if base.kind != ItemKind.Text {
+      run result.items.append(item)
+      if item.kind != ItemKind.Float && item.kind != ItemKind.Anchor { result.advance = result.advance + item.advance }
+      if item.kind == ItemKind.Atomic || ((item.kind == ItemKind.Open || item.kind == ItemKind.Close) && item.advance != 0.0 && !scopes[item.scope].phantomClone) { result.real = true }
+    }
+    unit = unit + 1
+  }
+  if next != shaped.length() {
+    fail TextError { source: NO_NODE, message: "Text service returned out-of-order or out-of-range runs" }
+  }
+  let origin = inlineOrigin + textEdge(nodes, original, scopes, start, true, context.direction == Direction.Rtl, visualPlan.active)
+  run Visual.fit(&mut visualPlan, nodes, scopes, result.items.asMutSlice(), context, analysis, start, end, tabs, origin, &mut result.visual)
+  if result.visual.active || tabs { result.advance = result.visual.advance }
+  if result.visual.active { result.real = result.real || result.visual.real }
+  if preserved {
+    let mut rtl = context.direction == Direction.Rtl
+    if context.unicodeBidi == UnicodeBidi.Plaintext { rtl = analysis.paragraphAt(start).level == 1 }
+    let tail = Visual.trailingWhitespace(nodes, scopes, result.items.asSlice(), context, analysis, &result.visual, rtl)
+    result.hanging = tail.advance
+    result.hangingItems = tail.items
+  }
+}
+
+effect fn collectHanging(candidate: &TextCandidate, context: TextContext, rtl: bool, ranges: &mut List<TextRange>)
+  ! OutOfMemoryError ? &mut Allocator {
+  let mut count = candidate.items.length()
+  if candidate.visual.active { count = candidate.visual.order.length() }
+  let mut index: usize = 0
+  while index < candidate.hangingItems {
+    let mut ordered = count - index - 1
+    if rtl { ordered = index }
+    let mut itemIndex = ordered
+    if candidate.visual.active { itemIndex = candidate.visual.order.get(ordered) }
+    let item = candidate.items.get(itemIndex)
+    let token = context.tokens[item.start.unit]
+    if item.kind == ItemKind.Text && (token.kind == TextTokenKind.PreservedSpace || token.kind == TextTokenKind.Tab) {
+      let end = candidate.texts.get(item.leaf).end - token.sourceStart
+      run ranges.append(TextRange { start: item.start, end: TextCursor { unit: item.start.unit, offset: end } })
+    }
+    index = index + 1
+  }
+}
+
+fn textBoundaryAllowed(nodes: &BoxTree, items: &[Item], scopes: &[Scope], tokens: &[TextToken], at: TextCursor) -> bool {
+  if at.unit == tokens.length { return true }
+  if at.offset != 0 { return nodes.style(items[at.unit].id).textWrap == TextWrap.Wrap }
+  let mut left = at.unit
+  while left > 0 && TextFlow.length(&tokens[left - 1]) == 0 { left = left - 1 }
+  let mut right = at.unit
+  while right < tokens.length && TextFlow.length(&tokens[right]) == 0 { right = right + 1 }
+  if left == 0 || right == tokens.length { return false }
+  let leftKind = tokens[left - 1].kind
+  if (leftKind == TextTokenKind.Space || leftKind == TextTokenKind.PreservedSpace || leftKind == TextTokenKind.Tab) && nodes.style(items[left - 1].id).textWrap == TextWrap.NoWrap { return false }
+  return canBreak(nodes, scopes, items[left - 1].scope, items[right].scope)
+}
+
+fn inlineBreakBoundary(items: &[Item], scopes: &[Scope], at: usize) -> usize {
+  let mut result = at
+  while result < items.length {
+    let kind = items[result].kind
+    if kind == ItemKind.Close || kind == ItemKind.Float || kind == ItemKind.Anchor {
+      result = result + 1
+      continue
+    }
+    if kind != ItemKind.Open { break }
+    // Characterless siblings do not introduce a break opportunity. Keep
+    // them before the existing opportunity, matching Chrome's affinity;
+    // first/last-content ownership below still takes enclosing boxes along.
+    let start = result
+    let scope = items[start].scope
+    let mut end = start + 1
+    while end < items.length {
+      let nextKind = items[end].kind
+      if nextKind == ItemKind.Text || nextKind == ItemKind.Atomic { break }
+      if nextKind == ItemKind.Close && items[end].scope == scope {
+        result = end + 1
+        break
+      }
+      end = end + 1
+    }
+    if result == start { break }
+  }
+  // CSS Text §5: a break beside the first/last content belongs outside
+  // the inline's margin edge, including any intervening empty descendants.
+  // Keep those descendants with their enclosing box, rather than generating
+  // decoration-only continuations at the same semantic break opportunity.
+  let mut current = boundaryScope(items, scopes, result)
+  let mut probe = result
+  while current != 0 && probe < items.length {
+    let kind = items[probe].kind
+    if kind == ItemKind.Text || kind == ItemKind.Atomic { break }
+    if kind == ItemKind.Close && items[probe].scope == current {
+      result = probe + 1
+      current = scopes[current].parent
+    }
+    probe = probe + 1
+  }
+  current = boundaryScope(items, scopes, result)
+  probe = result
+  while current != 0 && probe > 0 {
+    let kind = items[probe - 1].kind
+    if kind == ItemKind.Text || kind == ItemKind.Atomic { break }
+    probe = probe - 1
+    if kind == ItemKind.Open && items[probe].scope == current {
+      result = probe
+      current = scopes[current].parent
+    }
+  }
+  return result
+}
+
+fn textEdge(nodes: &BoxTree, items: &[Item], scopes: &[Scope], at: TextCursor, leading: bool, rtl: bool, visual: bool) -> f64 {
+  if visual { return 0.0 }
+  return continuationEdges(nodes, items, scopes, at.unit, leading, rtl)
+}
+
+// CSS2 §10.3.7 permits a hypothetical-position approximation. Resolve one
+// zero-width atomic stand-in at a time (WM4 §2.4.3), without feeding it into
+// the real paragraph's analysis, breaks, shaping, or source intervals.
+effect fn analyzeAnchors<M: TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, original: &[Item], external: bool, levels: &mut List<u8>) ! OutOfMemoryError | TextError ? &mut Allocator {
+  levels.clear()
+  let mut tokens = List<TextToken>.make()
+  let mut ignoredBreaks = List<TextBreak>.make()
+  let mut index: usize = 0
+  while index < original.length {
+    if original[index].kind == ItemKind.Anchor {
+      let mut level: u8 = 0
+      if context.direction == Direction.Rtl { level = 1 }
+      if external && nodes.style(original[index].id).display.outsideIs(DisplayOutside.Inline) {
+        if tokens.length() == 0 {
+          run tokens.reserveExact(context.tokens.length)
+          let mut unit: usize = 0
+          while unit < context.tokens.length { run tokens.append(context.tokens[unit])
+            unit = unit + 1 }
+        }
+        let token = tokens.get(index)
+        let mut hypothetical = token
+        hypothetical.kind = TextTokenKind.Atomic
+        tokens.set(index, hypothetical)
+        let mut shadow = context
+        shadow.tokens = tokens.asSlice()
+        ignoredBreaks.clear()
+        let mut analysis = run TextMeasure.analyze(&mut measurer, shadow, &mut ignoredBreaks)
+        run Bidi.normalizeAnalysis(shadow, &mut analysis)
+        level = analysis.levelAt(TextCursor { unit: index, offset: 0 })
+        tokens.set(index, token)
+      }
+      run levels.append(level)
+    }
+    index = index + 1
+  }
+}
+
+effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, unicodeBidi: UnicodeBidi, externalAnalysis: bool, input: Input, box: ResolvedBox, bfc: &mut BfcState, raw: &[Item], atomics: &mut List<AtomicData>, scopes: &[Scope], extents: &mut List<Extent>) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let axes = Axes.make(style.writingMode)
+  let rtl = style.usedDirection() == Direction.Rtl
+  let fragmented = input.fragmentation.active && input.performLayout
+  let mut saved = PreparedInline.make<'source>()
+  if fragmented {
+    match move output.inlinePrepared.asMutSlice()[id].pop() {
+      Option<PreparedInline<'source>>.Some { value } => { saved = move value }
+      Option<PreparedInline<'source>>.None => {}
+    }
+  }
+  let mut reuse = saved.ready && saved.barriers.length() == raw.length
+  let mut barrierIndex: usize = 0
+  while reuse && barrierIndex < raw.length {
+    reuse = saved.barriers.get(barrierIndex) == shapingBarrier(nodes, raw[barrierIndex], scopes)
+    barrierIndex = barrierIndex + 1
+  }
+  let mut barriers = move saved.barriers
+  let mut normalized = move saved.normalized
+  if !reuse {
+    let rawTokens = run tokensFor(nodes, raw, scopes)
+    normalized = run TextFlow.normalize(rawTokens.asSlice(), nodes.sources)
+    if fragmented {
+      barriers.clear()
+      barrierIndex = 0
+      while barrierIndex < raw.length {
+        run barriers.append(shapingBarrier(nodes, raw[barrierIndex], scopes))
+        barrierIndex = barrierIndex + 1
+      }
+    }
+  }
+  let mut original = List<Item>.make()
+  run original.reserveExact(normalized.origins.length())
+  let mut index: usize = 0
+  let mut hasFloats = false
+  let mut hasText = false
+  let mut hasAtomicMargins = false
+  let mut floatMaximum = 0.0
+  let mut floatMinimum = 0.0
+  while index < normalized.origins.length() {
+    let mut item = raw[normalized.origins.get(index)]
+    item.start = TextCursor { unit: index, offset: 0 }
+    if item.kind == ItemKind.Text { hasText = true }
+    if fragmented && item.kind == ItemKind.Atomic && FragmentBox.applies(nodes.style(item.id), style.writingMode) {
+      let margin = atomics.asSlice()[item.leaf].margin
+      hasAtomicMargins = hasAtomicMargins || margin.top != 0.0 || margin.bottom != 0.0
+    }
+    run original.append(item)
+    if item.kind == ItemKind.Float { hasFloats = true
+      floatMaximum = floatMaximum + item.advance
+      floatMinimum = max(floatMinimum, item.advance) }
+    index = index + 1
+  }
+  let context = TextContext { tokens: normalized.tokens.asSlice(), writingMode: style.writingMode, textOrientation: style.textOrientation, direction: style.usedDirection(), unicodeBidi: unicodeBidi, textJustify: style.textJustify }
+  let mut offered = move saved.offered
+  if !reuse { offered.clear() }
+  let mut points = List<TextBreak>.make()
+  let terminal = TextCursor { unit: context.tokens.length, offset: 0 }
+  let mut baseLevel: u8 = 0
+  if rtl { baseLevel = 1 }
+  let mut analysis = move saved.analysis
+  if !reuse { analysis = TextAnalysis.uniform(context.tokens.length, baseLevel, baseLevel, false) }
+  if !reuse && context.tokens.length != 0 && externalAnalysis {
+    analysis = run TextMeasure.analyze(&mut measurer, context, &mut offered)
+  } else if !reuse && !externalAnalysis {
+    // A normal, box-only paragraph consists entirely of neutral atomics.
+    // Direction-sensitive decorations do not require an external text service.
+    index = 0
+    while index < context.tokens.length {
+      if context.tokens[index].kind == TextTokenKind.Atomic {
+        if index != 0 { run offered.append(TextBreak { at: TextCursor { unit: index, offset: 0 }, kind: TextBreakKind.Soft }) }
+        run offered.append(TextBreak { at: TextCursor { unit: index + 1, offset: 0 }, kind: TextBreakKind.Soft })
+      }
+      index = index + 1
+    }
+  }
+  let mut visualPlan = move saved.visual
+  if !reuse {
+    run Bidi.normalizeAnalysis(context, &mut analysis)
+    run analyzeAnchors(nodes, &mut measurer, context, original.asSlice(), externalAnalysis, &mut visualPlan.anchorLevels)
+  }
+  let mut anchorIndex: usize = 0
+  index = 0
+  while index < original.length() {
+    if original.get(index).kind == ItemKind.Anchor {
+      let values = original.asMutSlice()
+      values[index].level = visualPlan.anchorLevels.get(anchorIndex)
+      anchorIndex = anchorIndex + 1
+    }
+    index = index + 1
+  }
+  if !reuse {
+    let levels = move visualPlan.anchorLevels
+    visualPlan = run Visual.makePlan(nodes, scopes, original.asSlice(), context, &analysis)
+    visualPlan.anchorLevels = move levels
+  }
+  let mut previous = TextCursor { unit: 0, offset: 0 }
+  index = 0
+  while index < offered.length() {
+    let point = offered.get(index)
+    let cursor = run TextFlow.checked(context.tokens, point.at)
+    if cursor.before(previous) {
+      fail TextError { source: NO_NODE, message: "Text service returned unordered break opportunities" }
+    }
+    previous = cursor
+    let mut at = cursor
+    if point.kind == TextBreakKind.Forced {
+      at = TextFlow.breakBoundary(context.tokens, cursor)
+    } else if cursor.offset == 0 {
+      at.unit = inlineBreakBoundary(original.asSlice(), scopes, cursor.unit)
+    }
+    let mut prior = TextCursor { unit: 0, offset: 0 }
+    if points.length() != 0 { prior = points.get(points.length() - 1).at }
+    if prior.before(at) && (point.kind == TextBreakKind.Forced || textBoundaryAllowed(nodes, original.asSlice(), scopes, context.tokens, at)) {
+      run points.append(TextBreak { at: at, kind: point.kind })
+    }
+    index = index + 1
+  }
+  if context.tokens.length != 0 {
+    let mut appendEnd = points.length() == 0
+    if !appendEnd { appendEnd = !points.get(points.length() - 1).at.equal(terminal) }
+    if appendEnd { run points.append(TextBreak { at: terminal, kind: TextBreakKind.Soft }) }
+  }
+  let mut fonts = List<TextFont>.make()
+  let mut shaped = List<TextRun>.make()
+  let mut candidate = TextCandidate.make()
+  let mut accepted = TextCandidate.make()
+  let mut hangingRanges = List<TextRange>.make()
+  let mut available = input.availableWidth
+  if axes.vertical { available = input.availableHeight }
+  let mut width = 0.0
+  if box.size.widthDefinite { width = max(0.0, box.size.width - box.inset.horizontal()) }
+  else if available.kind == AvailableKind.Definite { width = max(0.0, available.value - box.inset.horizontal()) }
+  else {
+    let mut minimum = available.kind == AvailableKind.MinContent
+    // CSS Sizing §5.1 defines intrinsic widths through shrink-to-fit. An
+    // indent can make the all-breaks width exceed the no-soft-breaks width.
+    let capMinimum = minimum && resolve(style.textIndent.value, 0.0, true, 0.0) != 0.0
+    let mut minimumWidth = 0.0
+    while true {
+      width = 0.0
+      let mut start = TextCursor { unit: 0, offset: 0 }
+      let mut firstIntrinsic = true
+      let mut afterForced = false
+      index = 0
+      while index < points.length() {
+        let point = points.get(index)
+        if minimum || point.kind == TextBreakKind.Forced || point.at.equal(terminal) {
+          let indent = lineIndent(style, nodes.node(id).firstFormattedRun, firstIntrinsic, afterForced, 0.0)
+          run shapeCandidate(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut fonts, &mut shaped, &mut candidate, start, point.at, minimum && point.kind == TextBreakKind.Hyphenated, 0.0, indent, &[])
+          let edges = textEdge(nodes, original.asSlice(), scopes, start, true, rtl, visualPlan.active) + textEdge(nodes, original.asSlice(), scopes, point.at, false, rtl, visualPlan.active)
+          let mut advance = candidate.advance
+          if minimum { advance = advance - candidate.hanging }
+          width = max(width, advance + edges + indent)
+          if candidate.real { firstIntrinsic = false }
+          afterForced = point.kind == TextBreakKind.Forced
+          start = point.at
+        }
+        index = index + 1
+      }
+      if minimum { width = max(width, floatMinimum) }
+      else { width = max(0.0, width + floatMaximum) }
+      if capMinimum && minimum {
+        minimumWidth = width
+        minimum = false
+        continue
+      }
+      if capMinimum { width = min(width, minimumWidth) }
+      break
+    }
+  }
+  let mut boundaries = SourceBoundaries { events: List<SourceBoundary>.make(), after: BreakBoundary.none(), afterValid: false }
+  if fragmented && (hasFloats || input.fragmentation.sourceAdjacent
+    && (input.fragmentation.sourceBoundary.forced.kinds.any() || input.fragmentation.sourceBoundary.avoided.any())) {
+    boundaries = run sourceBoundaries(nodes, &mut output, &mut measurer, original.asSlice(), context.tokens, scopes, atomics.asSlice(), input)
+  }
+  let mut floatProgress = false
+  if fragmented { floatProgress = run fitPendingFloats(nodes, &mut output, &mut measurer, id, original.asSlice(), atomics.asMutSlice(), input, box, &mut bfc, width, axes) }
+  let mut finalItems = List<Item>.make()
+  let mut finalTexts = List<TextLeaf>.make()
+  let mut lines = List<LineBox>.make()
+  let mut result = Layout.zero()
+  result.collapsesThrough = true
+  let baselineOffsets = fontBaselines(&scopes[0].font, style.writingMode).translated(-scopes[0].font.baseline)
+  let mut cursor = 0.0
+  let mut next: usize = 0
+  let mut start = TextCursor { unit: 0, offset: 0 }
+  let mut lineDirection = style.usedDirection()
+  let mut afterForced = false
+  let mut realLines: usize = 0
+  let mut hasRealLine = false
+  let mut frameLines: usize = 0
+  let mut blocked = false
+  let mut lineBreak = false
+  let mut lineLimit = NO_NODE
+  let initialBfc = bfc.checkpoint()
+  if fragmented {
+    if input.fragmentation.relaxation == BreakRelaxation.Strict { lineLimit = output.lineLimit(id) }
+    match output.resumes.get(id).cursor {
+      FlowCursor.Inline { start: at, nextBreak, nextChunk: _, realLines: count, hasRealLine: hasLine, afterForced: forced, lineDirection: direction } => {
+        start = at
+        next = nextBreak
+        realLines = count
+        hasRealLine = hasLine
+        afterForced = forced
+        lineDirection = direction
+      }
+      _ => {}
+    }
+    if !reuse {
+      // Analysis may expose different soft opportunities when percentage
+      // decorations change shaping barriers; the accepted text cursor does not.
+      next = 0
+      while next < points.length() && !start.before(points.get(next).at) { next = next + 1 }
+    }
+  }
+  let initialStart = start
+  let initialNext = next
+  let initialRealLines = realLines
+  let initialHasRealLine = hasRealLine
+  let initialAfterForced = afterForced
+  let initialDirection = lineDirection
+  let mut sourceEvent: usize = 0
+  let mut sourceCut = NO_NODE
+  let mut sourceNextFloat = NO_NODE
+  let mut sourceRequest = ForcedBreaks.none()
+  if fragmented { sourceCut = output.resumes.get(id).inlineSourceCut }
+  while next < points.length() {
+    while sourceEvent < boundaries.events.length() {
+      let event = boundaries.events.get(sourceEvent)
+      let acknowledgedLeading = event.at.unit == 0 && output.resumes.get(id).beforeHandled
+      if event.at.before(start) || sourceCut == event.at.unit || acknowledgedLeading || !event.values.forced.active(input.fragmentation.activeKinds()).kinds.any() {
+        sourceEvent = sourceEvent + 1
+      } else { break }
+    }
+    if sourceEvent < boundaries.events.length() && boundaries.events.get(sourceEvent).at.equal(start) {
+      let event = boundaries.events.get(sourceEvent)
+      sourceRequest = event.values.forced.active(input.fragmentation.activeKinds())
+      // The parent combines this request before scheduling the first source
+      // sibling. No float boundary is propagated to the enclosing box.
+      blocked = true
+      break
+    }
+    let previousDirection = lineDirection
+    if unicodeBidi == UnicodeBidi.Plaintext {
+      let paragraph = analysis.paragraphAt(start)
+      if paragraph.hasStrong {
+        lineDirection = Direction.Ltr
+        if paragraph.level == 1 { lineDirection = Direction.Rtl }
+      }
+    }
+    let indentRtl = lineDirection == Direction.Rtl
+    let indent = lineIndent(style, nodes.node(id).firstFormattedRun, !hasRealLine, afterForced, width)
+    let first = next
+    let leading = textEdge(nodes, original.asSlice(), scopes, start, true, rtl, visualPlan.active)
+    let checkpoint = bfc.checkpoint()
+    let sourceY = cursor
+    let mut end = start
+    let mut sourceEnding = false
+    let mut total = 0.0
+    let mut band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, 0.0), indent, indentRtl)
+    while next < points.length() {
+      let offeredPoint = points.get(next)
+      let mut point = offeredPoint
+      let mut atSource = false
+      if sourceEvent < boundaries.events.length() {
+        let event = boundaries.events.get(sourceEvent)
+        if !point.at.before(event.at) {
+          if !point.at.equal(event.at) || point.kind != TextBreakKind.Forced {
+            point = TextBreak { at: event.at, kind: TextBreakKind.Soft }
+          }
+          atSource = true
+        }
+      }
+      let mut inlineOrigin = band.left
+      if rtl { inlineOrigin = width - band.right }
+      run shapeCandidate(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut fonts, &mut shaped, &mut candidate, start, point.at, point.kind == TextBreakKind.Hyphenated, 0.0, inlineOrigin, &[])
+      let natural = leading + candidate.advance + textEdge(nodes, original.asSlice(), scopes, point.at, false, rtl, visualPlan.active)
+      let proposed = natural - candidate.hanging
+      let mut metrics = lineExtents(candidate.items.asSlice(), scopes, extents.asMutSlice(), 0, candidate.items.length(), candidate.real)
+      if hasAtomicMargins {
+        let count = candidate.items.length()
+        let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
+        let atEnd = input.fragmentation.marginEnd && box.inset.bottom == 0.0 && point.at.equal(terminal) && !hasFloats
+        let full = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, candidate.real)
+        let ending = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, true, candidate.real)
+        metrics = atomicLineMargins(nodes, candidate.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, candidate.real)
+        metrics.height = max(full.height, ending.height)
+      }
+      bfc.restore(checkpoint)
+      if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, candidate.items.asSlice(), &candidate.visual, atomics.asMutSlice(), 0, candidate.items.length(), &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, input, box.inset.top) }
+      band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, indentRtl)
+      while next == first && proposed > band.right - band.left && band.occupied && band.nextBottom > cursor {
+        cursor = band.nextBottom
+        band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, indentRtl)
+      }
+      if next > first && proposed > band.right - band.left { break }
+      let old = move accepted
+      accepted = move candidate
+      candidate = move old
+      total = proposed
+      if point.kind == TextBreakKind.Forced || point.at.equal(terminal) {
+        total = natural - min(accepted.hanging, max(0.0, natural - (band.right - band.left)))
+      }
+      end = point.at
+      sourceEnding = atSource
+      if point.at.equal(offeredPoint.at) { next = next + 1 }
+      if atSource || point.kind == TextBreakKind.Forced { break }
+    }
+    let mut metrics = lineExtents(accepted.items.asSlice(), scopes, extents.asMutSlice(), 0, accepted.items.length(), accepted.real)
+    let mut boundaryOnly = false
+    let mut terminalAdjoins = true
+    let mut reservedHeight = metrics.height
+    if hasAtomicMargins {
+      let count = accepted.items.length()
+      let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
+      let retained = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, false, accepted.real)
+      if hasFloats {
+        bfc.restore(checkpoint)
+        run placeFloats(nodes, &mut output, &mut measurer, accepted.items.asSlice(), &accepted.visual, atomics.asMutSlice(), 0, count, &mut bfc, input.bfcContentOrigin, width, sourceY, retained.height, axes, leading, input, box.inset.top)
+      }
+      // Measure adjacency before discarding: the removed margin itself must
+      // not manufacture a gap, but a taller contained float already does.
+      terminalAdjoins = input.fragmentation.marginEndChosen || bfc.bottom(input.bfcContentOrigin) <= cursor + retained.height
+      let atEnd = input.fragmentation.marginEnd && box.inset.bottom == 0.0 && end.equal(terminal) && terminalAdjoins
+      let full = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, accepted.real)
+      let ending = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, !end.equal(terminal) || terminalAdjoins, accepted.real)
+      let available = input.fragmentation.limit - input.fragmentation.offset - box.inset.top - cursor
+      boundaryOnly = full.height > available && ending.height <= full.height
+      if boundaryOnly { metrics = ending
+        reservedHeight = ending.height }
+      else {
+        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, accepted.real)
+        // Reserve a possible final-line expansion caused by dropping a negative
+        // margin, so a later boundary decision never publishes a rejected line.
+        reservedHeight = max(full.height, ending.height)
+      }
+    }
+    let mut floatBoundary = false
+    if fragmented && hasFloats && frameLines == 0 && accepted.real && input.fragmentation.offset + box.inset.top + cursor + metrics.height > input.fragmentation.limit {
+      let prefix = floatPrefix(context, original.asSlice(), start, end)
+      if start.before(prefix) {
+        run shapeCandidate(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut fonts, &mut shaped, &mut candidate, start, prefix, false, 0.0, 0.0, &[])
+        if !candidate.real {
+          // Floats may advance independently while the first real line waits.
+          // This is a fragment boundary, not a forced text/paragraph break.
+          let old = move accepted
+          accepted = move candidate
+          candidate = move old
+          end = prefix
+          next = first
+          while next < points.length() && !end.before(points.get(next).at) { next = next + 1 }
+          cursor = sourceY
+          metrics = Size.zero()
+          total = accepted.advance
+          floatBoundary = true
+          sourceEnding = sourceEnding && end.equal(boundaries.events.get(sourceEvent).at)
+          boundaryOnly = false
+          reservedHeight = 0.0
+        }
+      }
+    }
+    if fragmented && accepted.real {
+      let exceeds = input.fragmentation.offset + box.inset.top + cursor + reservedHeight > input.fragmentation.limit
+        || (boundaryOnly && !sourceEnding && !end.equal(terminal) && !allowsLineBreak(frameLines + 1, 1, style.orphans, 1, input.fragmentation.avoidInside || sourceAvoided(boundaries.events.asSlice(), end, input), input.fragmentation.relaxation))
+      let capped = frameLines >= lineLimit
+      let emergency = frameLines == 0 && !input.fragmentation.canBreakBefore && input.fragmentation.relaxation == BreakRelaxation.Avoidance && !capped
+      if capped || (exceeds && !emergency) {
+        bfc.restore(checkpoint)
+        cursor = sourceY
+        next = first
+        lineDirection = previousDirection
+        // Future widows are checked by a transactional root preview using the
+        // next fragmentainer's actual ancestor widths and parallel float flows.
+        let allowed = allowsLineBreak(frameLines, 1, style.orphans, 1, input.fragmentation.avoidInside || sourceAvoided(boundaries.events.asSlice(), start, input), input.fragmentation.relaxation)
+        if !allowed && frameLines == 0 && floatProgress { break }
+        if !allowed {
+          blocked = true
+          bfc.restore(initialBfc)
+          finalItems.clear()
+          finalTexts.clear()
+          lines.clear()
+          result = Layout.zero()
+          result.collapsesThrough = true
+          cursor = 0.0
+          start = initialStart
+          next = initialNext
+          realLines = initialRealLines
+          hasRealLine = initialHasRealLine
+          afterForced = initialAfterForced
+          lineDirection = initialDirection
+          frameLines = 0
+        } else {
+          lineBreak = true
+        }
+        break
+      }
+    }
+    bfc.restore(checkpoint)
+    if hasFloats { run placeFloats(nodes, &mut output, &mut measurer, accepted.items.asSlice(), &accepted.visual, atomics.asMutSlice(), 0, accepted.items.length(), &mut bfc, input.bfcContentOrigin, width, sourceY, metrics.height, axes, leading, input, box.inset.top) }
+    if fragmented {
+      let mut floatIndex: usize = 0
+      while floatIndex < accepted.items.length() {
+        let item = accepted.items.get(floatIndex)
+        if item.kind == ItemKind.Float && !atomics.asSlice()[item.leaf].deferred { floatProgress = true }
+        floatIndex = floatIndex + 1
+      }
+    }
+    band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, metrics.height), indent, indentRtl)
+    let mut ending = TextBreak { at: end, kind: TextBreakKind.Soft }
+    if !floatBoundary && !sourceEnding { ending = points.get(next - 1) }
+    if sourceEnding && next > first {
+      let point = points.get(next - 1)
+      if point.at.equal(end) && point.kind == TextBreakKind.Forced { ending = point }
+    }
+    let last = next == points.length() || ending.kind == TextBreakKind.Forced
+    let remaining = band.right - band.left - total
+    if input.performLayout && remaining > 0.0 && effectiveTextAlign(style, last) == TextAlign.Justify {
+      let mut inlineOrigin = band.left
+      if rtl { inlineOrigin = width - band.right }
+      hangingRanges.clear()
+      if !last {
+        let mut hangingRtl = rtl
+        if unicodeBidi == UnicodeBidi.Plaintext { hangingRtl = analysis.paragraphAt(start).level == 1 }
+        run collectHanging(&accepted, context, hangingRtl, &mut hangingRanges)
+      }
+      run shapeCandidate(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut fonts, &mut shaped, &mut candidate, start, end, ending.kind == TextBreakKind.Hyphenated, remaining, inlineOrigin, hangingRanges.asSlice())
+      let natural = leading + candidate.advance + textEdge(nodes, original.asSlice(), scopes, end, false, rtl, visualPlan.active)
+      total = natural - candidate.hanging
+      if last { total = natural - min(candidate.hanging, max(0.0, natural - (band.right - band.left))) }
+      let old = move accepted
+      accepted = move candidate
+      candidate = move old
+      if hasAtomicMargins {
+        let count = accepted.items.length()
+        let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && cursor == 0.0
+        let atEnd = boundaryOnly || input.fragmentation.marginEnd && box.inset.bottom == 0.0 && end.equal(terminal) && terminalAdjoins
+        metrics = atomicLineMargins(nodes, accepted.items.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, 0, count, atStart, atEnd, accepted.real)
+      }
+    }
+    if accepted.real {
+      hasRealLine = true
+      realLines = realLines + 1
+      frameLines = frameLines + 1
+      let exported = baselineOffsets.translated(box.inset.top + cursor + metrics.width)
+      if !result.hasFirstBaseline { result.firstBaselines = exported
+        result.hasFirstBaseline = true }
+      result.lastBaselines = exported
+      result.hasLastBaseline = true
+      result.collapsesThrough = false
+    }
+    if input.performLayout {
+      let lineStart = finalItems.length()
+      let base = finalTexts.length()
+      index = 0
+      while index < accepted.texts.length() { run finalTexts.append(accepted.texts.get(index))
+        index = index + 1 }
+      index = 0
+      while index < accepted.items.length() {
+        let mut item = accepted.items.get(index)
+        if item.kind == ItemKind.Text { item.leaf = item.leaf + base }
+        run finalItems.append(item)
+        index = index + 1
+      }
+      run Visual.prepareEmission(&mut accepted.visual)
+      let mut hangingStart = 0.0
+      if lineDirection == Direction.Rtl {
+        hangingStart = max(0.0, leading + accepted.advance + textEdge(nodes, original.asSlice(), scopes, end, false, rtl, visualPlan.active) - total)
+      }
+      run lines.append(LineBox { start: lineStart, end: finalItems.length(), y: cursor, left: band.left, width: band.right - band.left, advance: total, hangingStart: hangingStart, height: metrics.height, baseline: metrics.width, real: accepted.real, last: last, direction: lineDirection, visual: move accepted.visual })
+      accepted.visual = Line.make()
+    }
+    cursor = cursor + metrics.height
+    if !floatBoundary && (!sourceEnding || accepted.real) { afterForced = ending.kind == TextBreakKind.Forced }
+    start = end
+    if sourceEnding {
+      let event = boundaries.events.get(sourceEvent)
+      sourceCut = event.at.unit
+      sourceNextFloat = event.nextFloat
+      sourceRequest = event.values.forced.active(input.fragmentation.activeKinds())
+      lineBreak = true
+      break
+    }
+    if boundaryOnly && !end.equal(terminal) {
+      lineBreak = true
+      break
+    }
+  }
+  if hasAtomicMargins && lineBreak && !blocked && lines.length() > 0 {
+    let lastIndex = lines.length() - 1
+    let line = &lines.asSlice()[lastIndex]
+    let atStart = input.fragmentation.marginStart && box.inset.top == 0.0 && line.y == 0.0
+    let metrics = atomicLineMargins(nodes, finalItems.asMutSlice(), atomics.asMutSlice(), scopes, extents.asMutSlice(), axes, input, line.start, line.end, atStart, true, line.real)
+    cursor = line.y + metrics.height
+    let exported = baselineOffsets.translated(box.inset.top + line.y + metrics.width)
+    if line.real {
+      result.lastBaselines = exported
+      if frameLines == 1 { result.firstBaselines = exported }
+    }
+    let values = lines.asMutSlice()
+    values[lastIndex].height = metrics.height
+    values[lastIndex].baseline = metrics.width
+  }
+  let mut height = cursor + box.inset.vertical()
+  if box.size.heightDefinite && !fragmented { height = box.size.height }
+  result.size = axes.size(Size { width: width + box.inset.horizontal(), height: height })
+  result.contentSize = axes.size(Size { width: width, height: cursor })
+  if input.performLayout {
+    if fragmented && !blocked { run emitPendingFloats(nodes, &mut output, &mut measurer, id, original.asSlice(), atomics.asSlice(), input, box, result.size, axes) }
+    let mut spans = Spans { values: List<Span>.make(), first: NO_NODE, last: NO_NODE }
+    run spans.values.reserveExact(scopes.length)
+    index = 0
+    while index < scopes.length { run spans.values.append(Span.make(NO_NODE))
+      index = index + 1 }
+    index = 0
+    while index < lines.length() {
+      let line = &lines.asSlice()[index]
+      run emitLine(nodes, &mut output, &mut measurer, finalItems.asSlice(), atomics.asSlice(), finalTexts.asSlice(), fonts.asSlice(), scopes, &mut extents, &mut spans, id, style, axes, box, result.size, line, baselineOffsets.translated(line.baseline), input)
+      index = index + 1
+    }
+  }
+  if fragmented {
+    if sourceRequest.kinds.any() && !blocked {
+      run output.defer(id, sourceRequest)
+      if sourceNextFloat != NO_NODE { run output.defer(sourceNextFloat, sourceRequest) }
+    }
+    let mut state = output.resumes.get(id)
+    state.cursor = FlowCursor.Inline { start: start, nextBreak: next, nextChunk: 0, realLines: realLines, hasRealLine: hasRealLine, afterForced: afterForced, lineDirection: lineDirection }
+    state.frameLines = frameLines
+    state.lineBreak = lineBreak && !sourceRequest.kinds.any()
+    state.blocked = blocked
+    state.inlineSourceCut = sourceCut
+    if sourceRequest.kinds.any() { state.requested = sourceRequest }
+    state.sourceAfter = boundaries.after
+    state.sourceAfterValid = boundaries.afterValid && next == points.length()
+    state.normalContentComplete = next == points.length()
+    state.descendantsComplete = state.normalContentComplete && state.pendingFirst == NO_NODE
+    run output.resumes.set(id, state)
+    run output.inlinePrepared.asMutSlice()[id].reserveExact(1)
+    run output.inlinePrepared.asMutSlice()[id].append(PreparedInline { ready: true, normalized: move normalized, analysis: move analysis, offered: move offered, visual: move visualPlan, barriers: move barriers })
+  }
+  return result
+}

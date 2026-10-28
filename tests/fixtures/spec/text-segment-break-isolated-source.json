@@ -1,0 +1,31 @@
+{
+  "name": "text-segment-break-isolated-source",
+  "kind": "spec",
+  "features": ["source-text", "whitespace"],
+  "spec": [
+    "https://drafts.csswg.org/css-display-3/#intro",
+    "https://drafts.csswg.org/css-text-3/#white-space-phase-1"
+  ],
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "fonts": [{
+      "fontSize": 10, "ascent": 8, "descent": 2, "lineGap": 0,
+      "xHeight": 5, "capHeight": 7, "subscriptOffset": 2, "superscriptOffset": 3,
+      "baselines": {"alphabetic": 8, "ideographic": 10, "central": 5, "mathematical": 5}
+    }],
+    "nodes": [
+      {"parent": null, "style": {"width": 50, "fontKey": 1}},
+      {"parent": 0, "text": "a "},
+      {"parent": 0, "text": "\n"},
+      {"parent": 0, "text": " b"}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 50, "height": 10},
+      {"x": 0, "y": 0, "width": 5, "height": 10, "text": "a ", "rects": [{"x": 0, "y": 0, "width": 5, "height": 10}]},
+      {"x": 5, "y": 0, "width": 5, "height": 10, "text": "\n", "rects": [{"x": 5, "y": 0, "width": 5, "height": 10}]},
+      {"x": 10, "y": 0, "width": 5, "height": 10, "text": " b", "rects": [{"x": 10, "y": 0, "width": 5, "height": 10}]}
+    ]
+  }
+}

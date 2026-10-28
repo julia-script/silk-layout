@@ -1,0 +1,73 @@
+{
+  "name": "flex-max-freeze",
+  "kind": "spec",
+  "features": [
+    "flex",
+    "max-size",
+    "freeze"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flex",
+          "width": 300,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 1,
+          "maxWidth": 80,
+          "minWidth": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "flexBasis": 50,
+          "flexGrow": 1,
+          "minWidth": 0
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 20,
+        "contentWidth": 300,
+        "contentHeight": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 20,
+        "contentWidth": 80,
+        "contentHeight": 20
+      },
+      {
+        "x": 80,
+        "y": 0,
+        "width": 220,
+        "height": 20,
+        "contentWidth": 220,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

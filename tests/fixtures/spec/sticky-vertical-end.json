@@ -1,0 +1,76 @@
+{
+  "name": "sticky-vertical-end",
+  "kind": "spec",
+  "features": [
+    "scroll-state",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-overflow-3/#scrolling",
+    "https://drafts.csswg.org/css-position-3/#stickypos-insets",
+    "https://drafts.csswg.org/css-position-3/#static-position"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "overflowX": "hidden",
+          "overflowY": "hidden"
+        },
+        "scrollOffset": {
+          "x": -30,
+          "y": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 300,
+          "height": 100,
+          "writingMode": "vertical-rl"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 120,
+          "height": 100,
+          "writingMode": "horizontal-tb",
+          "position": "sticky",
+          "insetRight": 10,
+          "insetLeft": 20
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 100
+      },
+      {
+        "x": -170,
+        "y": 0,
+        "width": 300,
+        "height": 100
+      },
+      {
+        "x": 140,
+        "y": 0,
+        "width": 120,
+        "height": 100
+      }
+    ]
+  }
+}

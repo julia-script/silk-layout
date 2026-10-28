@@ -1,0 +1,23 @@
+{
+  "name": "flex-intrinsic-cyclic-edges-vertical",
+  "kind": "spec",
+  "features": ["flex", "vertical-writing", "max-content", "cyclic-percentage", "margin", "padding"],
+  "spec": [
+    "https://drafts.csswg.org/css-flexbox-1/#intrinsic-main-sizes-compat",
+    "https://drafts.csswg.org/css-flexbox-1/#intrinsic-item-contributions",
+    "https://drafts.csswg.org/css-sizing-3/#cyclic-percentage-contribution"
+  ],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flex", "writingMode": "vertical-rl", "height": "max-content", "width": 20}},
+      {"parent": 0, "style": {"writingMode": "vertical-rl", "height": 100, "flexShrink": 0, "margin": {"top": {"percent": 0.1}}, "padding": {"top": {"percent": 0.2}}}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 20, "height": 100, "contentWidth": 20, "contentHeight": 100},
+      {"x": 0, "y": 10, "width": 20, "height": 120, "contentWidth": 20, "contentHeight": 100}
+    ]
+  }
+}

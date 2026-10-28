@@ -1,0 +1,75 @@
+{
+  "name": "margin-break-flex-keep-trailing-fixed-frame",
+  "kind": "spec",
+  "spec": [
+    "https://drafts.csswg.org/css-break-4/#break-margins",
+    "https://github.com/w3c/csswg-drafts/issues/3254",
+    "https://github.com/w3c/csswg-drafts/issues/6812"
+  ],
+  "input": {
+    "viewport": {
+      "width": 400,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100,
+          "display": "flex",
+          "flexDirection": "column",
+          "alignItems": "flex-start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "height": 20,
+          "flexShrink": 0,
+          "marginBottom": 25,
+          "marginBreak": "keep"
+        }
+      }
+    ],
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 40
+        }
+      ],
+      "repeatStep": {
+        "x": 100,
+        "y": 0
+      }
+    }
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 45
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 30,
+            "height": 20
+          }
+        ]
+      }
+    ]
+  }
+}

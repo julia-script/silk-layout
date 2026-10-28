@@ -1,0 +1,63 @@
+{
+  "name": "absolute-padding-box",
+  "kind": "spec",
+  "features": [
+    "absolute",
+    "positioning",
+    "padding",
+    "border"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "position": "relative",
+          "width": 200,
+          "height": 100,
+          "padding": 10,
+          "border": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "insetLeft": 0,
+          "insetTop": 0,
+          "width": {
+            "percent": 0.5
+          },
+          "height": 20
+        }
+      }
+    ]
+  },
+  "spec": [
+    "https://www.w3.org/TR/CSS22/visudet.html#containing-block-details"
+  ],
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 224,
+        "height": 124,
+        "contentWidth": 200,
+        "contentHeight": 100
+      },
+      {
+        "x": 2,
+        "y": 2,
+        "width": 110,
+        "height": 20,
+        "contentWidth": 110,
+        "contentHeight": 20
+      }
+    ]
+  }
+}

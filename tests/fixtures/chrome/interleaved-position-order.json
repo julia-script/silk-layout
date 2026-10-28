@@ -1,0 +1,47 @@
+{
+  "name": "interleaved-position-order-chrome",
+  "kind": "chrome",
+  "features": [
+    "position",
+    "static-position",
+    "relative",
+    "display-contents",
+    "tree-order"
+  ],
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "contents"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "position": "relative",
+          "height": 10,
+          "insetTop": 20
+        }
+      }
+    ]
+  }
+}

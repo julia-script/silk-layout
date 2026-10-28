@@ -1,0 +1,17 @@
+{
+  "name": "resource-min-max-pairs",
+  "kind": "chrome",
+  "features": ["replaced", "natural-aspect-ratio", "min-max", "paired-constraints"],
+  "description": "Auto-sized natural 120 by 60 resources exercise both-axis maximum reduction, both-axis minimum expansion, and incompatible cross-axis minimum/maximum constraints. These are actual resource observations, not native-derived expectations.",
+  "spec": ["https://www.w3.org/TR/CSS22/visudet.html#min-max-widths", "https://www.w3.org/TR/css-sizing-4/#aspect-ratio-size-transfers"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "flow-root", "width": 400}},
+      {"parent": 0, "style": {"maxWidth": 90, "maxHeight": 30}, "natural": {"width": 120, "height": 60, "aspectRatio": 2}},
+      {"parent": 0, "style": {"minWidth": 150, "minHeight": 90}, "natural": {"width": 120, "height": 60, "aspectRatio": 2}},
+      {"parent": 0, "style": {"minWidth": 150, "maxHeight": 40}, "natural": {"width": 120, "height": 60, "aspectRatio": 2}},
+      {"parent": 0, "style": {"maxWidth": 90, "minHeight": 80}, "natural": {"width": 120, "height": 60, "aspectRatio": 2}}
+    ]
+  }
+}

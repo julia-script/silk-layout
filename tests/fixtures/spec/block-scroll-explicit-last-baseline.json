@@ -1,0 +1,103 @@
+{
+  "name": "block-scroll-explicit-last-baseline",
+  "kind": "spec",
+  "features": [
+    "scrolling",
+    "baseline",
+    "inline"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#baseline-export",
+    "https://drafts.csswg.org/css-inline-3/#baseline-source"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 20,
+          "height": 20,
+          "overflowY": "hidden",
+          "baselineSource": "last"
+        },
+        "scrollOffset": {
+          "x": 0,
+          "y": 15
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "inline-block",
+          "width": 10,
+          "height": 8
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 40
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 5,
+          "height": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20,
+        "hasFirstBaseline": true,
+        "hasLastBaseline": true,
+        "firstBaseline": 8,
+        "lastBaseline": 8
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 20,
+        "hasLastBaseline": true,
+        "lastBaseline": 8
+      },
+      {
+        "x": 0,
+        "y": -15,
+        "width": 10,
+        "height": 8
+      },
+      {
+        "x": 0,
+        "y": -7,
+        "width": 20,
+        "height": 40
+      },
+      {
+        "x": 20,
+        "y": 3,
+        "width": 5,
+        "height": 5
+      }
+    ]
+  }
+}

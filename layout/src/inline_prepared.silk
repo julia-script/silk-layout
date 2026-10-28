@@ -1,7 +1,11 @@
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import inline_text { NormalizedText }
 import inline_visual { Plan }
 import text { TextToken, TextAnalysis, TextBreak }
+import inline_items { Item, Scope }
+import geometry { ResolvedEdges }
+import tree { NO_NODE }
 
 // An entire normalized paragraph belongs to one compute pass. Fragment cursors
 // address these tokens, never a suffix whose bidi or source coordinates differ.
@@ -12,6 +16,7 @@ pub struct PreparedInline<'source> {
   pub offered: List<TextBreak>,
   pub visual: Plan,
   pub barriers: List<bool>,
+  pub memo: TextMemo,
 }
 impl PreparedInline {
   pub fn make<'source>() -> PreparedInline<'source> {
@@ -19,7 +24,94 @@ impl PreparedInline {
       ready: false,
       normalized: NormalizedText { tokens: List<TextToken<'source>>.make(), origins: List<usize>.make() },
       analysis: TextAnalysis.uniform(0, 0, 0, false),
-      offered: List<TextBreak>.make(), visual: Plan.make(), barriers: List<bool>.make(),
+      offered: List<TextBreak>.make(), visual: Plan.make(), barriers: List<bool>.make(), memo: TextMemo.make(),
     }
   }
+}
+
+// Line fitting results that depend only on the prepared paragraph, its items
+// and scopes, and the line width, so later probes of the same box in one pass
+// repeat them instead of shaping again. Results apply only while `items` and
+// `scopes` equal the current ones.
+pub struct TextMemo {
+  pub items: List<Item>, pub scopes: List<Scope>,
+  // Estimated advance before each unit (see fast line fitting). Estimates
+  // only steer the search, so they stay while the tokens do.
+  pub prefix: List<f64>,
+  pub minContent: f64, pub maxContent: f64, pub hasMin: bool, pub hasMax: bool,
+  // For each width fitted without floats: the index of the break point
+  // ending each line, `counts[i]` of them for `widths[i]`, in order.
+  pub widths: List<f64>, pub counts: List<usize>, pub ends: List<usize>,
+}
+impl TextMemo {
+  pub fn make() -> TextMemo {
+    return TextMemo {
+      items: List<Item>.make(), scopes: List<Scope>.make(), prefix: List<f64>.make(),
+      minContent: 0.0, maxContent: 0.0, hasMin: false, hasMax: false,
+      widths: List<f64>.make(), counts: List<usize>.make(), ends: List<usize>.make(),
+    }
+  }
+  // Keeps the results when they were computed from the same items and
+  // scopes; otherwise starts over from these.
+  pub effect fn prepare(self: &mut Self, items: &[Item], scopes: &[Scope]) ! OutOfMemoryError ? &mut Allocator {
+    let mut same = self.items.length() == items.length && self.scopes.length() == scopes.length
+    let mut index: usize = 0
+    while same && index < items.length {
+      same = sameItem(&self.items.asSlice()[index], &items[index])
+      index = index + 1
+    }
+    index = 0
+    while same && index < scopes.length {
+      same = sameScope(&self.scopes.asSlice()[index], &scopes[index])
+      index = index + 1
+    }
+    if same { return }
+    self.hasMin = false
+    self.hasMax = false
+    self.widths.clear()
+    self.counts.clear()
+    self.ends.clear()
+    self.items.clear()
+    self.scopes.clear()
+    run self.items.reserveExact(items.length)
+    index = 0
+    while index < items.length { run self.items.append(items[index])
+      index = index + 1 }
+    run self.scopes.reserveExact(scopes.length)
+    index = 0
+    while index < scopes.length { run self.scopes.append(scopes[index])
+      index = index + 1 }
+  }
+  // The first line end recorded for `width`, or NO_NODE.
+  pub fn linesFor(self: &Self, width: f64) -> usize {
+    let mut first: usize = 0
+    let mut index: usize = 0
+    while index < self.widths.length() {
+      if self.widths.get(index) == width { return first }
+      first = first + self.counts.get(index)
+      index = index + 1
+    }
+    return NO_NODE
+  }
+  pub effect fn record(self: &mut Self, width: f64, ends: &[usize]) ! OutOfMemoryError ? &mut Allocator {
+    run self.widths.append(width)
+    run self.counts.append(ends.length)
+    let mut index: usize = 0
+    while index < ends.length { run self.ends.append(ends[index])
+      index = index + 1 }
+  }
+}
+
+fn sameEdges(a: &ResolvedEdges, b: &ResolvedEdges) -> bool {
+  return a.top == b.top && a.right == b.right && a.bottom == b.bottom && a.left == b.left
+}
+fn sameItem(a: &Item, b: &Item) -> bool {
+  return a.kind == b.kind && a.level == b.level && a.id == b.id && a.scope == b.scope && a.group == b.group && a.leaf == b.leaf
+    && a.advance == b.advance && a.before == b.before && a.after == b.after && a.offset == b.offset
+    && a.lineLeftSpacing == b.lineLeftSpacing && a.start.equal(b.start)
+}
+fn sameScope(a: &Scope, b: &Scope) -> bool {
+  return a.id == b.id && a.parent == b.parent && a.group == b.group && a.offset == b.offset && a.phantomClone == b.phantomClone
+    && sameEdges(&a.inset, &b.inset) && sameEdges(&a.border, &b.border) && sameEdges(&a.margin, &b.margin)
+    && a.font.metrics.fontSize == b.font.metrics.fontSize && a.font.lineHeight == b.font.lineHeight
 }

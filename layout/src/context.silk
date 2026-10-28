@@ -19,6 +19,9 @@ pub struct Input {
   pub parentJustifyItems: Align, pub parentJustifyItemsSafety: OverflowAlignment,
   pub bfcContentOrigin: Point,
   pub performLayout: bool,
+  // Whether the caller reads the result's baselines. A size probe without it
+  // may skip the contents of a box whose size is already fixed.
+  pub baselines: bool,
   pub fragmentation: FragmentInput,
 }
 impl Copy for Input {}
@@ -28,7 +31,7 @@ impl Input {
     let mut height = AvailableSpace.maxContent()
     if parent.widthDefinite { width = AvailableSpace.definite(parent.width) }
     if parent.heightDefinite { height = AvailableSpace.definite(parent.height) }
-    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, fragmentation: FragmentInput.continuous() }
+    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, baselines: true, fragmentation: FragmentInput.continuous() }
   }
 }
 pub struct ResolvedBox {
@@ -132,6 +135,7 @@ pub fn childrenInput(input: &Input, style: &Style, box: &ResolvedBox, parent: Op
   let mut result = Input.make(parent)
   result.initialContainingBlock = input.initialContainingBlock
   result.performLayout = input.performLayout
+  result.baselines = input.baselines
   result.fragmentation = input.fragmentation
   result.fragmentation.active = input.fragmentation.active && input.performLayout
   result.fragmentation.flexAutoExtent = false

@@ -649,6 +649,57 @@ effect fn zeroSubtree(nodes: &BoxTree, output: &mut LayoutPass, id: usize) ! Out
     child = nodes.node(child).nextSibling }
 }
 // Layout baselines use each node's logical block axis, not physical y.
+struct BaselinePick { chosen: usize, rank: usize, useLast: bool, position: f64 }
+impl Copy for BaselinePick {}
+impl BaselinePick {
+  fn none(last: bool) -> BaselinePick with Intrinsic.inlineAlways() { return BaselinePick { chosen: NO_NODE, rank: 0, useLast: last, position: 0.0 } }
+}
+struct BaselinePicks { first: BaselinePick, last: BaselinePick }
+impl Copy for BaselinePicks {}
+
+fn considerBaseline(pick: &mut BaselinePick, item: &Item, child: &Layout, compatible: bool, position: f64, axis: &Axes, last: bool) with Intrinsic.inlineAlways() {
+  let mut rank: usize = 1
+  let mut useLast = last
+  if axis.row {
+    if compatible && ((!last && child.hasFirstBaseline) || (last && child.hasLastBaseline)) { rank = 2 }
+    if item.baselineEligible && (item.align == Align.Baseline || item.align == Align.LastBaseline) {
+      rank = 3
+      useLast = item.align == Align.LastBaseline
+      let groupLast = item.baselineEnd != (axis.crossReverse != axis.crossStartReverse)
+      if groupLast == last { rank = 4 }
+    }
+  }
+  let mut replace = pick.chosen == NO_NODE || rank > pick.rank
+  if rank == pick.rank {
+    if rank == 1 { replace = (!last && position < pick.position) || (last && position > pick.position) }
+    else if last { replace = true }
+  }
+  if replace {
+    pick.chosen = item.id
+    pick.rank = rank
+    pick.position = position
+    pick.useLast = useLast
+  }
+}
+
+// Picks the first-baseline item, the last-baseline item, or both from items[start..end].
+fn scanBaselineItems(nodes: &BoxTree, output: &LayoutPass, items: &[Item], start: usize, end: usize, blockHorizontal: bool, axis: &Axes, fragmented: bool, first: bool, last: bool, picks: &mut BaselinePicks) {
+  let mut index = start
+  while index < end {
+    let item = &items[index]
+    if !item.collapsed && (!fragmented || output.publication(item.id) != NO_NODE) {
+      let child = &output.boxes[item.id]
+      let compatible = (nodes.style(item.id).writingMode != WritingMode.HorizontalTb) == blockHorizontal
+      let mut position = child.location.y
+      if axis.horizontal { position = child.location.x }
+      if axis.mainStartReverse { position = -position - axisSize(child.size, axis.horizontal) }
+      if first { considerBaseline(&mut picks.first, item, child, compatible, position, axis, false) }
+      if last { considerBaseline(&mut picks.last, item, child, compatible, position, axis, true) }
+    }
+    index = index + 1
+  }
+}
+
 fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer: &mut M, items: &[Item], lines: &[Line], lineCount: usize, style: &Style, axis: &Axes, fragmented: bool, result: &mut Layout) {
   if lineCount == 0 { return }
   let mut firstLine: usize = 0
@@ -675,53 +726,36 @@ fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer
   let reverseBlock = blockReverse(style)
   let mut fontBaselines = BaselineSet.zero()
   let mut hasFontBaselines = false
+  // Both passes usually scan the same items (a single line, or a column), so one
+  // scan picks the first and last baseline items together.
+  let mut firstIndex = firstLine
+  let mut lastIndex = lastLine
+  if axis.crossReverse != axis.crossStartReverse {
+    firstIndex = lastLine
+    lastIndex = firstLine
+  }
+  let mut firstStart = lines[firstIndex].start
+  let mut firstEnd = lines[firstIndex].end
+  let mut lastStart = lines[lastIndex].start
+  let mut lastEnd = lines[lastIndex].end
+  if !axis.row {
+    firstStart = lines[0].start
+    firstEnd = lines[lineCount - 1].end
+    lastStart = firstStart
+    lastEnd = firstEnd
+  }
+  let mut picks = BaselinePicks { first: BaselinePick.none(false), last: BaselinePick.none(true) }
+  let shared = firstStart == lastStart && firstEnd == lastEnd
+  scanBaselineItems(nodes, &output, items, firstStart, firstEnd, blockHorizontal, &axis, fragmented, true, shared, &mut picks)
+  if !shared { scanBaselineItems(nodes, &output, items, lastStart, lastEnd, blockHorizontal, &axis, fragmented, false, true, &mut picks) }
   let mut pass: usize = 0
   while pass < 2 {
     let last = pass == 1
-    let mut lineIndex = firstLine
-    if last != (axis.crossReverse != axis.crossStartReverse) { lineIndex = lastLine }
-    let line = lines[lineIndex]
-    let mut start = line.start
-    let mut end = line.end
-    if !axis.row { start = lines[0].start
-      end = lines[lineCount - 1].end }
-    let mut chosen = NO_NODE
-    let mut chosenRank: usize = 0
-    let mut chosenLast = last
-    let mut chosenPosition = 0.0
-    let mut index = start
-    while index < end {
-      let item = items[index]
-      if !item.collapsed && (!fragmented || output.publication(item.id) != NO_NODE) {
-        let child = &output.boxes[item.id]
-        let childStyle = nodes.style(item.id)
-        let compatible = (childStyle.writingMode != WritingMode.HorizontalTb) == blockHorizontal
-        let mut rank: usize = 1
-        let mut useLast = last
-        if axis.row {
-          if compatible && ((!last && child.hasFirstBaseline) || (last && child.hasLastBaseline)) { rank = 2 }
-          if item.baselineEligible && (item.align == Align.Baseline || item.align == Align.LastBaseline) {
-            rank = 3
-            useLast = item.align == Align.LastBaseline
-            let groupLast = item.baselineEnd != (axis.crossReverse != axis.crossStartReverse)
-            if groupLast == last { rank = 4 }
-          }
-        }
-        let mut position = child.location.y
-        if axis.horizontal { position = child.location.x }
-        if axis.mainStartReverse { position = -position - axisSize(child.size, axis.horizontal) }
-        let mut replace = chosen == NO_NODE || rank > chosenRank
-        if rank == chosenRank {
-          if rank == 1 { replace = (!last && position < chosenPosition) || (last && position > chosenPosition) }
-          else if last { replace = true }
-        }
-        if replace { chosen = item.id
-          chosenRank = rank
-          chosenPosition = position
-          chosenLast = useLast }
-      }
-      index = index + 1
-    }
+    let mut pick = picks.first
+    if last { pick = picks.last }
+    let chosen = pick.chosen
+    let chosenRank = pick.rank
+    let chosenLast = pick.useLast
     if chosen != NO_NODE {
       let child = &output.boxes[chosen]
       let childStyle = nodes.style(chosen)

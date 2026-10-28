@@ -431,10 +431,7 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   }
   // Final layouts are kept under the same normalized request as probes.
   let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
-  match run output.reuseFinal(nodes, id, &key, REUSE_INDEPENDENT, false) {
-    Option<Layout>.Some { value: reused } => { return reused }
-    Option<Layout>.None => {}
-  }
+  if run output.reuseFinal(nodes, id, &key, REUSE_INDEPENDENT, false) { return output.boxes[id] }
   if input.bfcContentOrigin.x != 0.0 || input.bfcContentOrigin.y != 0.0 {
     let mut request = input.*
     request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
@@ -551,10 +548,7 @@ pub effect fn layoutInFlow<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   if !reusable { return run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc) }
   let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
   run bfc.collectBelow(input.bfcContentOrigin, &mut output.floatContext)
-  match run output.reuseFinal(nodes, id, &key, REUSE_IN_FLOW, true) {
-    Option<Layout>.Some { value: reused } => { return reused }
-    Option<Layout>.None => {}
-  }
+  if run output.reuseFinal(nodes, id, &key, REUSE_IN_FLOW, true) { return output.boxes[id] }
   return run layoutInFlowFresh(nodes, &mut output, &mut measurer, id, &input, &mut bfc, &key)
 }
 

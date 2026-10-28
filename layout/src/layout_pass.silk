@@ -623,8 +623,13 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // same request as in the previous compute gets a copy of that compute's
   // fragments and box records instead of a layout. `level` says which kind
   // of subtree the caller can take (see Incremental.markSubtrees).
-  pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
-    if self.frame != NO_NODE || id >= self.reusable.length() || (self.reusable.get(id) & REUSE_LEVEL) < level { return Option<Layout>.None }
+  pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
+    // Without tracking, the compute follows a cache clear: nothing is kept.
+    if !self.tracking || self.frame != NO_NODE { return Option<Layout>.None }
+    return run self.reuseKept(nodes, id, input, level, beside)
+  }
+  effect fn reuseKept(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
+    if id >= self.reusable.length() || (self.reusable.get(id) & REUSE_LEVEL) < level { return Option<Layout>.None }
     let mut slot = self.cache.keptRange(id)
     if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return Option<Layout>.None }
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }

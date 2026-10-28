@@ -217,7 +217,7 @@ fn probeInput(childInput: &Input, horizontal: bool, constraint: AvailableSpace, 
 // prepareFresh, or what it made of the item before under the same arguments.
 effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let id = item.id
-  let memoable = output.cache.flexMemos.enabled && !childInput.fragmentation.active && output.frame == NO_NODE
+  let memoable = output.cache.flexMemos.enabled && !output.cache.flexMemos.fresh && !childInput.fragmentation.active && output.frame == NO_NODE
   if memoable {
     let found = output.cache.flexMemos.find(id, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite)
     if found != NO_NODE {
@@ -607,11 +607,16 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       // probeNode, with the request built again only on a cache miss.
       let mut key = crossProbeInput(input, &item.*, axis)
       normalizeKey(output.keyShape(item.id), &mut key, output.viewportFree(item.id))
-      if !run output.storeCached(item.id, &key, CacheKind.IndependentBox) {
+      // Fragmented placement reads the probe back from boxes[id].
+      let mut cached = usize.MAX
+      let mut stored = false
+      if !input.fragmentation.active && output.frame == NO_NODE { cached = output.findProbe(item.id, &key, CacheKind.IndependentBox) }
+      else { stored = run output.storeCached(item.id, &key, CacheKind.IndependentBox) }
+      if cached == usize.MAX && !stored {
         let request = crossProbeInput(input, &item.*, axis)
         run probeFresh(nodes, &mut output, &mut measurer, item.id, &request, &key)
       }
-      let layout = &output.boxes[item.id]
+      let layout = output.probed(item.id, cached)
       item.cross = axisSize(layout.size, !axis.horizontal)
       item.baseline = baselineDistance(layout, nodes.style(item.id), input.parentWritingMode, input.parentTextOrientation, &axis, false)
       item.lastBaseline = baselineDistance(layout, nodes.style(item.id), input.parentWritingMode, input.parentTextOrientation, &axis, true)
@@ -891,9 +896,11 @@ pub struct FlexScratch { items: List<Item>, lines: List<Line> }
 // A compute after one in which few lookups found an entry (a resize gives
 // every container new sizes) neither looks up nor keeps entries, but for
 // every SAMPLE-th, so that edits after a drag find them again.
+// A fresh compute (the cache was just cleared) skips the memo too: it can
+// reuse nothing, and its entries would only be overwritten.
 pub struct FlexMemos {
   heads: List<usize>, entries: List<FlexMemo>,
-  enabled: bool, lookups: usize, hits: usize, skipped: usize,
+  enabled: bool, fresh: bool, lookups: usize, hits: usize, skipped: usize,
 }
 struct FlexMemo {
   input: Input, main: AvailableSpace, axis: Axes,
@@ -906,9 +913,10 @@ const MEMOS_PER_BOX: usize = 4
 const MEMOS: usize = 16384
 const SAMPLE: usize = 8
 impl FlexMemos {
-  pub fn make() -> FlexMemos { return FlexMemos { heads: List<usize>.make(), entries: List<FlexMemo>.make(), enabled: true, lookups: 0, hits: 0, skipped: 0 } }
+  pub fn make() -> FlexMemos { return FlexMemos { heads: List<usize>.make(), entries: List<FlexMemo>.make(), enabled: true, fresh: true, lookups: 0, hits: 0, skipped: 0 } }
   // Starts a compute that keeps the previous one's cache.
   pub fn rotate(self: &mut Self) {
+    self.fresh = false
     if self.lookups != 0 { self.enabled = self.hits * 4 >= self.lookups }
     if self.enabled { self.skipped = 0 }
     else {
@@ -922,6 +930,7 @@ impl FlexMemos {
     self.hits = 0
   }
   pub fn clear(self: &mut Self) {
+    self.fresh = true
     self.heads.clear()
     self.entries.clear()
   }
@@ -929,10 +938,12 @@ impl FlexMemos {
     if id < self.heads.length() { self.heads.set(id, NO_NODE) }
   }
   fn find(self: &mut Self, id: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool) -> usize {
-    self.lookups = self.lookups + 1
     if id >= self.heads.length() { return NO_NODE }
     let entries = self.entries.asSlice()
     let mut index = self.heads.get(id)
+    // Only boxes with memos count toward the hit rate: a compute after a
+    // fresh one fills them without turning the memo off.
+    if index != NO_NODE { self.lookups = self.lookups + 1 }
     while index != NO_NODE {
       let entry = &entries[index]
       if entry.main.kind == main.kind && entry.main.value == main.value && entry.intrinsic == intrinsic && entry.mainDefinite == mainDefinite

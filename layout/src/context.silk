@@ -85,10 +85,20 @@ pub fn resolve(value: Dimension, basis: f64, definite: bool, fallback: f64) -> f
 }
 pub fn edges(value: Edges, basis: f64, definite: bool) -> ResolvedEdges {
   // Cyclic percentage edges resolve against zero; calc() keeps its length.
+  // Dimension's constructors leave value and percent zero where a kind has
+  // none, so every kind resolves as value + percent * basis, without branches.
+  let mut used = 0.0
+  if definite { used = basis }
   return ResolvedEdges {
-    top: resolve(value.top, basis, definite, value.top.value), right: resolve(value.right, basis, definite, value.right.value),
-    bottom: resolve(value.bottom, basis, definite, value.bottom.value), left: resolve(value.left, basis, definite, value.left.value),
+    top: value.top.value + value.top.percent * used, right: value.right.value + value.right.percent * used,
+    bottom: value.bottom.value + value.bottom.percent * used, left: value.left.value + value.left.percent * used,
   }
+}
+// resolve(value, basis, definite, value.value) without branches; see edges.
+fn minimumLength(value: Dimension, basis: f64, definite: bool) -> f64 {
+  let mut used = 0.0
+  if definite { used = basis }
+  return value.value + value.percent * used
 }
 pub fn resolveBox(style: &Style, input: &Input) -> ResolvedBox with Intrinsic.inlineAlways() {
   let mut basis = input.parent.width
@@ -117,7 +127,7 @@ pub fn resolveBox(style: &Style, input: &Input) -> ResolvedBox with Intrinsic.in
   let mut result = ResolvedBox {
     padding: padding, border: border, margin: margin, inset: inset, size: size,
     gutter: ResolvedEdges.zero(), scrollbarMetrics: ScrollbarMetrics.zero(),
-    min: Size { width: max(inset.horizontal(), resolve(style.minWidth, input.parent.width, input.parent.widthDefinite, style.minWidth.value) + addWidth), height: max(inset.vertical(), resolve(style.minHeight, input.parent.height, input.parent.heightDefinite, style.minHeight.value) + addHeight) },
+    min: Size { width: max(inset.horizontal(), minimumLength(style.minWidth, input.parent.width, input.parent.widthDefinite) + addWidth), height: max(inset.vertical(), minimumLength(style.minHeight, input.parent.height, input.parent.heightDefinite) + addHeight) },
     max: Size { width: max(inset.horizontal(), resolve(style.maxWidth, input.parent.width, input.parent.widthDefinite, UNBOUNDED) + addWidth), height: max(inset.vertical(), resolve(style.maxHeight, input.parent.height, input.parent.heightDefinite, UNBOUNDED) + addHeight) },
   }
   if input.intrinsicWidth {

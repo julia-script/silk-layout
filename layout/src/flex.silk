@@ -498,7 +498,7 @@ fn baselineDistance(layout: &Layout, style: &Style, containerMode: WritingMode, 
 fn lineOverReverse(mode: WritingMode) -> bool {
   return mode == WritingMode.VerticalRl || mode == WritingMode.VerticalLr || mode == WritingMode.SidewaysRl
 }
-effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: &Line, input: &Input, axis: &Axes, parentStyle: &Style, collapsed: bool) -> Line ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: &Line, input: &Input, axis: &Axes, parentStyle: &Style, collapsed: bool, lineKnown: bool) -> Line ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut result = line.*
   // §9.4 floors the line size at zero, not the signed distances of its items.
   let mut before = -UNBOUNDED
@@ -516,7 +516,13 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut index = line.start
   while index < line.end {
     let mut item = items[index]
-    if active(&item, collapsed) {
+    // A stretched item in a line whose cross size is already known (§9.4
+    // step 8) takes the line's size; its hypothetical cross size is unused.
+    if lineKnown && item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd && active(&item, collapsed) {
+      item.cross = item.crossMin
+      item.baseline = 0.0
+      item.lastBaseline = 0.0
+    } else if active(&item, collapsed) {
       let mut childInput = input.*
       childInput.performLayout = false
       // Baseline alignment reads the item's baselines; a probed container's
@@ -847,7 +853,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
       let line = lines.get(lineIndex)
       run deferredMinimums(nodes, &mut output, &mut measurer, items.asMutSlice(), &line, &childInput, &axis, main, mainGap, collapsed)
       resolveFlexible(items.asMutSlice(), &line, main, mainGap, collapsed)
-      let mut measuredLine = run crossSizes(nodes, &mut output, &mut measurer, items.asMutSlice(), &line, &childInput, &axis, style, collapsed)
+      let mut measuredLine = run crossSizes(nodes, &mut output, &mut measurer, items.asMutSlice(), &line, &childInput, &axis, style, collapsed, style.flexWrap == FlexWrap.NoWrap && crossKnown && !input.fragmentation.active)
       if style.flexWrap == FlexWrap.NoWrap {
         if crossKnown { measuredLine.cross = cross }
         else { measuredLine.cross = max(0.0, clamp(measuredLine.cross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }

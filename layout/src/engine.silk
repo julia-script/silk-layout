@@ -198,14 +198,14 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     if minimum { request.availableHeight = AvailableSpace.minContent() }
   }
   request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
-  let key = cacheKey(nodes, id, &request, output.viewportFree(id))
-  match output.lookup(id, &key, CacheKind.IntrinsicContents) {
-    Option<Layout>.Some { value: cached } => {
+  let key = cacheKey(output.keyShape(id), &request, output.viewportFree(id))
+  match output.lookupSize(id, &key, CacheKind.IntrinsicContents) {
+    Option<Size>.Some { value: cached } => {
       output.stats.cacheHits = output.stats.cacheHits + 1
-      if horizontal { return cached.size.width }
-      return cached.size.height
+      if horizontal { return cached.width }
+      return cached.height
     }
-    Option<Layout>.None => {}
+    Option<Size>.None => {}
   }
   let mut box = resolveBox(nodes.style(id), &request)
   configureScrollbars(nodes.style(id), &mut output, &mut measurer, id, &request, &mut box)
@@ -318,7 +318,42 @@ fn percentEdges(value: &Edges) -> bool {
 // ratio-only replaced boxes fall back to it. Available space on an axis with
 // a known size only reaches descendants through the box's definite size.
 // Depends only on the box's own style, so keys stay valid across computes.
-fn cacheKey(nodes: &BoxTree, id: usize, input: &Input, viewportFree: bool) -> Input {
+// Style facts cacheKey reads, computed once per box for each compute.
+const KEY_FIXED: u8 = 1
+const KEY_EMPTY: u8 = 2
+const KEY_WIDTH_LENGTH: u8 = 4
+const KEY_HEIGHT_LENGTH: u8 = 8
+const KEY_BLOCK: u8 = 16
+const KEY_HORIZONTAL: u8 = 32
+const KEY_PERCENT: u8 = 64
+
+fn keyShape(nodes: &BoxTree, id: usize) -> u8 {
+  let node = nodes.node(id)
+  let style = nodes.style(id)
+  if node.kind == BoxKind.InlineFormatting || style.replaced { return KEY_FIXED }
+  let mut shape: u8 = 0
+  if node.firstChild == NO_NODE && node.measurement == Measurement.None && node.kind != BoxKind.Text { shape = shape | KEY_EMPTY }
+  if style.width.kind == DimensionKind.Length { shape = shape | KEY_WIDTH_LENGTH }
+  if style.height.kind == DimensionKind.Length { shape = shape | KEY_HEIGHT_LENGTH }
+  if node.kind == BoxKind.Block && node.measurement == Measurement.None && !isFlex(style) && style.writingMode == WritingMode.HorizontalTb && style.height.kind != DimensionKind.MinContent && style.height.kind != DimensionKind.MaxContent && style.height.kind != DimensionKind.FitContent { shape = shape | KEY_BLOCK }
+  if style.writingMode == WritingMode.HorizontalTb { shape = shape | KEY_HORIZONTAL }
+  if percentLike(style.width) || percentLike(style.height) || percentLike(style.minWidth) || percentLike(style.minHeight) || percentLike(style.maxWidth) || percentLike(style.maxHeight) || percentEdges(&style.padding) || percentEdges(&style.margin) || percentEdges(&style.inset) { shape = shape | KEY_PERCENT }
+  return shape
+}
+
+effect fn keyShapes(nodes: &BoxTree) -> List<u8> ! OutOfMemoryError ? &mut Allocator {
+  let count = nodes.boxes.length()
+  let mut result = List<u8>.make()
+  run result.reserveExact(count)
+  let mut id: usize = 0
+  while id < count {
+    run result.append(keyShape(nodes, id))
+    id = id + 1
+  }
+  return move result
+}
+
+fn cacheKey(shape: u8, input: &Input, viewportFree: bool) -> Input {
   let mut key = input.*
   // Only replaced boxes and orthogonal flows read the initial containing
   // block and the scrollport limits; see Incremental.viewportFreeSubtrees.
@@ -329,25 +364,21 @@ fn cacheKey(nodes: &BoxTree, id: usize, input: &Input, viewportFree: bool) -> In
   }
   if key.known.widthDefinite { key.availableWidth = AvailableSpace.maxContent() }
   if key.known.heightDefinite { key.availableHeight = AvailableSpace.maxContent() }
-  let node = nodes.node(id)
-  if node.kind == BoxKind.InlineFormatting { return key }
-  let style = nodes.style(id)
-  if style.replaced { return key }
+  // Inline formatting boxes and replaced boxes keep the rest of the request.
+  if shape & KEY_FIXED != 0 { return key }
   // An empty box has the same min- and max-content contribution, and a
   // fixed length leaves it nothing to do with available space on that axis.
-  if node.firstChild == NO_NODE && node.measurement == Measurement.None && node.kind != BoxKind.Text {
-    if key.intrinsicWidth || style.width.kind == DimensionKind.Length { key.availableWidth = AvailableSpace.maxContent() }
-    if key.intrinsicHeight || style.height.kind == DimensionKind.Length { key.availableHeight = AvailableSpace.maxContent() }
+  if shape & KEY_EMPTY != 0 {
+    if key.intrinsicWidth || shape & KEY_WIDTH_LENGTH != 0 { key.availableWidth = AvailableSpace.maxContent() }
+    if key.intrinsicHeight || shape & KEY_HEIGHT_LENGTH != 0 { key.availableHeight = AvailableSpace.maxContent() }
   }
   // A horizontal block container never reads its available block size: its
   // children get max-content block space and it has no stretch or
   // fit-content block sizing in a horizontal parent.
-  if node.kind == BoxKind.Block && node.measurement == Measurement.None && !isFlex(style) && style.writingMode == WritingMode.HorizontalTb && input.parentWritingMode == WritingMode.HorizontalTb && style.height.kind != DimensionKind.MinContent && style.height.kind != DimensionKind.MaxContent && style.height.kind != DimensionKind.FitContent {
-    key.availableHeight = AvailableSpace.maxContent()
-  }
-  if (style.writingMode == WritingMode.HorizontalTb) != (input.parentWritingMode == WritingMode.HorizontalTb) { return key }
-  if percentLike(style.width) || percentLike(style.height) || percentLike(style.minWidth) || percentLike(style.minHeight) || percentLike(style.maxWidth) || percentLike(style.maxHeight) { return key }
-  if percentEdges(&style.padding) || percentEdges(&style.margin) || percentEdges(&style.inset) { return key }
+  let parentHorizontal = input.parentWritingMode == WritingMode.HorizontalTb
+  if shape & KEY_BLOCK != 0 && parentHorizontal { key.availableHeight = AvailableSpace.maxContent() }
+  // Orthogonal flows and percentage-sized boxes read the parent size.
+  if (shape & KEY_HORIZONTAL != 0) != parentHorizontal || shape & KEY_PERCENT != 0 { return key }
   key.parent = OptionalSize.none()
   return key
 }
@@ -355,32 +386,37 @@ fn cacheKey(nodes: &BoxTree, id: usize, input: &Input, viewportFree: bool) -> In
 // CSS Sizing: known dimensions are border-box constraints, not a rewritten style.
 // Intrinsic probes preserve the original percentage containing block.
 pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  // Final layouts are kept under the same normalized request as probes.
-  let key = cacheKey(nodes, id, &input, output.viewportFree(id))
   if !input.performLayout {
-    match output.lookup(id, &key, CacheKind.IndependentBox) {
-      Option<Layout>.Some { value: cached } => {
-        output.stats.cacheHits = output.stats.cacheHits + 1
-        run output.store(id, &cached, false)
-        return cached
-      }
-      Option<Layout>.None => {}
-    }
+    run probeNode(nodes, &mut output, &mut measurer, id, &input)
+    return output.boxes[id]
   }
-  if input.performLayout {
-    match run output.reuseFinal(nodes, id, &key, REUSE_INDEPENDENT, false) {
-      Option<Layout>.Some { value: reused } => { return reused }
-      Option<Layout>.None => {}
-    }
+  // Final layouts are kept under the same normalized request as probes.
+  let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
+  match run output.reuseFinal(nodes, id, &key, REUSE_INDEPENDENT, false) {
+    Option<Layout>.Some { value: reused } => { return reused }
+    Option<Layout>.None => {}
   }
   let start = output.fragments.checkpoint()
   let mut bfc = BfcState.make()
   let mut request = input.*
   request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
-  if !input.performLayout { run output.remember(id, &key, CacheKind.IndependentBox, &result) }
-  else if output.frame == NO_NODE { run output.recordFinal(id, &key, &result, start, false) }
+  if output.frame == NO_NODE { run output.recordFinal(id, &key, &result, start, false) }
   return result
+}
+
+// A size probe (a request without performLayout) of an independent box. Its
+// result is left in output.boxes[id] rather than returned, so callers that
+// read a few fields skip copying the whole Layout.
+pub effect fn probeNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
+  if run output.storeCached(id, &key, CacheKind.IndependentBox) { return }
+  let mut bfc = BfcState.make()
+  let mut request = input.*
+  request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
+  // layoutBox stores every unfragmented result in output.boxes[id].
+  drop run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
+  run output.rememberStored(id, &key, CacheKind.IndependentBox)
 }
 
 // An in-flow block child of a shared BFC. Its subtree adds no floats and has
@@ -390,7 +426,7 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
 // formatting context.
 pub effect fn layoutInFlow<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let reusable = input.performLayout && !input.fragmentation.active && output.frame == NO_NODE && bfc.settled()
-  let key = cacheKey(nodes, id, &input, output.viewportFree(id))
+  let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
   if reusable {
     run bfc.collectBelow(input.bfcContentOrigin, &mut output.floatContext)
     match run output.reuseFinal(nodes, id, &key, REUSE_IN_FLOW, true) {
@@ -1040,6 +1076,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   boxes.previous = move snapshot
   boxes.reusable = run Incremental.reusableSubtrees(&nodes)
   boxes.viewportFrees = run Incremental.viewportFreeSubtrees(&nodes)
+  boxes.keyShapes = run keyShapes(&nodes)
   let mut input = Input.make(viewport)
   input.known = viewport
   input.blockRoot = true

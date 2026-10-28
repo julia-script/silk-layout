@@ -5,7 +5,7 @@ import silk.option { Option }
 import silk.ownership { Copy }
 import silk.usize
 import context { Input, overflowForAxis, scrollbarGutter }
-import geometry { Layout, Point, Rect, OptionalSize, AvailableSpace, AvailableKind, ScrollbarMetrics, ResolvedEdges, max }
+import geometry { Layout, Point, Rect, OptionalSize, AvailableSpace, AvailableKind, ScrollbarMetrics, ResolvedEdges, Size, max }
 import style { Overflow, ScrollbarWidth }
 import tree { Node, NO_NODE, LayoutStats }
 import bfc { FloatBox }
@@ -73,6 +73,7 @@ pub struct LayoutPass<'a, 'source> {
   // Boxes whose subtree never reads the initial containing block or the
   // scrollport limits (see Incremental.viewportFreeSubtrees).
   pub viewportFrees: List<bool>,
+  pub keyShapes: List<u8>,
   anchors: List<StaticAnchor>,
   selections: List<ScrollbarSelection>,
   frameSelections: List<List<FrameScrollbarSelection>>,
@@ -84,7 +85,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   pub effect fn make(boxes: &'a mut [Layout], fragments: &'a mut FragmentArena, sources: &'source [Node]) -> LayoutPass<'a, 'source> ! OutOfMemoryError ? &mut Allocator {
     // The paragraph cache may borrow text from these source nodes.
     drop sources
-    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero() }
+    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), keyShapes: List<u8>.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero() }
   }
   pub effect fn beginFrame(self: &mut Self, frame: usize) ! OutOfMemoryError ? &mut Allocator {
     if self.frame == NO_NODE { run self.resumes.prepare(self.boxes.length) }
@@ -562,9 +563,34 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
     return Option<Layout>.Some { value: layout }
   }
+  // cacheKey's style facts for the box; without them (passes built by hand)
+  // the key keeps the full request.
+  pub fn keyShape(self: &Self, id: usize) -> u8 {
+    if id < self.keyShapes.length() { return self.keyShapes.get(id) }
+    return 1
+  }
   pub fn viewportFree(self: &Self, id: usize) -> bool { return id < self.viewportFrees.length() && self.viewportFrees.get(id) }
   pub fn lookup(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Layout> {
     return self.cache.lookup(id, input, kind)
+  }
+  pub fn lookupSize(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Size> {
+    let index = self.cache.find(id, input, kind)
+    if index == usize.MAX { return Option<Size>.None }
+    return Option<Size>.Some { value: self.cache.layoutAt(index).size }
+  }
+  // Stores a cached intrinsic result (see store) straight from its cache entry
+  // and returns it, if the cache has one for this request.
+  pub effect fn storeCached(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> bool ! OutOfMemoryError ? &mut Allocator {
+    let index = self.cache.find(id, input, kind)
+    if index == usize.MAX { return false }
+    run self.preserveLayout(id)
+    self.boxes[id] = self.cache.layoutAt(index).*
+    self.stats.cacheHits = self.stats.cacheHits + 1
+    return true
+  }
+  // Caches the layout last stored for the box.
+  pub effect fn rememberStored(self: &mut Self, id: usize, input: &Input, kind: CacheKind) ! OutOfMemoryError ? &mut Allocator {
+    run self.cache.remember(id, input, kind, &self.boxes[id])
   }
   pub effect fn remember(self: &mut Self, id: usize, input: &Input, kind: CacheKind, layout: &Layout) ! OutOfMemoryError ? &mut Allocator {
     run self.cache.remember(id, input, kind, layout)

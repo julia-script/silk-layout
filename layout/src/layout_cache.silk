@@ -25,9 +25,11 @@ pub const FACT_FREE: u8 = 8
 // visits: the boxes positioning must visit, in source preorder; see
 // Positioned.positionVisits. styled: the boxes taking each tree node's
 // style; see Incremental.indexStyleSources. parents: each box's parent.
-pub struct BoxFacts { pub own: List<u8>, pub reusable: List<u8>, pub viewportFree: List<bool>, pub keyShapes: List<u8>, pub visits: List<usize>, pub styledOffsets: List<usize>, pub styledBoxes: List<usize>, pub parents: List<usize> }
+// `marks[id] == mark` marks a box in the current remark (see
+// Incremental.remarkSubtrees).
+pub struct BoxFacts { pub own: List<u8>, pub reusable: List<u8>, pub viewportFree: List<bool>, pub keyShapes: List<u8>, pub visits: List<usize>, pub styledOffsets: List<usize>, pub styledBoxes: List<usize>, pub parents: List<usize>, pub marks: List<usize>, pub mark: usize }
 impl BoxFacts {
-  pub fn make() -> BoxFacts { return BoxFacts { own: List<u8>.make(), reusable: List<u8>.make(), viewportFree: List<bool>.make(), keyShapes: List<u8>.make(), visits: List<usize>.make(), styledOffsets: List<usize>.make(), styledBoxes: List<usize>.make(), parents: List<usize>.make() } }
+  pub fn make() -> BoxFacts { return BoxFacts { own: List<u8>.make(), reusable: List<u8>.make(), viewportFree: List<bool>.make(), keyShapes: List<u8>.make(), visits: List<usize>.make(), styledOffsets: List<usize>.make(), styledBoxes: List<usize>.make(), parents: List<usize>.make(), marks: List<usize>.make(), mark: 0 } }
   pub fn covers(self: &Self, count: usize) -> bool {
     return self.own.length() == count && self.reusable.length() == count && self.viewportFree.length() == count && self.keyShapes.length() == count && self.parents.length() == count
   }
@@ -128,6 +130,10 @@ pub struct LayoutCache {
   results: List<FinalResult>,
   ranges: List<FinalRange>,
   rangeStamps: List<usize>, rangeSlots: List<usize>, keptRanges: List<FinalRange>,
+  // What undoRotate needs: the kept ranges and touched count before the
+  // last rotation, whether it compacted floats, and how many ranges this
+  // compute stamped and has not adopted (see adoptRange).
+  rotatedRanges: List<FinalRange>, rotatedTouched: usize, rotatedFloats: bool, stamped: usize,
   // Float lists of ranges, appended to; `floatsCompacted` is the length
   // after the last compaction.
   floats: List<FloatBox>, floatsCompacted: usize,
@@ -136,7 +142,7 @@ pub struct LayoutCache {
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<FinalRange>.make(), rangeStamps: List<usize>.make(), rangeSlots: List<usize>.make(), keptRanges: List<FinalRange>.make(), floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<FinalRange>.make(), rangeStamps: List<usize>.make(), rangeSlots: List<usize>.make(), keptRanges: List<FinalRange>.make(), rotatedRanges: List<FinalRange>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
@@ -148,6 +154,7 @@ impl LayoutCache {
     self.ranges.clear()
     self.keptRanges.clear()
     self.rangeStamps.clear()
+    self.rotatedFloats = true
     self.rangeSlots.clear()
     self.floats.clear()
     self.floatsCompacted = 0
@@ -156,10 +163,27 @@ impl LayoutCache {
   // Starts a compute: the previous compute's final layouts become reusable.
   pub effect fn rotateFinals(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
     self.generation = self.generation + 1
+    self.rotatedTouched = self.previouslyTouched
     self.previouslyTouched = self.touched
     self.touched = 0
+    let kept = Intrinsic.replace(self.keptRanges, List<FinalRange>.make())
+    self.keptRanges = Intrinsic.replace(self.rotatedRanges, move kept)
     self.keptRanges.clear()
-    if self.floats.length() > 1024 && self.floats.length() > 4 * self.floatsCompacted { run self.compactFloats() }
+    self.stamped = 0
+    self.rotatedFloats = self.floats.length() > 1024 && self.floats.length() > 4 * self.floatsCompacted
+    if self.rotatedFloats { run self.compactFloats() }
+  }
+  // Takes back the last rotateFinals when this compute changed nothing but
+  // what it adopted (see adoptRange): the previous compute stays the last
+  // one, its ranges kept as they were. Returns whether it could.
+  pub fn undoRotate(self: &mut Self) -> bool {
+    if self.stamped != 0 || self.rotatedFloats || self.generation == 0 { return false }
+    self.generation = self.generation - 1
+    self.touched = self.previouslyTouched + self.touched
+    self.previouslyTouched = self.rotatedTouched
+    let kept = Intrinsic.replace(self.rotatedRanges, List<FinalRange>.make())
+    self.rotatedRanges = Intrinsic.replace(self.keptRanges, move kept)
+    return true
   }
   // Rebuilds the float list with only the lists of valid ranges.
   effect fn compactFloats(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
@@ -197,6 +221,7 @@ impl LayoutCache {
     }
     if self.rangeStamps.get(id) != self.generation {
       run self.keptRanges.append(self.ranges.get(id))
+      self.stamped = self.stamped + 1
       self.rangeStamps.set(id, self.generation)
       self.rangeSlots.set(id, self.keptRanges.length() - 1)
     }
@@ -321,6 +346,7 @@ impl LayoutCache {
     }
     self.ranges.set(id, range)
     self.rangeStamps.set(id, usize.MAX)
+    self.stamped = self.stamped - 1
   }
   pub fn lookup(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Layout> {
     let index = self.find(id, input, kind)
@@ -398,6 +424,7 @@ impl LayoutCache {
     self.ranges = move kept
     self.keptRanges.clear()
     self.rangeStamps.clear()
+    self.rotatedFloats = true
     self.rangeSlots.clear()
     self.results = move results
     let mut texts = List<List<KeptText>>.make()

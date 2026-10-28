@@ -365,8 +365,13 @@ pub effect fn indexStyleSources(tree: &Tree, nodes: &BoxTree, offsets: &mut List
 pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, logged: bool, sources: &[usize], facts: &mut BoxFacts) -> List<usize> ! OutOfMemoryError ? &mut Allocator {
   let count = nodes.boxes.length()
   let mut changed = List<usize>.make()
-  let mut marked = List<bool>.make()
-  run marked.appendRepeated(false, count)
+  if facts.marks.length() != count {
+    facts.marks.clear()
+    run facts.marks.appendRepeated(0, count)
+  }
+  facts.mark = facts.mark + 1
+  let mark = facts.mark
+  let marked = facts.marks.asMutSlice()
   if logged {
     let offsets = facts.styledOffsets.asSlice()
     let styled = facts.styledBoxes.asSlice()
@@ -376,8 +381,8 @@ pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, logged:
       if source + 1 < offsets.length {
         let mut slot = offsets[source]
         while slot < offsets[source + 1] {
-          if !marked.get(styled[slot]) {
-            marked.set(styled[slot], true)
+          if marked[styled[slot]] != mark {
+            marked[styled[slot]] = mark
             run changed.append(styled[slot])
           }
           slot = slot + 1
@@ -386,8 +391,8 @@ pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, logged:
       if source < nodes.firstBySource.length() {
         let mut box = nodes.firstBySource.get(source)
         while box != NO_NODE {
-          if !marked.get(box) {
-            marked.set(box, true)
+          if marked[box] != mark {
+            marked[box] = mark
             run changed.append(box)
           }
           box = nodes.node(box).nextContinuation
@@ -401,8 +406,8 @@ pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, logged:
     while at < direct {
       let mut child = nodes.node(changed.get(at)).firstChild
       while child != NO_NODE {
-        if !marked.get(child) {
-          marked.set(child, true)
+        if marked[child] != mark {
+          marked[child] = mark
           run changed.append(child)
         }
         child = nodes.node(child).nextSibling
@@ -414,41 +419,38 @@ pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, logged:
     while id < count {
       let node = nodes.node(id)
       let mut restyled = changedSince(tree, styleSource(tree, nodes, id), since) || changedSince(tree, node.source, since)
-      if !restyled && node.parent != NO_NODE && marked.get(node.parent) {
+      if !restyled && node.parent != NO_NODE && marked[node.parent] == mark {
         let parent = nodes.node(node.parent)
         restyled = changedSince(tree, styleSource(tree, nodes, node.parent), since) || changedSince(tree, parent.source, since)
       }
       if restyled {
         run changed.append(id)
-        marked.set(id, true)
+        marked[id] = mark
       }
       id = id + 1
     }
   }
   if changed.length() == 0 { return move changed }
-  let mut order = List<usize>.make()
+  // Own facts of the restyled boxes; then reusability and viewport freedom
+  // again, children before parents, for them and for each ancestor of a box
+  // whose values changed.
+  let mut pending = List<usize>.make()
   let mut at: usize = 0
   while at < changed.length() {
     let box = changed.get(at)
     facts.own.set(box, ownFacts(nodes, box))
-    run order.append(box)
-    let mut ancestor = nodes.node(box).parent
-    while ancestor != NO_NODE && !marked.get(ancestor) {
-      marked.set(ancestor, true)
-      run order.append(ancestor)
-      ancestor = nodes.node(ancestor).parent
-    }
+    run pending.append(box)
     at = at + 1
   }
-  run order.sort()
-  // Children before parents.
+  run pending.sort()
   let own = facts.own.asSlice()
   let levels = facts.reusable.asMutSlice()
   let frees = facts.viewportFree.asMutSlice()
-  at = order.length()
-  while at > 0 {
-    at = at - 1
-    let box = order.get(at)
+  // `pending` ascends; its last box has no pending descendant.
+  while pending.length() > 0 {
+    let last = pending.length() - 1
+    let box = pending.get(last)
+    pending.truncate(last)
     let mut level = own[box] & REUSE_LEVEL
     let mut free = (own[box] & FACT_FREE) != 0
     let mut child = nodes.node(box).firstChild
@@ -458,8 +460,21 @@ pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, logged:
       free = free && frees[child]
       child = nodes.node(child).nextSibling
     }
+    let parent = nodes.node(box).parent
+    let same = levels[box] == level && frees[box] == free
     levels[box] = level
     frees[box] = free
+    if same || parent == NO_NODE || marked[parent] == mark { continue }
+    marked[parent] = mark
+    // Insert in order.
+    run pending.append(parent)
+    let slots = pending.asMutSlice()
+    let mut to = slots.length - 1
+    while to > 0 && slots[to - 1] > parent {
+      slots[to] = slots[to - 1]
+      to = to - 1
+    }
+    slots[to] = parent
   }
   return move changed
 }

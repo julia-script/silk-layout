@@ -1104,6 +1104,19 @@ fn contains(values: &[usize], value: usize) -> bool {
   return false
 }
 
+// Whether every changed source is a box in `alone` or text one of them lays out.
+fn allAlone(nodes: &BoxTree, changes: &[usize], alone: &[usize]) -> bool {
+  let mut at: usize = 0
+  while at < changes.length {
+    let box = nodes.firstBySource.get(changes[at])
+    at = at + 1
+    if box == NO_NODE || nodes.node(box).nextContinuation != NO_NODE { return false }
+    if contains(alone, box) { continue }
+    if nodes.node(box).kind != BoxKind.Text || !contains(alone, textContainer(nodes, box)) { return false }
+  }
+  return true
+}
+
 // Whether a block container lays out the box in flow, horizontally.
 fn blockPlaced(nodes: &BoxTree, id: usize) -> bool {
   let style = nodes.style(id)
@@ -1138,8 +1151,11 @@ effect fn cutoffCandidates(tree: &Tree, since: usize, nodes: &BoxTree, output: &
       if tree.outerChangedAt(changes[at - 1]) > since { continue }
       // A block parent places the box by its padding and border, which come
       // out the same when its size does; its float origin matters to no float.
+      // A flex parent sees them only through a size they cannot change (see
+      // Tree.setStyle).
       insets = tree.insetsChangedAt(changes[at - 1]) > since
-      if insets && !blockPlaced(nodes, id) { continue }
+      if insets && !blockPlaced(nodes, id) && nodes.node(nodes.node(id).parent).kind != BoxKind.Flex { continue }
+      insets = insets && nodes.node(nodes.node(id).parent).kind != BoxKind.Flex
     }
     let range = output.cache.keptRange(id)
     if !range.valid || range.floatCount != 0 || range.end > output.fragments.values.length() || output.fragments.values.get(range.start).box != id { continue }
@@ -1253,6 +1269,7 @@ effect fn cutoffBox<'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>,
       && Layout.sameOutside(&pass.boxes[id], &output.boxes.asSlice()[id], baselines)
       && Fragment.sameOutside(&pass.fragments.values.asSlice()[0], &output.fragments.values.asSlice()[range.start], baselines)
   }
+  if same { run pass.keepTexts() }
   output.cache = Intrinsic.replace(pass.cache, LayoutCache.make())
   facts.reusable = Intrinsic.replace(pass.reusable, List<u8>.make())
   facts.viewportFree = Intrinsic.replace(pass.viewportFrees, List<bool>.make())
@@ -1338,14 +1355,28 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   }
   // Changed boxes laid out alone first; see cutoffCandidates.
   if alone.length() != 0 { output.suspendReuse() }
+  let mut allCut = alone.length() != 0
   let mut candidate: usize = 0
   while candidate < alone.length() {
     let mut first: usize = 0
     if candidate > 0 { first = aloneEnds.get(candidate - 1) }
     if !run cutoffBox(&nodes, &mut output, &mut facts, &mut measurer, alone.get(candidate), aloneRanges.get(candidate), aloneProbes.asSlice(), first, aloneEnds.get(candidate)) {
       Incremental.invalidateBox(&nodes, &mut output.cache, alone.get(candidate), true)
+      allCut = false
     }
     candidate = candidate + 1
+  }
+  // Every change was laid out alone and its parent sees none of it: the
+  // previous output, with those boxes spliced in, is this compute's, and the
+  // cache stays the previous compute's but for them.
+  if allCut && sameViewport(&output.keptViewport, &viewport) && output.keptScroll.x == tree.viewportScrollOffset.x && output.keptScroll.y == tree.viewportScrollOffset.y && tree.scrollRevision() == output.keptScrolls
+    && allAlone(&nodes, changes.asSlice(), alone.asSlice()) && output.cache.undoRotate() {
+    output.facts = move facts
+    output.writes = move writes
+    output.stats = LayoutStats.zero()
+    output.keep(tree.revision(), true)
+    output.adopt(move nodes)
+    return
   }
   let cache = Intrinsic.replace(output.cache, LayoutCache.make())
   let snapshot = Intrinsic.replace(output.snapshot, Snapshot.make())

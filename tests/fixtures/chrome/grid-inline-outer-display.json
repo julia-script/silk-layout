@@ -1,0 +1,58 @@
+{
+  "name": "grid-inline-outer-display",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "inline-grid",
+    "box-generation"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-containers"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 150
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "flow-root",
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-grid",
+          "width": 40,
+          "verticalAlign": "top"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 20,
+          "height": 8
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 30,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "inline-block",
+          "width": 7,
+          "height": 5,
+          "verticalAlign": "top"
+        }
+      }
+    ]
+  }
+}

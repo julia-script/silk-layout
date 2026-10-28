@@ -1,0 +1,43 @@
+{
+  "name": "grid-float-nonfloating",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "float",
+    "box-generation"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-containers"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 150
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "float": "right",
+          "width": 20,
+          "height": 8
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "clear": "both",
+          "width": 30,
+          "height": 7
+        }
+      }
+    ]
+  }
+}

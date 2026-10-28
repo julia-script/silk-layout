@@ -11,7 +11,7 @@ import silk.slice { Slice }
 import inline_prepared { KeptText }
 
 const ABSENT: usize = usize.MAX
-// Reuse levels of a subtree's kept layout; see Incremental.reusableSubtrees.
+// Reuse levels of a subtree's kept layout; see Incremental.markSubtrees.
 pub const REUSE_NONE: u8 = 0
 pub const REUSE_INDEPENDENT: u8 = 1
 pub const REUSE_IN_FLOW: u8 = 2
@@ -87,7 +87,7 @@ impl LayoutCache {
     self.texts.clear()
   }
   // Starts a compute: the previous compute's final layouts become reusable.
-  pub fn rotateFinals(self: &mut Self) {
+  pub effect fn rotateFinals(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
     self.generation = self.generation + 1
     self.previouslyTouched = self.touched
     self.touched = 0
@@ -95,6 +95,8 @@ impl LayoutCache {
     let spare = Intrinsic.replace(self.kept, move previous)
     self.finals = move spare
     self.finals.clear()
+    let count = self.kept.length()
+    run self.finals.appendRepeated(FinalRange.none(), count)
     let previousFloats = Intrinsic.replace(self.finalFloats, List<FloatBox>.make())
     let spareFloats = Intrinsic.replace(self.keptFloats, move previousFloats)
     self.finalFloats = move spareFloats
@@ -109,8 +111,7 @@ impl LayoutCache {
   effect fn setRange(self: &mut Self, id: usize, range: FinalRange) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.finals.length() {
       let missing = id + 1 - self.finals.length()
-      run self.finals.reserve(missing)
-      while self.finals.length() <= id { run self.finals.append(FinalRange.none()) }
+      run self.finals.appendRepeated(FinalRange.none(), missing)
     }
     self.finals.set(id, range)
   }

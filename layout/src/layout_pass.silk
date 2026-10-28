@@ -71,7 +71,7 @@ pub struct LayoutPass<'a, 'source> {
   // Floats beside the in-flow box being reused or recorded (see layoutInFlow).
   pub floatContext: List<FloatBox>,
   // Boxes whose subtree never reads the initial containing block or the
-  // scrollport limits (see Incremental.viewportFreeSubtrees).
+  // scrollport limits (see Incremental.markSubtrees).
   pub viewportFrees: List<bool>,
   anchors: List<StaticAnchor>,
   selections: List<ScrollbarSelection>,
@@ -547,7 +547,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // Blink LayoutNG / Servo style result reuse: a clean box laid out with the
   // same request as in the previous compute gets a copy of that compute's
   // fragments and box records instead of a layout. `level` says which kind
-  // of subtree the caller can take (see Incremental.reusableSubtrees).
+  // of subtree the caller can take (see Incremental.markSubtrees).
   pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
     if self.frame != NO_NODE || id >= self.reusable.length() || self.reusable.get(id) < level { return Option<Layout>.None }
     let slot = self.cache.keptRange(id)

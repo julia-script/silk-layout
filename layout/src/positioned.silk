@@ -1875,6 +1875,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     visual = visual || style.position == Position.Sticky || scroll.x != 0.0 || scroll.y != 0.0
     at = at + 1
   }
+  if relative || visual { output.fragments.offsetting() }
   if relative { positionRelative(nodes, &mut output, viewport) }
   let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport)
   run output.selectScrollbars(nodes)
@@ -2030,6 +2031,7 @@ pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(n
     frame = frame + 1
   }
   output.frame = savedFrame
+  output.fragments.offsetting()
   positionRelative(nodes, &mut output, viewport)
   let overflow = treeOverflow(nodes, &mut output, viewportRect, viewportRect)
   run output.selectScrollbars(nodes)

@@ -348,9 +348,9 @@ impl Snapshot {
     self.boxes.clear()
   }
   pub fn takeOutput(self: &mut Self, fragments: &mut FragmentArena, boxes: &mut List<Layout>, keepBoxes: bool) {
+    if keepBoxes { return }
     let spareFragments = Intrinsic.replace(self.fragments, FragmentArena.make())
     self.fragments = Intrinsic.replace(fragments.*, move spareFragments)
-    if keepBoxes { return }
     let spareBoxes = Intrinsic.replace(self.boxes, List<Layout>.make())
     self.boxes = Intrinsic.replace(boxes.*, move spareBoxes)
   }

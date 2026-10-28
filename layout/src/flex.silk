@@ -997,11 +997,21 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   if input.fragmentation.active && input.performLayout {
     return run layoutFlexFragment(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, axis, items.asSlice(), lines.asSlice(), main, cross, mainGap, crossGap, collapsed)
   }
-  let mut totalCross = gaps(lines.length(), crossGap)
+  return run placeFlexLines(nodes, &mut output, &mut measurer, id, &input, &box, &childInput, &axis, items.asSlice(), lines.asSlice(), main, cross, mainGap, crossGap, collapsed)
+}
+
+// layoutFlexPass's line and item placement, returning one local so the result
+// is built in the caller's slot.
+effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: &Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let style = nodes.style(id)
+  let mainInset = edgeTotal(box.inset, axis.horizontal)
+  let crossInset = edgeTotal(box.inset, !axis.horizontal)
+  let mut index: usize = 0
+  let mut totalCross = gaps(lines.length, crossGap)
   let mut lineIndex: usize = 0
-  while lineIndex < lines.length() { totalCross = totalCross + lines.get(lineIndex).cross
+  while lineIndex < lines.length { totalCross = totalCross + lines[lineIndex].cross
     lineIndex = lineIndex + 1 }
-  let mut lineDistribution = distribute(style.alignContent, cross - totalCross, lines.length(), style.alignContentSafety == OverflowAlignment.Safe, axis.crossReverse, axis.crossStartReverse, !axis.horizontal)
+  let mut lineDistribution = distribute(style.alignContent, cross - totalCross, lines.length, style.alignContentSafety == OverflowAlignment.Safe, axis.crossReverse, axis.crossStartReverse, !axis.horizontal)
   if style.flexWrap == FlexWrap.NoWrap { lineDistribution = Distribution { offset: 0.0, between: 0.0 } }
   let mut crossCursor = lineDistribution.offset
   let mut result = Layout.zero()
@@ -1021,12 +1031,12 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   // item placement and baselines would be discarded.
   if !input.performLayout && !input.baselines { return result }
   lineIndex = 0
-  while lineIndex < lines.length() {
-    let line = lines.get(lineIndex)
+  while lineIndex < lines.length {
+    let line = lines[lineIndex]
     let mut used = gaps(line.count, mainGap)
     let mut autoCount: usize = 0
     index = line.start
-    while index < line.end { let item = &items.asSlice()[index]
+    while index < line.end { let item = &items[index]
       if active(item, collapsed) {
         used = used + item.target + item.marginStart + item.marginEnd
         if item.autoStart { autoCount = autoCount + 1 }
@@ -1041,11 +1051,11 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     let mut cursor = distribution.offset
     index = line.start
     while index < line.end {
-      let item = &items.asSlice()[index]
+      let item = &items[index]
       if !active(item, collapsed) { run zeroSubtree(nodes, &mut output, item.id) }
       else {
         let mut childCross = item.cross
-        let mut finalInput = childInput
+        let mut finalInput = childInput.*
         setKnown(&mut finalInput, axis.horizontal, item.target)
         setIndefinite(&mut finalInput, axis.horizontal, !item.mainDefinite)
         if item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd {
@@ -1088,17 +1098,17 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     crossCursor = crossCursor + line.cross + crossGap + lineDistribution.between
     lineIndex = lineIndex + 1
   }
-  containerBaselines(nodes, &output, &mut measurer, items.asSlice(), lines.asSlice(), lines.length(), style, &axis, false, &mut result)
+  containerBaselines(nodes, &output, &mut measurer, items, lines, lines.length, style, &axis, false, &mut result)
   if input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After && nodes.node(id).dynamicAfter {
     let mut state = output.resumes.get(id)
     state.after = FragmentBox.boundary(nodes, id, false, input.fragmentation.kind, input.fragmentation.rectoOnRight)
-    if lines.length() > 0 {
+    if lines.length > 0 {
       let row = axis.horizontal == (output.frames.writingMode == WritingMode.HorizontalTb)
       if row {
-        state.after.merge(lineBoundary(nodes, &output, items.asSlice(), lines.get(lines.length() - 1), false, input.fragmentation.rectoOnRight, collapsed))
+        state.after.merge(lineBoundary(nodes, &output, items, lines[lines.length - 1], false, input.fragmentation.rectoOnRight, collapsed))
       } else {
-        let last = boundaryItemIndex(items.asSlice(), collapsed, false)
-        if last < items.length() { state.after.merge(itemBoundary(nodes, &output, items.get(last), false, input.fragmentation.rectoOnRight)) }
+        let last = boundaryItemIndex(items, collapsed, false)
+        if last < items.length { state.after.merge(itemBoundary(nodes, &output, items[last], false, input.fragmentation.rectoOnRight)) }
       }
     }
     run output.resumes.set(id, state)

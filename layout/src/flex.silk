@@ -5,7 +5,7 @@ import silk.ownership { Copy }
 import silk.usize
 import geometry { Measure, Layout, BaselineSet, FontRequest, Size, OptionalSize, AvailableSpace, AvailableKind, ResolvedEdges, max, min, clamp, abs }
 import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, BoxSizing, Visibility, MarginBreak, BoxDecorationBreak }
-import tree { NO_NODE }
+import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
 import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, scrollable, overflowForAxis, UNBOUNDED }
 import engine { layoutNode }
@@ -111,6 +111,9 @@ struct Item {
   baseline: f64, lastBaseline: f64, baselineEligible: bool, baselineSizesLine: bool, baselineEnd: bool,
   frozen: bool, violation: f64, collapsed: bool, strut: f64,
   minContribution: f64, maxContribution: f64, mainDefinite: bool,
+  // An automatic minimum still to measure, and the cross size and preferred
+  // main size it depends on; see deferredMinimum.
+  minimumPending: bool, pendingCross: f64, pendingCrossDefinite: bool, pendingPreferred: f64,
 }
 impl Copy for Item {}
 impl Item {
@@ -120,7 +123,8 @@ impl Item {
       autoStart: false, autoEnd: false, autoCrossStart: false, autoCrossEnd: false,
       cross: 0.0, crossMin: 0.0, crossMax: UNBOUNDED, crossAuto: true, align: Align.Stretch,
       baseline: 0.0, lastBaseline: 0.0, baselineEligible: false, baselineSizesLine: false, baselineEnd: false,
-      frozen: false, violation: 0.0, collapsed: false, strut: 0.0, minContribution: 0.0, maxContribution: 0.0, mainDefinite: false }
+      frozen: false, violation: 0.0, collapsed: false, strut: 0.0, minContribution: 0.0, maxContribution: 0.0, mainDefinite: false,
+      minimumPending: false, pendingCross: 0.0, pendingCrossDefinite: false, pendingPreferred: 0.0 }
   }
 }
 struct Line { start: usize, end: usize, count: usize, cross: f64, baseline: f64, lastBaseline: f64, baselineCross: f64, lastBaselineCross: f64 }
@@ -227,7 +231,13 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let mut borderRatio = style.boxSizing == BoxSizing.BorderBox && style.aspectRatio > 0.0 && !style.aspectRatioAuto
   let mut minContent = item.inset
   let mut minimumCross = crossSize
-  if autoMinimum || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
+  // §4.5: the automatic minimum is at most the preferred size. When the flex
+  // base is at least that large, the minimum cannot change the hypothetical
+  // size or a growing line; only a shrinking line reads it, so measure the
+  // content suggestion then (deferredMinimum) instead of probing every item.
+  let base = resolve(basis, parentMain, parentDefinite, 0.0) + add
+  let deferMinimum = autoMinimum && !intrinsic && preferredDefinite && basisDefinite && basis.kind == DimensionKind.Length && base >= max(item.inset, preferredSize) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
+  if (autoMinimum && !deferMinimum) || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
     let measured = run probe(nodes, &mut output, &mut measurer, id, &measureInput, axis.horizontal, AvailableSpace.minContent())
     minContent = axisSize(measured.size, axis.horizontal)
     minimumCross = axisSize(measured.size, !axis.horizontal)
@@ -251,7 +261,13 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   if mainConstraint.kind == AvailableKind.Definite { fitContent = clamp(mainConstraint.value - item.marginStart - item.marginEnd, minContent, maxContent) }
   if minimumDimension.kind == DimensionKind.FitContent { item.minimum = fitContent }
   if maximumDimension.kind == DimensionKind.FitContent { item.maximum = fitContent }
-  if autoMinimum {
+  if deferMinimum {
+    item.minimum = item.inset
+    item.minimumPending = true
+    item.pendingCross = crossSize
+    item.pendingCrossDefinite = crossDefinite
+    item.pendingPreferred = preferredSize
+  } else if autoMinimum {
     let mut contentSuggestion = minContent
     if ratio > 0.0 {
       contentSuggestion = clamp(contentSuggestion,
@@ -332,6 +348,35 @@ effect fn collectLines(items: &[Item], count: usize, lines: &mut List<Line>, mai
     index = index + 1
   }
   if start < count { run lines.append(Line { start: start, end: count, count: activeCount, cross: 0.0, baseline: 0.0, lastBaseline: 0.0, baselineCross: 0.0, lastBaselineCross: 0.0 }) }
+}
+// Measures the automatic minimums prepare deferred, once a line shrinks.
+effect fn deferredMinimums<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: &Line, childInput: &Input, axis: &Axes, main: f64, gap: f64, collapsed: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let mut pending = false
+  let mut hypothetical = 0.0
+  let mut index = line.start
+  while index < line.end {
+    let item = &items[index]
+    if active(item, collapsed) {
+      hypothetical = hypothetical + item.hypothetical + item.marginStart + item.marginEnd
+      pending = pending || item.minimumPending
+    }
+    index = index + 1
+  }
+  if !pending || hypothetical <= main - gaps(line.count, gap) { return () }
+  index = line.start
+  while index < line.end {
+    if items[index].minimumPending {
+      let mut item = items[index]
+      let mut measureInput = childInput.*
+      if item.pendingCrossDefinite { setKnown(&mut measureInput, !axis.horizontal, item.pendingCross) }
+      let measured = run probe(nodes, &mut output, &mut measurer, item.id, &measureInput, axis.horizontal, AvailableSpace.minContent())
+      let minimum = min(axisSize(measured.size, axis.horizontal), item.pendingPreferred)
+      item.minimum = max(item.inset, min(minimum, item.maximum))
+      item.minimumPending = false
+      items[index] = item
+    }
+    index = index + 1
+  }
 }
 fn resolveFlexible(items: &mut [Item], line: &Line, main: f64, gap: f64, collapsed: bool) {
   let space = main - gaps(line.count, gap)
@@ -560,7 +605,7 @@ fn selfStartReverse(style: &Style, horizontal: bool) -> bool {
   return style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
 }
 effect fn zeroSubtree(nodes: &BoxTree, output: &mut LayoutPass, id: usize) ! OutOfMemoryError ? &mut Allocator {
-  run output.store(id, Layout.zero(), false)
+  run output.store(id, &Layout.zero(), false)
   let mut child = nodes.node(id).firstChild
   while child != NO_NODE { run zeroSubtree(nodes, &mut output, child)
     child = nodes.node(child).nextSibling }
@@ -796,6 +841,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     let mut totalCross = gaps(lines.length(), crossGap)
     while lineIndex < lines.length() {
       let line = lines.get(lineIndex)
+      run deferredMinimums(nodes, &mut output, &mut measurer, items.asMutSlice(), &line, &childInput, &axis, main, mainGap, collapsed)
       resolveFlexible(items.asMutSlice(), &line, main, mainGap, collapsed)
       let mut measuredLine = run crossSizes(nodes, &mut output, &mut measurer, items.asMutSlice(), &line, &childInput, &axis, style, collapsed)
       if style.flexWrap == FlexWrap.NoWrap {
@@ -928,7 +974,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
           childLayout.location.y = box.inset.top + crossPosition }
         else { childLayout.location.x = box.inset.left + crossPosition
           childLayout.location.y = box.inset.top + mainPosition }
-        run output.store(item.id, childLayout, input.performLayout)
+        run output.store(item.id, &childLayout, input.performLayout)
         cursor = cursor + item.target + item.marginEnd + mainGap + distribution.between
         if item.autoEnd { cursor = cursor + autoShare }
       }
@@ -1406,7 +1452,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
               setEdge(&mut childLayout.usedMargin, !axis.horizontal, !axis.crossReverse, line.cross - childCross - crossOffset)
             }
             placeFragment(&mut childLayout, blockHorizontal, opening + rowStart + blockMargin, inlineInset + mainPosition)
-            run output.store(item.id, childLayout, true)
+            run output.store(item.id, &childLayout, true)
             allNormal = allNormal && child.normalComplete
           } else { allNormal = allNormal && old.normalComplete }
           output.closeCheckpoint(childCheckpoint)
@@ -1517,7 +1563,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
         let mut layout = output.boxes[items[index].id]
         if blockHorizontal { layout.location.x = extent - layout.location.x - layout.size.width }
         else { layout.location.y = extent - layout.location.y - layout.size.height }
-        run output.store(items[index].id, layout, true)
+        run output.store(items[index].id, &layout, true)
       }
       index = index + 1
     }
@@ -1710,7 +1756,7 @@ effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
               let mut crossPosition = crossCursor + crossOffset
               if axis.crossReverse { crossPosition = cross - crossPosition - childCross }
               placeFragment(&mut childLayout, blockHorizontal, opening + position, inlineInset + crossPosition)
-              run output.store(item.id, childLayout, true)
+              run output.store(item.id, &childLayout, true)
               if !overflowOnly {
                 cursor = position + childExtent
                 extent = max(extent, cursor)
@@ -1799,7 +1845,7 @@ effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
         let mut layout = output.boxes[items[index].id]
         if blockHorizontal { layout.location.x = size - layout.location.x - layout.size.width }
         else { layout.location.y = size - layout.location.y - layout.size.height }
-        run output.store(items[index].id, layout, true)
+        run output.store(items[index].id, &layout, true)
       }
       index = index + 1
     }

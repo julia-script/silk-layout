@@ -2,7 +2,7 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.usize
 import silk.effect { Effect }
 import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
-import style { Style, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
+import style { Style, Display, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
 import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
 import block { layoutBlock }
@@ -558,6 +558,19 @@ struct BoxSizing {
   ratioInsetHeight: f64,
 }
 
+// Whether prepareSizing's general path reduces to its plain branch for this box.
+fn plainSizing(style: &Style, node: &BoxNode, input: &Input, fragmented: bool, display: &Display) -> bool with Intrinsic.inlineAlways() {
+  return !fragmented && !style.replaced && node.measurement != Measurement.Natural && style.aspectRatio <= 0.0
+    && style.writingMode == WritingMode.HorizontalTb && input.parentWritingMode == WritingMode.HorizontalTb
+    && style.float == Float.None && !outOfFlow(style) && display.outsideIs(DisplayOutside.Block)
+    && style.overflowX == Overflow.Visible && style.overflowY == Overflow.Visible
+    && !keywordSize(style.width.kind) && !keywordSize(style.height.kind) && !keywordSize(style.minWidth.kind)
+    && !keywordSize(style.minHeight.kind) && !keywordSize(style.maxWidth.kind) && !keywordSize(style.maxHeight.kind)
+}
+fn keywordSize(kind: DimensionKind) -> bool with Intrinsic.inlineAlways() {
+  return kind == DimensionKind.MinContent || kind == DimensionKind.MaxContent || kind == DimensionKind.FitContent
+}
+
 // Fills `sizing`, which the caller seeds with the resolved box and a copy of `input`.
 effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, fragmented: bool, monolithic: bool, sizing: &mut BoxSizing) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
@@ -565,6 +578,32 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   let display = effectiveDisplay(style, &input)
   // Only flex-item blockification suppresses a declared in-flow float.
   let floating = style.float != Float.None && !input.blockify && !outOfFlow(style)
+  if plainSizing(style, node, &input, fragmented, &display) {
+    // What the general path below reduces to for a horizontal in-flow block
+    // in a horizontal parent, with no aspect ratio, natural size, intrinsic
+    // size keyword or scrollbar: only fill-available inline sizing applies.
+    let justification = blockJustification(style, &input)
+    let autoInlineMargin = style.margin.left.kind == DimensionKind.Auto || style.margin.right.kind == DimensionKind.Auto
+    let stretchInline = justification == Align.Stretch && !autoInlineMargin
+    let fitInline = justification != Align.Normal && !stretchInline
+    let definite = sizing.request.availableWidth.kind == AvailableKind.Definite
+    if !sizing.box.size.widthDefinite && !input.intrinsicWidth && definite && (input.shrinkToFit || fitInline) {
+      // Shrink-to-fit needs intrinsic probes: take the general path.
+    } else {
+      sizing.natural = NaturalDimensions.none()
+      if !sizing.box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && definite && ((!input.shrinkToFit && !fitInline) || stretchInline) {
+        sizing.box.size.width = max(sizing.box.inset.horizontal(), sizing.request.availableWidth.value - sizing.box.margin.horizontal())
+        sizing.box.size.widthDefinite = true
+      }
+      if sizing.box.size.widthDefinite { sizing.box.size.width = clamp(sizing.box.size.width, sizing.box.min.width, sizing.box.max.width) }
+      if sizing.box.size.heightDefinite { sizing.box.size.height = clamp(sizing.box.size.height, sizing.box.min.height, sizing.box.max.height) }
+      sizing.ratio = 0.0
+      sizing.ratioBorder = false
+      sizing.ratioInsetWidth = sizing.box.inset.horizontal()
+      sizing.ratioInsetHeight = sizing.box.inset.vertical()
+      return
+    }
+  }
   let mut natural = NaturalDimensions.none()
   if node.measurement == Measurement.Natural { natural = Measure.natural(&mut measurer, node.measureKey) }
   sizing.natural = natural

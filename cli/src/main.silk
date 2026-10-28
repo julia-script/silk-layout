@@ -576,6 +576,8 @@ effect fn execute(document: &Value)
     let mut clock = OsMonotonicClock.make()
     let mut iteration: i32 = 0
     while iteration < iterations {
+      // Each sample is a full layout, like the taffy and yoga harnesses.
+      output.invalidate()
       let start = run MonotonicClock.now() |> Effect.provideMut<MonotonicClock>(&mut clock)
       run Engine.compute<Fixtures>(&tree, &mut output, &mut fixtures, viewport)
       let end = run MonotonicClock.now() |> Effect.provideMut<MonotonicClock>(&mut clock)

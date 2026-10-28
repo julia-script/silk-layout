@@ -341,6 +341,11 @@ impl Snapshot {
   pub fn make() -> Snapshot { return Snapshot { fragments: FragmentArena.make(), boxes: List<Layout>.make() } }
   // Takes a finished compute's output, leaving the spare storage in its place.
   // Box layouts stay in place when the next compute keeps them.
+  // Forgets the previous output, keeping the storage for the next one.
+  pub fn clear(self: &mut Self) {
+    self.fragments.clear()
+    self.boxes.clear()
+  }
   pub fn takeOutput(self: &mut Self, fragments: &mut FragmentArena, boxes: &mut List<Layout>, keepBoxes: bool) {
     let spareFragments = Intrinsic.replace(self.fragments, FragmentArena.make())
     self.fragments = Intrinsic.replace(fragments.*, move spareFragments)

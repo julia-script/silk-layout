@@ -151,6 +151,15 @@ impl FragmentArena {
     return run self.append(value)
   }
 
+  // Empties the arena, keeping its storage.
+  pub fn clear(self: &mut Self) {
+    self.values.clear()
+    self.texts.clear()
+    self.settled.clear()
+    self.firstByBox.clear()
+    self.lastByBox.clear()
+  }
+
   pub fn checkpoint(self: &Self) -> usize { return self.values.length() }
 
   // Undo appends in reverse order, including links held by surviving fragments.

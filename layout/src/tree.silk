@@ -272,7 +272,7 @@ impl LayoutTree {
   pub fn invalidate(self: &mut Self) {
     self.keptReusable = false
     self.cache.clear()
-    self.snapshot = Snapshot.make()
+    self.snapshot.clear()
   }
   pub fn treeRevision(self: &Self) -> usize { return self.keptRevision }
   pub fn reusable(self: &Self) -> bool { return self.keptReusable }
@@ -281,7 +281,7 @@ impl LayoutTree {
     self.keptReusable = reusable
     if !reusable {
       self.cache.clear()
-      self.snapshot = Snapshot.make()
+      self.snapshot.clear()
     }
   }
   pub fn adopt<'a>(self: &mut Self, constructed: BoxTree<'a>) {

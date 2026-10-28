@@ -129,7 +129,7 @@ pub effect fn computeFragmented<'frames, 'source, M: Measure + TextMeasure>(tree
     let overflow = run positionFragmentedTree(&nodes, &mut pass, &mut measurer, viewport, tree.viewportScrollOffset)
     if !pass.needsRelayout {
       drop pass
-      output.fragments.resolveLocations()
+      output.fragments.deferLocations()
       output.viewportOverflow = overflow
       output.adopt(move nodes)
       return

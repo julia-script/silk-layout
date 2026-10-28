@@ -688,9 +688,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     wasStarted = previous.started
     wasNormalComplete = previous.normalComplete
   }
-  let sizing = run prepareSizing(nodes, &mut output, &mut measurer, id, &input, fragmented, monolithic)
-  let mut box = sizing.box
-  let mut request = sizing.request
+  let mut sizing = run prepareSizing(nodes, &mut output, &mut measurer, id, &input, fragmented, monolithic)
   let natural = sizing.natural
   let ratio = sizing.ratio
   let ratioBorder = sizing.ratioBorder
@@ -722,7 +720,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   }
   let checkpoint = bfc.checkpoint()
   if fragmented && !monolithic && id != 0 && !wasStarted && node.dynamicAfter && input.fragmentation.boundaryProbe == BoundaryProbe.None {
-    let full = Axes.make(output.frames.writingMode).box(box)
+    let full = Axes.make(output.frames.writingMode).box(sizing.box)
     if full.size.heightDefinite || full.max.height < UNBOUNDED || style.float != Float.None && !input.blockify {
       // Bounded boxes can finish before their descendants; a float's adjacent
       // source flow can advance before its independent stream has completed.
@@ -730,7 +728,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       // Continuous discovery preserves float constraints but ignores internal
       // breaks; neither its geometry nor its flow progress is committed.
       let trial = output.checkpoint()
-      let mut probe = request
+      let mut probe = sizing.request
       probe.fragmentation.active = false
       probe.fragmentation.boundaryProbe = BoundaryProbe.After
       drop run layoutBox(nodes, &mut output, &mut measurer, id, &probe, &mut bfc)
@@ -747,10 +745,10 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   let mut result = Layout.zero()
   // A size probe of a flex container whose border box is already fixed needs
   // nothing from its items unless the caller reads baselines.
-  if !input.performLayout && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && box.size.widthDefinite && box.size.heightDefinite && isFlex(style) && !style.replaced {
-    result.size = Size { width: box.size.width, height: box.size.height }
+  if !input.performLayout && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && sizing.box.size.widthDefinite && sizing.box.size.heightDefinite && isFlex(style) && !style.replaced {
+    result.size = Size { width: sizing.box.size.width, height: sizing.box.size.height }
   } else {
-    result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
+    result = run contents(nodes, &mut output, &mut measurer, id, &sizing.request, &sizing.box, natural, &mut bfc)
   }
   if fragmented {
     let state = output.resumes.get(id)
@@ -760,8 +758,8 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       return result
     }
   }
-  let mut width = clamp(result.size.width, box.min.width, box.max.width)
-  let mut height = clamp(result.size.height, box.min.height, box.max.height)
+  let mut width = clamp(result.size.width, sizing.box.min.width, sizing.box.max.width)
+  let mut height = clamp(result.size.height, sizing.box.min.height, sizing.box.max.height)
   if fragmented && !monolithic {
     if output.frames.writingMode == WritingMode.HorizontalTb { height = result.size.height }
     else { width = result.size.width }
@@ -769,14 +767,14 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   // Width changes can rewrap text and flex lines. Height constraints can change
   // column flexing. Relayout only dimensions actually changed by min/max.
   if width != result.size.width || height != result.size.height {
-    if width != result.size.width { box.size.width = width
-      box.size.widthDefinite = true }
-    if height != result.size.height { box.size.height = height
-      box.size.heightDefinite = true }
-    configureScrollbars(style, &mut output, &mut measurer, id, &request, &mut box)
+    if width != result.size.width { sizing.box.size.width = width
+      sizing.box.size.widthDefinite = true }
+    if height != result.size.height { sizing.box.size.height = height
+      sizing.box.size.heightDefinite = true }
+    configureScrollbars(style, &mut output, &mut measurer, id, &sizing.request, &mut sizing.box)
     bfc.restore(checkpoint)
     output.restoreCheckpoint(passCheckpoint)
-    result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
+    result = run contents(nodes, &mut output, &mut measurer, id, &sizing.request, &sizing.box, natural, &mut bfc)
   }
   // An intrinsic inline size can become the ratio-determining size only
   // after contents have been measured. Transfer the allotted size (including
@@ -784,79 +782,79 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   // the dependent axis remain indefinite during this intrinsic transfer.
   if ratio > 0.0 && !style.replaced {
     let mut transferred = false
-    if style.writingMode == WritingMode.HorizontalTb && !box.size.heightDefinite && !input.intrinsicHeight && style.height.kind == DimensionKind.Auto {
+    if style.writingMode == WritingMode.HorizontalTb && !sizing.box.size.heightDefinite && !input.intrinsicHeight && style.height.kind == DimensionKind.Auto {
       let mut height = max(0.0, result.size.width - ratioInsetWidth) / ratio + ratioInsetHeight
       if style.minHeight.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, false)) {
         let mut contentMinimum = result.size.height
         if fragmented && !monolithic {
-          let mut probe = request
+          let mut probe = sizing.request
           probe.known.width = result.size.width
           probe.known.widthDefinite = true
           contentMinimum = run intrinsic(nodes, &mut output, &mut measurer, id, &probe, natural, false, true)
         }
         height = max(height, contentMinimum)
       }
-      box.size.height = clamp(height, box.min.height, box.max.height)
-      box.size.heightDefinite = true
-      request.indefiniteHeight = !box.size.widthDefinite || request.indefiniteWidth
+      sizing.box.size.height = clamp(height, sizing.box.min.height, sizing.box.max.height)
+      sizing.box.size.heightDefinite = true
+      sizing.request.indefiniteHeight = !sizing.box.size.widthDefinite || sizing.request.indefiniteWidth
       transferred = true
     }
-    if style.writingMode != WritingMode.HorizontalTb && !box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto {
+    if style.writingMode != WritingMode.HorizontalTb && !sizing.box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto {
       let mut width = max(0.0, result.size.height - ratioInsetHeight) * ratio + ratioInsetWidth
       if style.minWidth.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, true)) {
         let mut contentMinimum = result.size.width
         if fragmented && !monolithic {
-          let mut probe = request
+          let mut probe = sizing.request
           probe.known.height = result.size.height
           probe.known.heightDefinite = true
           contentMinimum = run intrinsic(nodes, &mut output, &mut measurer, id, &probe, natural, true, true)
         }
         width = max(width, contentMinimum)
       }
-      box.size.width = clamp(width, box.min.width, box.max.width)
-      box.size.widthDefinite = true
-      request.indefiniteWidth = !box.size.heightDefinite || request.indefiniteHeight
+      sizing.box.size.width = clamp(width, sizing.box.min.width, sizing.box.max.width)
+      sizing.box.size.widthDefinite = true
+      sizing.request.indefiniteWidth = !sizing.box.size.heightDefinite || sizing.request.indefiniteHeight
       transferred = true
     }
     if transferred {
-      configureScrollbars(style, &mut output, &mut measurer, id, &request, &mut box)
+      configureScrollbars(style, &mut output, &mut measurer, id, &sizing.request, &mut sizing.box)
       bfc.restore(checkpoint)
       output.restoreCheckpoint(passCheckpoint)
-      result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
+      result = run contents(nodes, &mut output, &mut measurer, id, &sizing.request, &sizing.box, natural, &mut bfc)
     }
   }
   // Block/flex algorithms can enforce an intrinsic min/max internally.
   // Inform the host when that creates an allotted area, without turning an
   // indefinite CSS percentage basis into a definite one. Each iteration
   // marks at least one previously intrinsic axis constrained.
-  if scrollbarApplies(style, &input) && !box.scrollbarMetrics.overlay && (box.scrollbarMetrics.horizontal > 0.0 || box.scrollbarMetrics.vertical > 0.0) {
-    let mut available = box.size
+  if scrollbarApplies(style, &input) && !sizing.box.scrollbarMetrics.overlay && (sizing.box.scrollbarMetrics.horizontal > 0.0 || sizing.box.scrollbarMetrics.vertical > 0.0) {
+    let mut available = sizing.box.size
     while true {
-      let constrainWidth = !available.widthDefinite && ((box.min.width > box.border.horizontal() + box.padding.horizontal() && result.size.width <= box.min.width) || result.size.width >= box.max.width)
-      let constrainHeight = !available.heightDefinite && ((box.min.height > box.border.vertical() + box.padding.vertical() && result.size.height <= box.min.height) || result.size.height >= box.max.height)
+      let constrainWidth = !available.widthDefinite && ((sizing.box.min.width > sizing.box.border.horizontal() + sizing.box.padding.horizontal() && result.size.width <= sizing.box.min.width) || result.size.width >= sizing.box.max.width)
+      let constrainHeight = !available.heightDefinite && ((sizing.box.min.height > sizing.box.border.vertical() + sizing.box.padding.vertical() && result.size.height <= sizing.box.min.height) || result.size.height >= sizing.box.max.height)
       if !constrainWidth && !constrainHeight { break }
       if constrainWidth { available.width = result.size.width
         available.widthDefinite = true }
       if constrainHeight { available.height = result.size.height
         available.heightDefinite = true }
-      let originalSize = box.size
-      let previous = box.gutter
-      box.size = available
-      configureScrollbars(style, &mut output, &mut measurer, id, &request, &mut box)
-      box.size = originalSize
-      if previous.top == box.gutter.top && previous.right == box.gutter.right && previous.bottom == box.gutter.bottom && previous.left == box.gutter.left { break }
+      let originalSize = sizing.box.size
+      let previous = sizing.box.gutter
+      sizing.box.size = available
+      configureScrollbars(style, &mut output, &mut measurer, id, &sizing.request, &mut sizing.box)
+      sizing.box.size = originalSize
+      if previous.top == sizing.box.gutter.top && previous.right == sizing.box.gutter.right && previous.bottom == sizing.box.gutter.bottom && previous.left == sizing.box.gutter.left { break }
       bfc.restore(checkpoint)
       output.restoreCheckpoint(passCheckpoint)
-      result = run contents(nodes, &mut output, &mut measurer, id, &request, &box, natural, &mut bfc)
+      result = run contents(nodes, &mut output, &mut measurer, id, &sizing.request, &sizing.box, natural, &mut bfc)
     }
   }
   if input.performLayout && output.frame != NO_NODE {
     if node.needsFragmentGeometry {
-      let mut fullContent = box.size
-      if fullContent.widthDefinite { fullContent.width = max(0.0, fullContent.width - box.inset.horizontal()) }
-      if fullContent.heightDefinite { fullContent.height = max(0.0, fullContent.height - box.inset.vertical()) }
-      fullContent.widthDefinite = fullContent.widthDefinite && !request.indefiniteWidth
-      fullContent.heightDefinite = fullContent.heightDefinite && !request.indefiniteHeight
+      let mut fullContent = sizing.box.size
+      if fullContent.widthDefinite { fullContent.width = max(0.0, fullContent.width - sizing.box.inset.horizontal()) }
+      if fullContent.heightDefinite { fullContent.height = max(0.0, fullContent.height - sizing.box.inset.vertical()) }
+      fullContent.widthDefinite = fullContent.widthDefinite && !sizing.request.indefiniteWidth
+      fullContent.heightDefinite = fullContent.heightDefinite && !sizing.request.indefiniteHeight
       run output.rememberFullBox(id, FullBoxGeometry { parent: incoming.parent, known: incoming.known, content: fullContent })
     }
   }
@@ -869,10 +867,10 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     let mut naturalContent = previousExtent
     if monolithic {
       let axes = Axes.make(incoming.parentWritingMode)
-      let mut margins = axes.edges(box.margin)
+      let mut margins = axes.edges(sizing.box.margin)
       margins.top = FragmentBox.startMargin(style, margins.top, state, incoming.fragmentation, incoming.parentWritingMode)
       margins.bottom = FragmentBox.endMargin(style, margins.bottom, true, incoming.fragmentation.marginEnd, incoming.parentWritingMode)
-      box.margin = axes.physicalEdges(margins)
+      sizing.box.margin = axes.physicalEdges(margins)
       if incoming.fragmentation.canBreakBefore && previousExtent > max(0.0, incoming.fragmentation.limit - incoming.fragmentation.offset) {
         state.blocked = true
       } else {
@@ -891,15 +889,15 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
       state.normalComplete = state.normalContentComplete
       state.contentComplete = state.descendantsComplete
     } else {
-      let current = FragmentBox.current(style, &box, &state, &incoming.fragmentation, output.frames.writingMode)
+      let current = FragmentBox.current(style, &sizing.box, &state, &incoming.fragmentation, output.frames.writingMode)
       naturalContent = max(0.0, previousExtent - frameAxes.box(current).inset.vertical())
-      box = FragmentBox.finish(style, &incoming, &box, &current, &mut state, &mut result, output.frames.writingMode)
+      sizing.box = FragmentBox.finish(style, &incoming, &sizing.box, &current, &mut state, &mut result, output.frames.writingMode)
     }
     run output.resumes.set(id, state)
     let delta = frameAxes.size(result.size).height - previousExtent
     let mut alignment = 0.0
     if !monolithic && node.kind == BoxKind.Block && !wasNormalComplete {
-      let content = max(0.0, frameAxes.size(result.size).height - frameAxes.box(box).inset.vertical())
+      let content = max(0.0, frameAxes.size(result.size).height - frameAxes.box(sizing.box).inset.vertical())
       alignment = blockContentOffset(style, content - naturalContent)
     }
     if !state.blocked && !state.skipped {
@@ -950,26 +948,26 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   }
   // These are used content-box dimensions, not intrinsic sizes or overflow
   // extents. Normalize after constraints and every layout algorithm.
-  result.contentSize = Size { width: max(0.0, result.size.width - box.inset.horizontal()), height: max(0.0, result.size.height - box.inset.vertical()) }
-  result.scrollbarGutter = box.gutter
+  result.contentSize = Size { width: max(0.0, result.size.width - sizing.box.inset.horizontal()), height: max(0.0, result.size.height - sizing.box.inset.vertical()) }
+  result.scrollbarGutter = sizing.box.gutter
   if scrollbarApplies(style, &input) {
-    result.setScrollbarMetrics(box.scrollbarMetrics)
+    result.setScrollbarMetrics(sizing.box.scrollbarMetrics)
     result.horizontalScrollbar = overflowForAxis(style, true) == Overflow.Scroll || output.selected(id, true)
     result.verticalScrollbar = overflowForAxis(style, false) == Overflow.Scroll || output.selected(id, false)
     if output.frame != NO_NODE && style.scrollbarWidth != ScrollbarWidth.None && (overflowForAxis(style, true) == Overflow.Auto || overflowForAxis(style, false) == Overflow.Auto) {
-      run output.rememberScrollbars(id, box.scrollbarMetrics, box.gutter)
+      run output.rememberScrollbars(id, sizing.box.scrollbarMetrics, sizing.box.gutter)
     }
   }
-  result.usedMargin = box.margin
-  let mut marginStart = box.margin.top
-  let mut marginEnd = box.margin.bottom
+  result.usedMargin = sizing.box.margin
+  let mut marginStart = sizing.box.margin.top
+  let mut marginEnd = sizing.box.margin.bottom
   if input.parentWritingMode == WritingMode.VerticalRl || input.parentWritingMode == WritingMode.SidewaysRl {
-    marginStart = box.margin.right
-    marginEnd = box.margin.left
+    marginStart = sizing.box.margin.right
+    marginEnd = sizing.box.margin.left
   }
   if input.parentWritingMode == WritingMode.VerticalLr || input.parentWritingMode == WritingMode.SidewaysLr {
-    marginStart = box.margin.left
-    marginEnd = box.margin.right
+    marginStart = sizing.box.margin.left
+    marginEnd = sizing.box.margin.right
   }
   result.marginTopPositive = max(result.marginTopPositive, marginStart)
   result.marginTopNegative = min(result.marginTopNegative, marginStart)
@@ -990,12 +988,12 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     result.marginBottomNegative = state.marginBottom.negative()
     run output.resumes.set(id, state)
   }
-  result.widthDefinite = box.size.widthDefinite && !request.indefiniteWidth
-  result.heightDefinite = box.size.heightDefinite && !request.indefiniteHeight
+  result.widthDefinite = sizing.box.size.widthDefinite && !sizing.request.indefiniteWidth
+  result.heightDefinite = sizing.box.size.heightDefinite && !sizing.request.indefiniteHeight
   result.preferredRatio = ratio
   result.ratioBorderBox = ratioBorder
   exportScrollBaselines(style, node.kind, &mut result)
-  if input.performLayout { overflowGeometry(nodes, &output, id, &box, &mut result) }
+  if input.performLayout { overflowGeometry(nodes, &output, id, &sizing.box, &mut result) }
   run output.store(id, &result, input.performLayout)
   output.closeCheckpoint(passCheckpoint)
   output.fragmentParent = previousParent

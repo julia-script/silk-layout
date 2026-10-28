@@ -1584,7 +1584,10 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   boxes.previous = move snapshot
   boxes.flexScratch = move flexScratch
   boxes.inPlace = inPlace
-  boxes.tracking = sameBoxes || kept
+  // After computes that laid out most boxes again and copied none, copying
+  // is unlikely to pay: this one skips its checks and the write tracking
+  // they need, trying again every eighth compute.
+  boxes.tracking = (sameBoxes || kept) && output.reuseIdle % 8 == 0
   boxes.writes = move writes
   boxes.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
   boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
@@ -1603,6 +1606,8 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     if !boxes.needsRelayout {
       output.stats = boxes.stats
       output.relaidMost = sameBoxes && boxes.stats.fullLayouts * 2 > nodes.boxes.length()
+      if output.relaidMost && boxes.stats.reusedLayouts == 0 { output.reuseIdle = output.reuseIdle + 1 }
+      else { output.reuseIdle = 0 }
       run boxes.keepTexts()
       let kept = Intrinsic.replace(boxes.cache, LayoutCache.make())
       let mut captured = Intrinsic.replace(boxes.next, Snapshot.make())

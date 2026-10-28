@@ -75,6 +75,9 @@ impl Fragment {
 pub struct SettledRange { pub start: usize, pub end: usize, pub overflow: Rect }
 impl Copy for SettledRange {}
 
+// Fragments appendRange checks, copies and relinks at a time.
+const RANGE_CHUNK: usize = 64
+
 pub struct FragmentArena {
   pub values: List<Fragment>,
   pub texts: List<TextFragment>,
@@ -206,70 +209,86 @@ impl FragmentArena {
   // Appends a copy of the source's fragments [start, end), whose parents all
   // lie inside the range except the first's, which becomes `parent`. Links
   // are rebuilt as append would; visual offsets and world locations reset.
-  // The range is recorded as settled.
-  pub effect fn appendRange(self: &mut Self, source: &FragmentArena, start: usize, end: usize, parent: usize) ! OutOfMemoryError ? &mut Allocator {
+  // The range is recorded as settled. Returns false, leaving the arena as it
+  // was, when a link leaves the range: positioning appended a child after
+  // the normal-flow fragments. Works in chunks small enough to stay cached
+  // between checking, copying and relinking them.
+  pub effect fn appendRange(self: &mut Self, source: &FragmentArena, start: usize, end: usize, parent: usize) -> bool ! OutOfMemoryError ? &mut Allocator {
     let base = self.values.length()
     let sourceValues = source.values.asSlice()
-    // Text records of a laid-out range are usually contiguous: copy them in
-    // one piece and shift indices, else one by one.
-    let mut texts: usize = 0
-    let mut firstText = NO_NODE
-    let mut lastText: usize = 0
-    let mut ordered = true
-    let mut index = start
-    while index < end {
-      let text = sourceValues[index].textData
-      if text != NO_NODE {
-        if firstText == NO_NODE { firstText = text }
-        else if text != lastText + 1 { ordered = false }
-        lastText = text
-        texts = texts + 1
-      }
-      index = index + 1
-    }
+    let sourceTexts = source.texts.asSlice()
     run self.values.reserve(end - start)
     run self.settled.reserve(1)
-    run self.texts.reserve(texts)
-    run self.values.appendSlice(Slice.view(sourceValues, start, end - start))
-    let textBase = self.texts.length()
-    let bulk = texts != 0 && ordered
-    if bulk { run self.texts.appendSlice(Slice.view(source.texts.asSlice(), firstText, texts)) }
-    let sourceTexts = source.texts.asSlice()
-    let mut at = base
-    let stop = base + (end - start)
-    while at < stop {
-      let values = self.values.asMutSlice()
-      values[at].visualOffset = Point { x: 0.0, y: 0.0 }
-      values[at].worldLocation = Point { x: 0.0, y: 0.0 }
-      if values[at].textData != NO_NODE {
-        if bulk { values[at].textData = textBase + (values[at].textData - firstText) }
-        else {
-          let text = sourceTexts[values[at].textData]
-          values[at].textData = self.texts.length()
-          run self.texts.append(text)
+    let mut chunk = start
+    while chunk < end {
+      let mut stop = chunk + RANGE_CHUNK
+      if stop > end { stop = end }
+      // Text records of a laid-out range are usually contiguous: copy them in
+      // one piece and shift indices, else one by one.
+      let mut texts: usize = 0
+      let mut firstText = NO_NODE
+      let mut lastText: usize = 0
+      let mut ordered = true
+      let mut index = chunk
+      while index < stop {
+        let from = &sourceValues[index]
+        if (index > start && (from.parent < start || from.parent >= index)) || (from.lastChild != NO_NODE && from.lastChild >= end) {
+          self.rollback(base)
+          return false
         }
+        let text = from.textData
+        if text != NO_NODE {
+          if firstText == NO_NODE { firstText = text }
+          else if text != lastText + 1 { ordered = false }
+          lastText = text
+          texts = texts + 1
+        }
+        index = index + 1
       }
-      if at == base {
-        values[at].parent = parent
-        if values[at].firstChild != NO_NODE {
-          values[at].firstChild = base + (values[at].firstChild - start)
-          values[at].lastChild = base + (values[at].lastChild - start)
+      run self.texts.reserve(texts)
+      let at0 = self.values.length()
+      run self.values.appendSlice(Slice.view(sourceValues, chunk, stop - chunk))
+      let textBase = self.texts.length()
+      let bulk = texts != 0 && ordered
+      if bulk { run self.texts.appendSlice(Slice.view(sourceTexts, firstText, texts)) }
+      let mut at = at0
+      let last = at0 + (stop - chunk)
+      while at < last {
+        let values = self.values.asMutSlice()
+        values[at].visualOffset = Point { x: 0.0, y: 0.0 }
+        values[at].worldLocation = Point { x: 0.0, y: 0.0 }
+        if values[at].textData != NO_NODE {
+          if bulk { values[at].textData = textBase + (values[at].textData - firstText) }
+          else {
+            let text = sourceTexts[values[at].textData]
+            values[at].textData = self.texts.length()
+            run self.texts.append(text)
+          }
         }
-        self.linkParent(at)
-      } else {
-        // Every link but the root's own sibling links stays in the range.
-        values[at].parent = base + (values[at].parent - start)
-        if values[at].firstChild != NO_NODE {
-          values[at].firstChild = base + (values[at].firstChild - start)
-          values[at].lastChild = base + (values[at].lastChild - start)
+        if at == base {
+          values[at].parent = parent
+          if values[at].firstChild != NO_NODE {
+            values[at].firstChild = base + (values[at].firstChild - start)
+            values[at].lastChild = base + (values[at].lastChild - start)
+          }
+          self.linkParent(at)
+        } else {
+          // Every link but the root's own sibling links stays in the range.
+          values[at].parent = base + (values[at].parent - start)
+          if values[at].firstChild != NO_NODE {
+            values[at].firstChild = base + (values[at].firstChild - start)
+            values[at].lastChild = base + (values[at].lastChild - start)
+          }
+          if values[at].previousSibling != NO_NODE { values[at].previousSibling = base + (values[at].previousSibling - start) }
+          if values[at].nextSibling != NO_NODE { values[at].nextSibling = base + (values[at].nextSibling - start) }
         }
-        if values[at].previousSibling != NO_NODE { values[at].previousSibling = base + (values[at].previousSibling - start) }
-        if values[at].nextSibling != NO_NODE { values[at].nextSibling = base + (values[at].nextSibling - start) }
+        self.linkBox(at)
+        at = at + 1
       }
-      self.linkBox(at)
-      at = at + 1
+      chunk = stop
     }
-    run self.settled.append(SettledRange { start: base, end: stop, overflow: sourceValues[start].scrollableOverflow })
+    run self.settled.append(SettledRange { start: base, end: base + (end - start), overflow: sourceValues[start].scrollableOverflow })
+    return true
   }
   // Links an appended range's first fragment after its parent's last child.
   fn linkParent(self: &mut Self, index: usize) {

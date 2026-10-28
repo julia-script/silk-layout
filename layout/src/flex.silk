@@ -309,8 +309,13 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   // A content-based flex base is the max-content size, which is at least the
   // min-content size the content suggestion measures.
   let contentBase = !basisDefinite && basis.kind == DimensionKind.Auto && mainConstraint.kind != AvailableKind.MinContent
-  let deferMinimum = autoMinimum && !intrinsic && (lengthBase || contentBase) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
-  if (autoMinimum && !deferMinimum) || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
+  // In an intrinsic pass, an item that cannot grow contributes at most its
+  // flex base (§9.9.3); a length base equal to the preferred size is at
+  // least that preferred size and the automatic minimum, so neither
+  // contribution reads the content.
+  let fixedContribution = intrinsic && lengthBase && item.grow == 0.0 && base <= preferredSize
+  let deferMinimum = autoMinimum && ((!intrinsic && (lengthBase || contentBase)) || fixedContribution) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
+  if (autoMinimum && !deferMinimum) || (intrinsic && !deferMinimum) || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
     let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, horizontal, blockAxisConstraint(style, horizontal, AvailableSpace.minContent()), crossDefinite, crossSize)
     minContent = axisSize(measured.size, horizontal)
     minimumCross = axisSize(measured.size, !horizontal)
@@ -321,7 +326,7 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   }
   let mut maxContent = minContent
   let mut contentCross = crossSize
-  if !basisDefinite || intrinsic || minimumDimension.kind == DimensionKind.MaxContent || maximumDimension.kind == DimensionKind.MaxContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
+  if !basisDefinite || (intrinsic && !deferMinimum) || minimumDimension.kind == DimensionKind.MaxContent || maximumDimension.kind == DimensionKind.MaxContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
     // An empty box's max-content probe has its min-content probe's key.
     let mut measured = minProbe
     if !minProbed || !constraintFreeProbe(output.keyShape(id)) { measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, horizontal, AvailableSpace.maxContent(), crossDefinite, crossSize) }

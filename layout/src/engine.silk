@@ -560,6 +560,17 @@ fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut Resolv
 }
 
 // probeFresh for a box emptyBoxApplies to: stores and caches the same result.
+// probeEmptyBox's size without the cache: sizing a childless box again
+// costs less than storing and finding its result. False when
+// emptyBoxApplies does not hold, leaving result untouched.
+pub fn sizeEmptyBox(nodes: &BoxTree, id: usize, input: &Input, result: &mut Layout) -> bool {
+  if nodes.node(id).firstChild != NO_NODE || !emptyBoxApplies(nodes, id, &input) { return false }
+  let style = nodes.style(id)
+  let mut box = resolveBox(style, &input)
+  emptyBoxLayout(style, &input, &BfcState.make(), &mut box, &mut result)
+  return true
+}
+
 effect fn probeEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, id: usize, input: &Input, key: &Input) ! OutOfMemoryError ? &mut Allocator {
   output.stats.sizeProbes = output.stats.sizeProbes + 1
   let style = nodes.style(id)

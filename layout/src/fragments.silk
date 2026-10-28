@@ -364,9 +364,11 @@ impl FragmentArena {
     if index + 1 > self.written { self.written = index + 1 }
   }
   // Prepares fragment `index` for an edit by the caller.
-  pub effect fn edit(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn edit(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
     // A fresh arena, writing over no previous output, saves and notes nothing.
-    if !self.inPlace && !self.viewing { return }
+    if self.inPlace || self.viewing { run self.editPrevious(index) }
+  }
+  effect fn editPrevious(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
     run self.saveFragment(index)
     if self.inPlace && index + 1 > self.written { self.written = index + 1 }
     // Positioning edits after the flow, which saves nothing.

@@ -305,8 +305,11 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     result.resume = replacement.resume.replacing(previous.resume)
     return result
   }
-  pub effect fn preserveLayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
-    if self.frame != NO_NODE && self.resumes.needsLayoutSnapshot(id) {
+  pub effect fn preserveLayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
+    if self.frame != NO_NODE { run self.preserveFrameLayout(id) }
+  }
+  effect fn preserveFrameLayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
+    if self.resumes.needsLayoutSnapshot(id) {
       run self.resumes.rememberLayout(id, self.boxes[id])
     }
   }
@@ -333,7 +336,10 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   }
   // A box's layout is written: in an in-place compute its previous layout is
   // saved before its first write.
-  pub effect fn touch(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn touch(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
+    if self.tracking || self.inPlace { run self.touchTracked(id) }
+  }
+  effect fn touchTracked(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
     if self.tracking && id < self.writes.written.length() && self.writes.written.get(id) != self.writes.generation {
       self.writes.written.set(id, self.writes.generation)
       self.markAncestors(id)

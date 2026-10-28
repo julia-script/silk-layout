@@ -5,6 +5,8 @@ Each harness lays out the same document and reports per-iteration compute time, 
 process start, JSON parsing and tree construction. Taffy and yoga get a fresh tree for every
 iteration so their layout caches never help; silk-layout keeps no cache between computes.
 Geometry is compared on border boxes in absolute coordinates.
+Grid workloads are taffy-only comparisons: Yoga is explicitly skipped and excluded
+from timing-ratio and geometry summaries.
 
   python3 bench/compare/compare.py --silk build/.../release/silk_layout_cli \\
       --taffy bench/compare/taffy/target/release/taffy-harness \\
@@ -70,12 +72,19 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         for name in names:
             document = W.WORKLOADS[name]()
+            is_grid = any(node.get("style", {}).get("display") == "grid" for node in document["nodes"])
             path = Path(tmp) / f"{name}.json"
             path.write_text(json.dumps(document))
             silk_ns, silk_boxes = run_silk(args.silk, document, args.iterations)
             row = {"nodes": len(document["nodes"]), "silk_ms": min(silk_ns) / 1e6, "silk_median_ms": statistics.median(silk_ns) / 1e6}
+            if is_grid:
+                row["comparison"] = "taffy-only (grid; Yoga unsupported)"
             line = f"{name:<20}{row['silk_ms']:>10.3f}"
             for engine, binary in engines:
+                if is_grid and engine == "yoga":
+                    row[engine] = {"skipped": "Yoga does not support CSS Grid"}
+                    line += f"{'skip':>11}{'-':>8}{'-':>8}"
+                    continue
                 ns, boxes = run_harness(binary, path, args.iterations)
                 bad = mismatches(silk_boxes, boxes)
                 ms = min(ns) / 1e6
@@ -86,13 +95,20 @@ def main():
                     i = bad[0]
                     row[engine]["first_mismatch"] = {"node": i, "silk": silk_boxes[i], engine: boxes[i]}
                 line += f"{ms:>11.3f}{ratio:>7.2f}x{len(bad):>8}"
+            if is_grid:
+                line += "  [taffy-only grid; Yoga unsupported]"
             print(line, flush=True)
             results[name] = row
     for engine, values in ratios.items():
         if values:
             print(f"geomean silk/{engine}: {math.exp(sum(map(math.log, values)) / len(values)):.2f}x")
+        skipped = sum(bool(row[engine].get("skipped")) for row in results.values())
+        if skipped:
+            print(f"{engine}: {len(values)} workloads compared; {skipped} grids skipped (not included in ratios or geometry)")
     for name, row in results.items():
         for engine, _ in engines:
+            if row[engine].get("skipped"):
+                continue
             if row[engine].get("first_mismatch"):
                 print(f"{name}: {row[engine]['mismatched_nodes']} boxes differ from {engine}; first {row[engine]['first_mismatch']}")
     if args.json:

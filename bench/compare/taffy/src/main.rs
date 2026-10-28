@@ -3,6 +3,11 @@
 //! Prints {"layoutNs": [...]} and, with --dump, every node's border box in absolute coordinates.
 //! With --updates, one tree is kept: each iteration applies the next step of the cycle (a new
 //! viewport and/or node styles, as in the silk-layout CLI's "updates" field) and times one layout.
+//! Grid mapping is intentionally limited to numeric lines/spans, non-repeated tracks
+//! (fixed, percent, fr, auto and minmax), row flow, gaps and item/self alignment.
+//! Named placement/areas, repeat, calc, fit-content and intrinsic breadth keywords
+//! are rejected rather than approximated. Fixture wrapping models horizontal text
+//! without floats; it does not expose line boxes or baseline data to taffy.
 use serde_json::Value;
 use std::time::Instant;
 use taffy::prelude::*;
@@ -12,6 +17,8 @@ struct Fixture {
     min_width: f32,
     max_width: f32,
     height: f32,
+    wrap: bool,
+    has_line_boxes: bool,
 }
 
 fn dimension(value: Option<&Value>) -> Dimension {
@@ -55,6 +62,7 @@ fn edges<T: Copy>(s: &serde_json::Map<String, Value>, name: &str, parse: fn(Opti
 
 fn align(value: Option<&Value>) -> AlignItems {
     value.map_or(AlignItems::NORMAL, |v| match v.as_str().unwrap() {
+        "normal" => AlignItems::NORMAL,
         "flex-start" => AlignItems::FLEX_START,
         "flex-end" => AlignItems::FLEX_END,
         "start" => AlignItems::START,
@@ -62,13 +70,23 @@ fn align(value: Option<&Value>) -> AlignItems {
         "center" => AlignItems::CENTER,
         "baseline" => AlignItems::BASELINE,
         "stretch" => AlignItems::STRETCH,
-        other => panic!("unsupported alignItems {other}"),
+        other => panic!("unsupported item alignment {other}"),
     })
+}
+
+fn self_align(value: Option<&Value>) -> Option<AlignSelf> {
+    match value {
+        None => None,
+        Some(Value::String(s)) if s == "auto" => None,
+        _ => Some(align(value)),
+    }
 }
 
 fn justify(value: Option<&Value>) -> JustifyContent {
     value.map_or(JustifyContent::NORMAL, |v| match v.as_str().unwrap() {
         "flex-start" => JustifyContent::FLEX_START,
+        "normal" => JustifyContent::NORMAL,
+        "stretch" => JustifyContent::STRETCH,
         "flex-end" => JustifyContent::FLEX_END,
         "start" => JustifyContent::START,
         "end" => JustifyContent::END,
@@ -80,15 +98,99 @@ fn justify(value: Option<&Value>) -> JustifyContent {
     })
 }
 
+fn grid_nonnegative(value: &Value) -> f32 {
+    let number = value.as_f64().unwrap_or_else(|| panic!("unsupported grid number {value}"));
+    assert!(number.is_finite() && number >= 0.0 && number <= f32::MAX as f64, "unsupported grid number {value}");
+    number as f32
+}
+
+fn grid_breadth(value: &Value) -> TrackSizingFunction {
+    match value {
+        Value::Number(_) => length(grid_nonnegative(value)),
+        Value::String(s) if s == "auto" => auto(),
+        Value::Object(o) if o.len() == 1 && o.contains_key("percent") => percent(grid_nonnegative(&o["percent"])),
+        Value::Object(o) if o.len() == 1 && o.contains_key("fr") => fr(grid_nonnegative(&o["fr"])),
+        _ => panic!("unsupported grid breadth {value}"),
+    }
+}
+
+fn grid_track(value: &Value) -> TrackSizingFunction {
+    if let Some(o) = value.as_object().filter(|o| o.contains_key("minmax")) {
+        assert!(o.len() == 1, "unsupported grid track {value}");
+        let pair = o["minmax"].as_array().filter(|p| p.len() == 2)
+            .unwrap_or_else(|| panic!("minmax requires two breadths: {value}"));
+        let minimum = grid_breadth(&pair[0]);
+        assert!(!minimum.max.is_fr(), "grid minmax minimum cannot be flexible: {value}");
+        let maximum = grid_breadth(&pair[1]);
+        TrackSizingFunction { min: minimum.min, max: maximum.max }
+    } else {
+        grid_breadth(value)
+    }
+}
+
+fn grid_template<S: taffy::style::CheapCloneStr>(value: Option<&Value>) -> Vec<GridTemplateComponent<S>> {
+    match value {
+        None => Vec::new(),
+        Some(Value::String(s)) if s == "none" => Vec::new(),
+        Some(Value::Array(tracks)) => {
+            assert!(tracks.len() <= 10_000, "grid template exceeds 10000 tracks");
+            tracks.iter().map(|v| GridTemplateComponent::Single(grid_track(v))).collect()
+        }
+        Some(other) => panic!("unsupported grid template {other}"),
+    }
+}
+
+fn grid_auto_tracks(value: Option<&Value>) -> Vec<TrackSizingFunction> {
+    match value {
+        None => Vec::new(),
+        Some(Value::Array(tracks)) => {
+            assert!(!tracks.is_empty() && tracks.len() <= 10_000, "grid auto tracks require 1..10000 sizes");
+            tracks.iter().map(grid_track).collect()
+        }
+        Some(value) => vec![grid_track(value)],
+    }
+}
+
+fn grid_line_number(value: &Value) -> i16 {
+    let number = value.as_f64().unwrap_or_else(|| panic!("unsupported grid line {value}"));
+    assert!(number.is_finite() && number != 0.0 && number.fract() == 0.0, "grid line must be a nonzero integer: {value}");
+    // Match the native protocol's placement-number clamp before narrowing for taffy.
+    number.clamp(-10_000.0, 10_000.0) as i16
+}
+
+fn grid_placement(value: Option<&Value>) -> GridPlacement {
+    match value {
+        None => GridPlacement::Auto,
+        Some(Value::String(s)) if s == "auto" => GridPlacement::Auto,
+        Some(value @ Value::Number(_)) => line(grid_line_number(value)),
+        Some(Value::Object(o)) if o.len() == 1 && o.contains_key("line") => line(grid_line_number(&o["line"])),
+        Some(Value::Object(o)) if o.len() == 1 && o.contains_key("span") => {
+            let count = grid_line_number(&o["span"]);
+            assert!(count > 0, "grid span must be positive");
+            span(count as u16)
+        }
+        Some(other) => panic!("unsupported grid placement {other}"),
+    }
+}
+
 fn style(value: &Value) -> Style {
     let s = value.as_object().unwrap();
+    for name in s.keys().filter(|name| name.starts_with("grid")) {
+        assert!(matches!(name.as_str(),
+            "gridTemplateRows" | "gridTemplateColumns" | "gridAutoRows" | "gridAutoColumns" |
+            "gridAutoFlow" | "gridRowStart" | "gridRowEnd" | "gridColumnStart" | "gridColumnEnd"),
+            "unsupported grid property {name}");
+    }
     let num = |name: &str, default: f32| s.get(name).map(|v| v.as_f64().unwrap() as f32).unwrap_or(default);
     let border = edges(s, "border", length_percentage);
     Style {
-        display: match s.get("display").and_then(Value::as_str) {
-            Some("flex") => Display::Flex,
-            Some("none") => Display::None,
-            _ => Display::Block,
+        display: match s.get("display") {
+            None => Display::Block,
+            Some(Value::String(s)) if s == "block" => Display::Block,
+            Some(Value::String(s)) if s == "flex" => Display::Flex,
+            Some(Value::String(s)) if s == "grid" => Display::Grid,
+            Some(Value::String(s)) if s == "none" => Display::None,
+            Some(other) => panic!("unsupported display {other}"),
         },
         flex_direction: match s.get("flexDirection").and_then(Value::as_str) {
             Some("column") => FlexDirection::Column,
@@ -112,7 +214,22 @@ fn style(value: &Value) -> Style {
         border,
         gap: Size { width: length_percentage(s.get("columnGap")), height: length_percentage(s.get("rowGap")) },
         align_items: align(s.get("alignItems")),
+        align_self: self_align(s.get("alignSelf")),
+        justify_items: align(s.get("justifyItems")),
+        justify_self: self_align(s.get("justifySelf")),
+        align_content: justify(s.get("alignContent")),
         justify_content: justify(s.get("justifyContent")),
+        grid_template_columns: grid_template(s.get("gridTemplateColumns")),
+        grid_template_rows: grid_template(s.get("gridTemplateRows")),
+        grid_auto_columns: grid_auto_tracks(s.get("gridAutoColumns")),
+        grid_auto_rows: grid_auto_tracks(s.get("gridAutoRows")),
+        grid_auto_flow: match s.get("gridAutoFlow") {
+            None => GridAutoFlow::Row,
+            Some(Value::String(s)) if s == "row" => GridAutoFlow::Row,
+            Some(other) => panic!("unsupported gridAutoFlow {other}"),
+        },
+        grid_column: Line { start: grid_placement(s.get("gridColumnStart")), end: grid_placement(s.get("gridColumnEnd")) },
+        grid_row: Line { start: grid_placement(s.get("gridRowStart")), end: grid_placement(s.get("gridRowEnd")) },
         ..Default::default()
     }
 }
@@ -135,6 +252,8 @@ fn build(document: &Value) -> Workload {
             min_width: m["minWidth"].as_f64().unwrap() as f32,
             max_width: m["maxWidth"].as_f64().unwrap() as f32,
             height: m["height"].as_f64().unwrap() as f32,
+            wrap: m.get("wrap").map(|v| v.as_bool().expect("wrap must be boolean")).unwrap_or(false),
+            has_line_boxes: m.get("hasLineBoxes").map(|v| v.as_bool().expect("hasLineBoxes must be boolean")).unwrap_or(true),
         });
         let node = tree.new_leaf_with_context(style(&item["style"]), fixture).unwrap();
         nodes.push(node);
@@ -167,7 +286,16 @@ fn measure(known: Size<Option<f32>>, available: Size<AvailableSpace>, fixture: &
         AvailableSpace::MaxContent => fixture.max_width,
         AvailableSpace::Definite(w) => w.min(fixture.max_width).max(fixture.min_width),
     });
-    Size { width, height: known.height.unwrap_or(fixture.height) }
+    let height = known.height.unwrap_or_else(|| {
+        let capacity = fixture.min_width.max(width);
+        let lines = if fixture.wrap && fixture.has_line_boxes && capacity > 0.0 {
+            (fixture.max_width / capacity).ceil().max(1.0)
+        } else {
+            1.0
+        };
+        fixture.height * lines
+    });
+    Size { width, height }
 }
 
 fn layout(workload: &mut Workload) {

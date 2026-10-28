@@ -97,3 +97,130 @@ pub effect fn reusableSubtrees(nodes: &BoxTree) -> List<u8> ! OutOfMemoryError ?
   }
   return move result
 }
+
+// Generated boxes of the previous compute matched to this compute's after a
+// change in which boxes are generated (an insertion, or a display change).
+// Box indices shift, so kept results are carried over by this mapping. A
+// sourced box matches the same continuation of its source; an anonymous box
+// matches the anonymous child of the matched parent with the same kind and
+// style owner, in order. `changed` marks new boxes with no match, or whose
+// own fields, parent, children or continuations differ from their match.
+pub struct BoxMatch { pub toOld: List<usize>, pub toNew: List<usize>, pub changed: List<bool> }
+
+fn anonymousLike(a: &BoxNode, b: &BoxNode) -> bool {
+  return a.source == NO_NODE && b.source == NO_NODE && a.kind == b.kind && a.styleOwner == b.styleOwner
+}
+
+fn mapped(map: &[usize], id: usize) -> usize {
+  if id == NO_NODE { return NO_NODE }
+  return map[id]
+}
+
+pub effect fn matchBoxes(previous: &[BoxNode], previousFirst: &[usize], next: &BoxTree) -> BoxMatch ! OutOfMemoryError ? &mut Allocator {
+  let count = next.boxes.length()
+  let mut toOld = List<usize>.make()
+  let mut toNew = List<usize>.make()
+  let mut changed = List<bool>.make()
+  run toOld.reserveExact(count)
+  run toNew.reserveExact(previous.length)
+  run changed.reserveExact(count)
+  while toOld.length() < count { run toOld.append(NO_NODE) }
+  while toNew.length() < previous.length { run toNew.append(NO_NODE) }
+  while changed.length() < count { run changed.append(true) }
+  if count == 0 || previous.length == 0 { return BoxMatch { toOld: move toOld, toNew: move toNew, changed: move changed } }
+  toOld.set(0, 0)
+  toNew.set(0, 0)
+  // Parents precede children, so a box's parent is matched before it.
+  let mut id: usize = 0
+  while id < count {
+    let node = next.node(id)
+    if id != 0 && node.source != NO_NODE {
+      let mut ordinal: usize = 0
+      let mut before = node.previousContinuation
+      while before != NO_NODE {
+        ordinal = ordinal + 1
+        before = next.node(before).previousContinuation
+      }
+      let mut old = NO_NODE
+      if node.source < previousFirst.length { old = previousFirst[node.source] }
+      while old != NO_NODE && ordinal > 0 {
+        old = previous[old].nextContinuation
+        ordinal = ordinal - 1
+      }
+      if old != NO_NODE && toNew.get(old) == NO_NODE && previous[old].kind == node.kind && previous[old].styleOwner == node.styleOwner {
+        toOld.set(id, old)
+        toNew.set(old, id)
+      }
+    }
+    // Anonymous children pair up in order among those alike.
+    let parent = toOld.get(id)
+    if parent != NO_NODE {
+      let mut cursor = previous[parent].firstChild
+      let mut child = node.firstChild
+      while child != NO_NODE {
+        let item = next.node(child)
+        if item.source == NO_NODE {
+          let mut scan = cursor
+          while scan != NO_NODE && !anonymousLike(&previous[scan], item) { scan = previous[scan].nextSibling }
+          if scan != NO_NODE {
+            if toNew.get(scan) == NO_NODE {
+              toOld.set(child, scan)
+              toNew.set(scan, child)
+            }
+            cursor = previous[scan].nextSibling
+          }
+        }
+        child = item.nextSibling
+      }
+    }
+    id = id + 1
+  }
+  id = 0
+  let map = toOld.asSlice()
+  while id < count {
+    let old = map[id]
+    if old != NO_NODE {
+      let a = &previous[old]
+      let b = next.node(id)
+      let mut same = a.kind == b.kind && a.source == b.source && a.styleOwner == b.styleOwner
+        && (a.anonymousStyle == NO_NODE) == (b.anonymousStyle == NO_NODE)
+        && a.parent == mapped(map, b.parent)
+        && a.previousContinuation == mapped(map, b.previousContinuation) && a.nextContinuation == mapped(map, b.nextContinuation)
+        && a.firstForSource == b.firstForSource && a.lastForSource == b.lastForSource
+        && a.interruptionFirst == mapped(map, b.interruptionFirst) && a.interruptionLast == mapped(map, b.interruptionLast)
+        && a.anonymousBlock == b.anonymousBlock && a.blockify == b.blockify && a.independentRoot == b.independentRoot
+        && a.firstFormattedRun == b.firstFormattedRun && a.needsFragmentGeometry == b.needsFragmentGeometry
+        && a.fragmentMonolithic == b.fragmentMonolithic
+        && a.beforeControl == b.beforeControl && a.dynamicBefore == b.dynamicBefore
+        && a.afterControl == b.afterControl && a.dynamicAfter == b.dynamicAfter
+        && a.measureKey == b.measureKey && a.measurement == b.measurement
+      let mut oldChild = a.firstChild
+      let mut newChild = b.firstChild
+      while same && (oldChild != NO_NODE || newChild != NO_NODE) {
+        if oldChild == NO_NODE || newChild == NO_NODE || map[newChild] != oldChild { same = false }
+        else {
+          oldChild = previous[oldChild].nextSibling
+          newChild = next.node(newChild).nextSibling
+        }
+      }
+      if same { changed.set(id, false) }
+    }
+    id = id + 1
+  }
+  return BoxMatch { toOld: move toOld, toNew: move toNew, changed: move changed }
+}
+
+// Clears every changed box and its ancestors in the remapped cache.
+pub fn invalidateUnmatched(nodes: &BoxTree, cache: &mut LayoutCache, changed: &[bool]) {
+  let mut id: usize = 0
+  while id < changed.length {
+    if changed[id] {
+      let mut box = id
+      while box != NO_NODE {
+        cache.clearBox(box)
+        box = nodes.node(box).parent
+      }
+    }
+    id = id + 1
+  }
+}

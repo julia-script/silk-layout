@@ -975,11 +975,20 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   // Keep size results from the previous compute of this tree when its boxes
   // are unchanged, minus those that changed sources can affect. Reuse the
   // boxes themselves when no change since could alter them.
-  let kept = output.reusable() && tree.structureRevision() <= since
-  let restoring = kept && tree.boxRevision() <= since && output.boxNodes.length() != 0
+  // When they differ, carry results over to the matching new boxes.
+  let kept = output.reusable() && output.boxNodes.length() != 0
+  let restoring = kept && tree.structureRevision() <= since && tree.boxRevision() <= since
   let nodes = run boxesFor(tree, &mut output, since, restoring)
   if restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice())) {
     output.cache.rotateFinals()
+    Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
+    run output.cache.compact()
+  } else if kept {
+    let matched = run Incremental.matchBoxes(output.boxNodes.asSlice(), output.firstBySource.asSlice(), &nodes)
+    output.cache.rotateFinals()
+    run output.cache.remap(matched.toOld.asSlice(), matched.toNew.asSlice())
+    run output.snapshot.remap(matched.toOld.asSlice(), matched.toNew.asSlice())
+    Incremental.invalidateUnmatched(&nodes, &mut output.cache, matched.changed.asSlice())
     Incremental.invalidateChanged(tree, &nodes, &mut output.cache, since)
     run output.cache.compact()
   } else {

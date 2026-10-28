@@ -22,6 +22,7 @@ impl Copy for Entry {}
 // the box's own. Ranges are kept per compute; results are written in place,
 // since carrying a copied subtree forward only moves its ranges.
 pub struct FinalResult { pub input: Input, pub layout: Layout }
+impl Copy for FinalResult {}
 pub struct FinalRange { pub valid: bool, pub start: usize, pub end: usize }
 impl Copy for FinalRange {}
 impl FinalRange {
@@ -157,6 +158,44 @@ impl LayoutCache {
     self.touched = self.touched + 1
     self.heads.set(id, index)
   }
+  // Moves kept results to new box indices after box generation changed:
+  // `toOld[new]` is the matching previous box or ABSENT, `toNew` the reverse.
+  // Results of previous boxes with no match become unreachable.
+  pub effect fn remap(self: &mut Self, toOld: &[usize], toNew: &[usize]) ! OutOfMemoryError ? &mut Allocator {
+    let mut old: usize = 0
+    while old < self.heads.length() {
+      if old >= toNew.length || toNew[old] == ABSENT {
+        let mut index = self.heads.get(old)
+        while index != ABSENT {
+          self.dead = self.dead + 1
+          index = self.entries.get(index).next
+        }
+      }
+      old = old + 1
+    }
+    let mut heads = List<usize>.make()
+    let mut kept = List<FinalRange>.make()
+    let mut results = List<FinalResult>.make()
+    run heads.reserveExact(toOld.length)
+    run kept.reserveExact(toOld.length)
+    run results.reserveExact(toOld.length)
+    let mut id: usize = 0
+    while id < toOld.length {
+      let from = toOld[id]
+      let mut head = ABSENT
+      let mut range = FinalRange.none()
+      if from != ABSENT && from < self.heads.length() { head = self.heads.get(from) }
+      if from != ABSENT && from < self.kept.length() { range = self.kept.get(from) }
+      run heads.append(head)
+      run kept.append(range)
+      if from != ABSENT && from < self.results.length() { run results.append(self.results.asSlice()[from]) }
+      else { run results.append(FinalResult { input: Input.make(OptionalSize.definite(0.0, 0.0)), layout: Layout.zero() }) }
+      id = id + 1
+    }
+    self.heads = move heads
+    self.kept = move kept
+    self.results = move results
+  }
   // Rebuilds the entry list without unreachable entries and, once entries the
   // previous compute did not use dominate (a drag-resize leaves one set per
   // size), without those either. Each box keeps its lookup order.
@@ -200,4 +239,18 @@ impl LayoutCache {
 pub struct Snapshot { pub fragments: FragmentArena, pub boxes: List<Layout> }
 impl Snapshot {
   pub fn make() -> Snapshot { return Snapshot { fragments: FragmentArena.make(), boxes: List<Layout>.make() } }
+  // Renumbers boxes as LayoutCache.remap does.
+  pub effect fn remap(self: &mut Self, toOld: &[usize], toNew: &[usize]) ! OutOfMemoryError ? &mut Allocator {
+    let mut boxes = List<Layout>.make()
+    run boxes.reserveExact(toOld.length)
+    let mut id: usize = 0
+    while id < toOld.length {
+      let from = toOld[id]
+      if from != ABSENT && from < self.boxes.length() { run boxes.append(self.boxes.asSlice()[from]) }
+      else { run boxes.append(Layout.zero()) }
+      id = id + 1
+    }
+    self.boxes = move boxes
+    run self.fragments.remapBoxes(toOld, toNew)
+  }
 }

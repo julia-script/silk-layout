@@ -1695,6 +1695,14 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
         if output.frame == NO_NODE || single {
           output.boxes[id].scrollableOverflow = overflow
         }
+        // A childless in-flow box whose overflow stays inside its border box
+        // adds nothing to a parent that already covers its border box (see
+        // parentCovers below, set by an earlier sibling).
+        if fragment.firstChild == NO_NODE && !positioned && !nonpainting && parentId == limitsParent && parentCovers
+          && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0
+          && overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height {
+          continue
+        }
         overflow = propagatedOverflow(style, overflow, paddingRect)
       }
     }

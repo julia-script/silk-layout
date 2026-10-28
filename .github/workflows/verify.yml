@@ -13,9 +13,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      SILK_VERSION: 0.1.0-dev.20+10a8c67813a1
+      SILK_VERSION: 0.1.0-dev.22+5cd5bc433c4e
       SILK_HOME: ${{ github.workspace }}/.cache/silk
-      SILK_CLANG: /usr/bin/clang-22
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,13 +23,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache/silk
-          key: silk-dev20-10a8c67813a1-x86_64-linux
-      - name: Install LLVM 22
-        run: |
-          curl --fail --silent --show-error https://apt.llvm.org/llvm-snapshot.gpg | sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
-          echo 'deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm-22.list
-          sudo apt-get update -qq
-          sudo apt-get install -y clang-22
+          key: silk-dev22-5cd5bc433c4e-x86_64-linux
+      - uses: actions/cache@v4
+        with:
+          path: .cache/llvm-22.1.8
+          key: llvm-22.1.8-linux-x64-clang
+      - name: Install LLVM 22 clang
+        run: echo "SILK_CLANG=$(LLVM_HOME=.cache/llvm-22.1.8 scripts/install-llvm)" >> "$GITHUB_ENV"
       - name: Install and verify published Silk
         shell: bash
         run: |
@@ -39,11 +38,11 @@ jobs:
           if [[ ! -f "$toolchain/bin/silkc" ]]; then
             asset="silk-$SILK_VERSION-x86_64-unknown-linux-gnu.tar.gz"
             curl --fail --location --silent --show-error "https://github.com/silk-lang/silk/releases/download/v${SILK_VERSION/+/%2B}/${asset/+/%2B}" -o "$RUNNER_TEMP/silk.tar.gz"
-            echo "f2ae1338d78871d511a40ca358b00c985594a3d4b555e22ccc01c8ca723d02b9  $RUNNER_TEMP/silk.tar.gz" | sha256sum -c -
+            echo "6f8c7b056d8076873a24bd30d562577daad67b1e89e218703f07a37d336ab0f3  $RUNNER_TEMP/silk.tar.gz" | sha256sum -c -
             mkdir -p "$toolchain"
             tar -xzf "$RUNNER_TEMP/silk.tar.gz" --strip-components=1 -C "$toolchain"
           fi
-          echo "f81c8f8d35082e6f283022ce6f3e08f65dfd4a502d34f75bc3bcd8efaeeaab4f  $toolchain/bin/silkc" | sha256sum -c -
+          echo "caf606ea34b207ddab9ce040a352cd3883f856fac51dd5c330c9f3efa045815f  $toolchain/bin/silkc" | sha256sum -c -
           echo "$toolchain/bin" >> "$GITHUB_PATH"
       - name: Native checks, tests and adapter scenarios
         run: scripts/check

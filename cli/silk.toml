@@ -1,7 +1,7 @@
 [package]
 name = "silk_layout_cli"
 version = "0.1.0"
-silk-version = "0.1.0-dev.20+10a8c67813a1"
+silk-version = "0.1.0-dev.22+5cd5bc433c4e"
 license = "MIT"
 
 [dependencies]

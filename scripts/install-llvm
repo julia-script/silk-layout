@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+# Install the Clang that Silk links with (LLVM 22.1.8, the release Silk's own CI uses) into
+# .cache/llvm-22.1.8 (or $LLVM_HOME) and print the path of its clang. Only clang and its resource headers are
+# kept, so the install is small enough to cache.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+version=22.1.8
+digest=df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384
+dir=${LLVM_HOME:-$root/.cache/llvm-$version}
+case $dir in /*) ;; *) dir=$root/$dir ;; esac
+if [ ! -x "$dir/bin/clang" ]; then
+  [ "$(uname -sm)" = "Linux x86_64" ] || { echo "install-llvm supports Linux x86_64 only" >&2; exit 1; }
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  curl -fsSL --retry 3 -o "$tmp/llvm.tar.xz" \
+    "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-Linux-X64.tar.xz"
+  echo "$digest  $tmp/llvm.tar.xz" | sha256sum -c - >&2
+  mkdir "$tmp/install"
+  tar -xf "$tmp/llvm.tar.xz" --strip-components=1 -C "$tmp/install" --wildcards \
+    '*/bin/clang' '*/bin/clang-22' '*/lib/clang/*'
+  mkdir -p "$(dirname "$dir")"
+  rm -rf "$dir"
+  mv "$tmp/install" "$dir"
+fi
+echo "$dir/bin/clang"

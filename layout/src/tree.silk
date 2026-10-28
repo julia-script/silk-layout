@@ -12,6 +12,7 @@ import silk.option { Option }
 import box_tree { BoxTree, BoxNode }
 import fragments { FragmentArena, FragmentKind, TextFragmentKind }
 import layout_cache { LayoutCache, Snapshot, BoxFacts, BoxWrites }
+import flex { FlexScratch }
 
 pub const NO_NODE: usize = usize.MAX
 pub struct NodeId { pub index: usize }
@@ -372,6 +373,9 @@ pub struct LayoutTree {
   // Spare storage for laying out a changed subtree alone (see the early
   // cutoff in compute).
   pub scratchBoxes: List<Layout>, pub scratchFragments: FragmentArena,
+  // Flex item and line lists, kept so nested containers don't allocate on
+  // every compute.
+  pub flexScratch: List<FlexScratch>,
 }
 impl LayoutTree {
   pub fn make() -> LayoutTree {
@@ -383,7 +387,7 @@ impl LayoutTree {
       anonymousOrigins: List<usize>.make(), anonymousText: List<bool>.make(),
       firstBySource: List<usize>.make(), lastBySource: List<usize>.make(),
       fragments: FragmentArena.make(), viewportOverflow: Rect.zero(),
-      scratchBoxes: List<Layout>.make(), scratchFragments: FragmentArena.make(),
+      scratchBoxes: List<Layout>.make(), scratchFragments: FragmentArena.make(), flexScratch: List<FlexScratch>.make(),
     }
   }
   pub effect fn prepare(self: &mut Self, count: usize) ! OutOfMemoryError ? &mut Allocator {

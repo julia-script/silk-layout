@@ -43,23 +43,33 @@ fn clearSubtree(nodes: &BoxTree, cache: &mut LayoutCache, root: usize) {
 // Clears what a changed source can affect: every generated box of the
 // source with its descendants (they may read the changed style), and every
 // ancestor (its size may depend on any descendant). A text source shares its
-// parent's style and has no descendants.
-pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, since: usize) {
+// parent's style and has no descendants. When `logged`, `sources` lists the
+// changed sources.
+pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, since: usize, logged: bool, sources: &[usize]) {
+  if logged {
+    let mut at: usize = 0
+    while at < sources.length {
+      invalidateSource(nodes, &mut cache, sources[at])
+      at = at + 1
+    }
+    return
+  }
   let mut source: usize = 0
   while source < tree.nodes.length() {
-    if tree.changedAt(source) > since {
-      let mut box = nodes.firstBySource.get(source)
-      while box != NO_NODE {
-        clearSubtree(nodes, &mut cache, box)
-        let mut ancestor = nodes.node(box).parent
-        while ancestor != NO_NODE {
-          cache.clearBox(ancestor)
-          ancestor = nodes.node(ancestor).parent
-        }
-        box = nodes.node(box).nextContinuation
-      }
-    }
+    if tree.changedAt(source) > since { invalidateSource(nodes, &mut cache, source) }
     source = source + 1
+  }
+}
+fn invalidateSource(nodes: &BoxTree, cache: &mut LayoutCache, source: usize) {
+  let mut box = nodes.firstBySource.get(source)
+  while box != NO_NODE {
+    clearSubtree(nodes, &mut cache, box)
+    let mut ancestor = nodes.node(box).parent
+    while ancestor != NO_NODE {
+      cache.clearBox(ancestor)
+      ancestor = nodes.node(ancestor).parent
+    }
+    box = nodes.node(box).nextContinuation
   }
 }
 
@@ -278,28 +288,113 @@ fn changedSince(tree: &Tree, source: usize, since: usize) -> bool {
   return source != NO_NODE && source < tree.nodes.length() && tree.changedAt(source) > since
 }
 
+// Indexes boxes by the tree node whose style they take: those of node n are
+// boxes[offsets[n]..offsets[n + 1]].
+pub effect fn indexStyleSources(tree: &Tree, nodes: &BoxTree, offsets: &mut List<usize>, boxes: &mut List<usize>) ! OutOfMemoryError ? &mut Allocator {
+  let sources = tree.nodes.length()
+  let count = nodes.boxes.length()
+  offsets.clear()
+  boxes.clear()
+  run offsets.appendRepeated(0, sources + 1)
+  run boxes.appendRepeated(NO_NODE, count)
+  let ends = offsets.asMutSlice()
+  let mut id: usize = 0
+  while id < count {
+    let source = styleSource(tree, nodes, id)
+    if source != NO_NODE && source < sources { ends[source + 1] = ends[source + 1] + 1 }
+    id = id + 1
+  }
+  let mut at: usize = 0
+  while at < sources {
+    ends[at + 1] = ends[at + 1] + ends[at]
+    at = at + 1
+  }
+  // Fill from each node's end, leaving offsets[n] at its start.
+  let slots = boxes.asMutSlice()
+  id = count
+  while id > 0 {
+    id = id - 1
+    let source = styleSource(tree, nodes, id)
+    if source != NO_NODE && source < sources {
+      ends[source + 1] = ends[source + 1] - 1
+      slots[ends[source + 1]] = id
+    }
+  }
+  at = 0
+  while at < sources {
+    ends[at] = ends[at + 1]
+    at = at + 1
+  }
+}
+
 // Refreshes kept facts for the same boxes after style changes since the
 // compute they reflect: the own facts of every box whose style or parent's
 // style changed, then the subtree facts of those boxes and their ancestors.
-// Returns the boxes whose own facts were refreshed.
-pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, facts: &mut BoxFacts) -> List<usize> ! OutOfMemoryError ? &mut Allocator {
+// When `logged`, `sources` lists the changed tree nodes, which with the
+// style source index in `facts` finds those boxes without visiting the
+// others. Returns the boxes whose own facts were refreshed.
+pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, logged: bool, sources: &[usize], facts: &mut BoxFacts) -> List<usize> ! OutOfMemoryError ? &mut Allocator {
   let count = nodes.boxes.length()
   let mut changed = List<usize>.make()
   let mut marked = List<bool>.make()
   run marked.appendRepeated(false, count)
-  let mut id: usize = 0
-  while id < count {
-    let node = nodes.node(id)
-    let mut restyled = changedSince(tree, styleSource(tree, nodes, id), since) || changedSince(tree, node.source, since)
-    if !restyled && node.parent != NO_NODE && marked.get(node.parent) {
-      let parent = nodes.node(node.parent)
-      restyled = changedSince(tree, styleSource(tree, nodes, node.parent), since) || changedSince(tree, parent.source, since)
+  if logged {
+    let offsets = facts.styledOffsets.asSlice()
+    let styled = facts.styledBoxes.asSlice()
+    let mut at: usize = 0
+    while at < sources.length {
+      let source = sources[at]
+      if source + 1 < offsets.length {
+        let mut slot = offsets[source]
+        while slot < offsets[source + 1] {
+          if !marked.get(styled[slot]) {
+            marked.set(styled[slot], true)
+            run changed.append(styled[slot])
+          }
+          slot = slot + 1
+        }
+      }
+      if source < nodes.firstBySource.length() {
+        let mut box = nodes.firstBySource.get(source)
+        while box != NO_NODE {
+          if !marked.get(box) {
+            marked.set(box, true)
+            run changed.append(box)
+          }
+          box = nodes.node(box).nextContinuation
+        }
+      }
+      at = at + 1
     }
-    if restyled {
-      run changed.append(id)
-      marked.set(id, true)
+    // So do the children of those boxes.
+    let direct = changed.length()
+    at = 0
+    while at < direct {
+      let mut child = nodes.node(changed.get(at)).firstChild
+      while child != NO_NODE {
+        if !marked.get(child) {
+          marked.set(child, true)
+          run changed.append(child)
+        }
+        child = nodes.node(child).nextSibling
+      }
+      at = at + 1
     }
-    id = id + 1
+  } else {
+    let mut id: usize = 0
+    while id < count {
+      let node = nodes.node(id)
+      let mut restyled = changedSince(tree, styleSource(tree, nodes, id), since) || changedSince(tree, node.source, since)
+      if !restyled && node.parent != NO_NODE && marked.get(node.parent) {
+        let parent = nodes.node(node.parent)
+        restyled = changedSince(tree, styleSource(tree, nodes, node.parent), since) || changedSince(tree, parent.source, since)
+      }
+      if restyled {
+        run changed.append(id)
+        marked.set(id, true)
+      }
+      id = id + 1
+    }
   }
   if changed.length() == 0 { return move changed }
   let mut order = List<usize>.make()

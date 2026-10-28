@@ -11,7 +11,7 @@ import box_tree { BoxTree, BoxKind }
 import fragments { FragmentKind, TextFragment, TextFragmentKind }
 import axes { Axes }
 import context { Input, ResolvedBox, resolveBox, resolve, outOfFlow, UNBOUNDED }
-import engine { layoutNode }
+import engine { layoutNode, layoutNodeInPlace }
 import bfc { BfcState, FloatBox, Band }
 import layout_pass { LayoutPass, FullBoxGeometry }
 import text { TextMeasure, TextError, TextToken, TextTokenKind, TextContext, TextCursor, TextRange, TextBreak, TextBreakKind, TextAnalysis, TextShapeRequest, TextRun }
@@ -518,13 +518,13 @@ effect fn sourceBoundaries<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
           probe.fragmentation.sourceBoundary = BreakBoundary.none()
           if nodes.node(item.id).dynamicBefore {
             probe.fragmentation.boundaryProbe = BoundaryProbe.Before
-            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &probe)
+            run layoutNodeInPlace(nodes, &mut output, &mut measurer, item.id, &probe)
             before.merge(output.resumes.get(item.id).before)
             output.restoreCheckpoint(checkpoint)
           }
           if nodes.node(item.id).dynamicAfter {
             probe.fragmentation.boundaryProbe = BoundaryProbe.After
-            drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &probe)
+            run layoutNodeInPlace(nodes, &mut output, &mut measurer, item.id, &probe)
             following.merge(output.resumes.get(item.id).after)
             output.restoreCheckpoint(checkpoint)
           }

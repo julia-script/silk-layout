@@ -9,7 +9,7 @@ import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrie
 import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
 import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, isFlex, scrollable, overflowForAxis, UNBOUNDED }
-import engine { layoutNode, probeNode, probeFresh, normalizeKey, constraintFreeProbe, sizeEmptyBox, emptyIntrinsicWidth }
+import engine { layoutNode, layoutNodeInPlace, probeNode, probeFresh, normalizeKey, constraintFreeProbe, sizeEmptyBox, emptyIntrinsicWidth }
 import layout_pass { LayoutPass, CacheKind }
 import layout_cache { LayoutCache }
 import text { TextMeasure, TextError }
@@ -1393,7 +1393,7 @@ effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
         } else {
           // Unfragmented, layoutNode already stored the child's layout: place
           // it there instead of copying the whole result out.
-          drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &finalInput)
+          run layoutNodeInPlace(nodes, &mut output, &mut measurer, item.id, &finalInput)
           let mut usedMargin = output.boxes[item.id].usedMargin
           let location = itemLocation(nodes, item, &line, style, &axis, box, output.boxes[item.id].size, &mut usedMargin, autoShare, cursor, crossCursor, main, cross)
           let hasClearance = output.boxes[item.id].hasClearance
@@ -1570,7 +1570,7 @@ effect fn discoverItemBefore<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
   request.fragmentation.canBreakBefore = false
   request.fragmentation.forcedStart = false
   request.fragmentation.relaxation = BreakRelaxation.Avoidance
-  drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
+  run layoutNodeInPlace(nodes, &mut output, &mut measurer, item.id, &request)
   let before = output.resumes.get(item.id).before
   output.restoreCheckpoint(checkpoint)
   output.closeCheckpoint(checkpoint)

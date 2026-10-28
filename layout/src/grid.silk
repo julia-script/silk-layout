@@ -5,7 +5,7 @@ import style { Style, DimensionKind, Direction, Align }
 import context { Input, ResolvedBox, childrenInput, resolveBox, resolve }
 import box_tree { BoxTree }
 import layout_pass { LayoutPass }
-import engine { layoutNode, probeNode }
+import engine { layoutNode, layoutNodeInPlace, probeNode }
 import text { TextMeasure, TextError }
 import fragmentation { FragmentationError }
 import axes { Axes }
@@ -267,7 +267,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     request.performLayout = input.performLayout
     request.baselines = input.baselines
     if input.performLayout {
-      drop run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
+      run layoutNodeInPlace(nodes, &mut output, &mut measurer, item.id, &request)
     } else {
       run probeNode(nodes, &mut output, &mut measurer, item.id, &request)
     }

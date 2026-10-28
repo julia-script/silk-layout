@@ -11,7 +11,7 @@ import grid_scratch { GridScratchPool }
 import context { Input }
 import fragmentation { Fragmentainers, Fragmentainer, FragmentAncestor, FragmentationError }
 import breaks { BreakRelaxation, nextRelaxation }
-import engine { layoutNode }
+import engine { layoutNode, layoutNodeInPlace }
 import positioned { positionFragmentedTree }
 import fragment_fit { WidowCheck, collectWidows, validateWidows }
 
@@ -48,7 +48,7 @@ effect fn fitRoot<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let checkpoint = output.checkpoint()
   let mut request = input.*
   while true {
-    drop run layoutNode(nodes, &mut output, &mut measurer, 0, &request)
+    run layoutNodeInPlace(nodes, &mut output, &mut measurer, 0, &request)
     let state = output.resumes.get(0)
     if !state.blocked {
       output.closeCheckpoint(checkpoint)

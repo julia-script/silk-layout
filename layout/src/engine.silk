@@ -139,6 +139,11 @@ effect fn firstContents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
 
 effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if !(input.performLayout && input.fragmentation.active) { return run contentAlgorithm(nodes, &mut output, &mut measurer, id, &input, &box, natural, &mut bfc) }
+  return run fragmentedContents(nodes, &mut output, &mut measurer, id, &input, &box, natural, &mut bfc)
+}
+
+// contents in a fragmented pass, kept out of line so the common path's code stays small.
+effect fn fragmentedContents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator with Intrinsic.inlineNever() {
   let mut resolved = box.*
   let mut request = input.*
   if input.performLayout && input.fragmentation.active {
@@ -190,9 +195,14 @@ effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
 effect fn contentAlgorithm<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, request: &Input, resolved: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if nodes.node(id).kind == BoxKind.InlineFormatting { return run layoutInline(nodes, &mut output, &mut measurer, id, &request, &resolved, &mut bfc) }
   if nodes.node(id).measurement == Measurement.Content { return measureLeaf(nodes, &mut measurer, id, &request, &resolved, &bfc) }
-  if nodes.style(id).replaced { return layoutReplaced(nodes.style(id), &request, &resolved, natural) }
+  if nodes.style(id).replaced { return replacedContents(nodes.style(id), &request, &resolved, natural) }
   if isFlex(nodes.style(id)) { return run layoutFlex(nodes, &mut output, &mut measurer, id, &request, &resolved) }
   return run layoutBlock(nodes, &mut output, &mut measurer, id, nodes.style(id), &request, &resolved, &mut bfc)
+}
+
+// layoutReplaced, kept out of line: replaced boxes are rare on the content path.
+fn replacedContents(style: &Style, input: &Input, box: &ResolvedBox, natural: NaturalDimensions) -> Layout with Intrinsic.inlineNever() {
+  return layoutReplaced(style, &input, &box, natural)
 }
 
 effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, natural: NaturalDimensions, horizontal: bool, minimum: bool) -> f64 ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {

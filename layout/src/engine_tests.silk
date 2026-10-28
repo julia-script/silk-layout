@@ -831,6 +831,7 @@ test effect fn repeatedResizesLayOutAfresh() ! OutOfMemoryError | TextError | Fr
   let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
   let root = tree.root()
   let mut last = root
+  let mut lastBlock = root
   let mut at: usize = 0
   while at < 8 {
     let mut style = Style.make()
@@ -839,13 +840,14 @@ test effect fn repeatedResizesLayOutAfresh() ! OutOfMemoryError | TextError | Fr
     let leaf = run tree.append(block, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
     run tree.setMeasurement(leaf, 0)
     last = leaf
+    lastBlock = block
     at = at + 1
   }
   let mut output = LayoutTree.make()
   let mut content = Content { minimum: 20.0, maximum: 300.0, height: 18.0 }
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(250.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(output.resizeRelaid, "a resize that reaches every box is noted")
+  run Testing.expect(output.relaidMost, "a resize that reaches every box is noted")
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(120.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   let bounds = run output.sourceBounds(last)
   let mut fresh = LayoutTree.make()
@@ -854,4 +856,14 @@ test effect fn repeatedResizesLayOutAfresh() ! OutOfMemoryError | TextError | Fr
   run Testing.expect(bounds.x == expected.x && bounds.y == expected.y && bounds.width == expected.width && bounds.height == expected.height && bounds.width == 118.0, "a resize laid out afresh matches a fresh compute")
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(120.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(output.stats.passes == 0, "an unchanged tree after a fresh resize keeps its output")
+  // An edit after a compute that laid out most boxes is laid out afresh too.
+  let mut wide = Style.make()
+  wide.padding.top = Dimension.px(9.0)
+  run tree.setStyle(lastBlock, move wide)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(120.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let edited = run output.sourceBounds(last)
+  let mut again = LayoutTree.make()
+  run compute(&tree, &mut again, &mut content, OptionalSize.definite(120.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let expectedEdit = run again.sourceBounds(last)
+  run Testing.expect(output.stats.fullLayouts > 1 && edited.x == expectedEdit.x && edited.y == expectedEdit.y && edited.width == expectedEdit.width, "an edit laid out afresh matches a fresh compute")
 }

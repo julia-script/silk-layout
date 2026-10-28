@@ -311,12 +311,17 @@ fn percentEdges(value: &Edges) -> bool {
 // input.parent; descendants resolve against this box's content box. When the
 // box has none and is not orthogonal to its parent, the result cannot depend
 // on input.parent, so equal requests from differently sized parents share an
-// entry. Depends only on the box's own style, so keys stay valid across
-// computes. Anonymous inline formatting roots pass input.parent through.
+// entry. Anonymous inline formatting roots pass input.parent through, and
+// ratio-only replaced boxes fall back to it. Available space on an axis with
+// a known size only reaches descendants through the box's definite size.
+// Depends only on the box's own style, so keys stay valid across computes.
 fn cacheKey(nodes: &BoxTree, id: usize, input: &Input) -> Input {
   let mut key = input.*
+  if key.known.widthDefinite { key.availableWidth = AvailableSpace.maxContent() }
+  if key.known.heightDefinite { key.availableHeight = AvailableSpace.maxContent() }
   if nodes.node(id).kind == BoxKind.InlineFormatting { return key }
   let style = nodes.style(id)
+  if style.replaced { return key }
   if (style.writingMode == WritingMode.HorizontalTb) != (input.parentWritingMode == WritingMode.HorizontalTb) { return key }
   if percentLike(style.width) || percentLike(style.height) || percentLike(style.minWidth) || percentLike(style.minHeight) || percentLike(style.maxWidth) || percentLike(style.maxHeight) { return key }
   if percentEdges(&style.padding) || percentEdges(&style.margin) || percentEdges(&style.inset) { return key }

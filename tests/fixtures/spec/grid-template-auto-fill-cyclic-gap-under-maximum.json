@@ -1,0 +1,111 @@
+{
+  "name": "grid-template-auto-fill-cyclic-gap-under-maximum",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-repeat",
+    "https://drafts.csswg.org/css-grid-2/#gutters",
+    "https://drafts.csswg.org/css-gaps-1/#gap-percent"
+  ],
+  "derivation": "The preferred inline size is indefinite, so the cyclic percentage gap contributes zero while finding intrinsic size and repeat count: five 20px tracks fit the 100px maximum. Final 10% gaps resolve to 10px against that intrinsic width and overflow without enlarging the container.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "maxWidth": 100,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fill",
+                "tracks": [
+                  20
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "gridAutoRows": [
+            10
+          ],
+          "columnGap": {
+            "percent": 0.1
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 30,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 60,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 90,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 120,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

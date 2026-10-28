@@ -1,0 +1,119 @@
+{
+  "name": "grid-template-integer-repeat-both-axes-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Each two-track pattern repeats twice. Columns total 60 plus three 2px gutters; rows total 32 plus three 1px gutters.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 66,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": 2,
+                "tracks": [
+                  10,
+                  20
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            {
+              "repeat": {
+                "count": 2,
+                "tracks": [
+                  7,
+                  9
+                ]
+              }
+            }
+          ],
+          "columnGap": 2,
+          "rowGap": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  }
+}

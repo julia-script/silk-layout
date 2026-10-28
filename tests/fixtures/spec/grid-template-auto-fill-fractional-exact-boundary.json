@@ -1,0 +1,167 @@
+{
+  "name": "grid-template-auto-fill-fractional-exact-boundary",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Ten 2.1px tracks exactly fill 21px. Repetition counting must not drop a track because the algebraic quotient rounds just below an integer.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 21,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fill",
+                "tracks": [
+                  2.1
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "gridAutoRows": [
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 21,
+        "height": 20
+      },
+      {
+        "x": 0.0,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 2.1,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 4.2,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 6.300000000000001,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 8.4,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 10.5,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 12.600000000000001,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 14.700000000000001,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 16.8,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 18.900000000000002,
+        "y": 0,
+        "width": 2.1,
+        "height": 10
+      },
+      {
+        "x": 0.0,
+        "y": 10,
+        "width": 2.1,
+        "height": 10
+      }
+    ]
+  }
+}

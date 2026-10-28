@@ -1,0 +1,264 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.list { List }
+import silk.string { String }
+import silk.testing { Testing, AssertionError }
+import grid_style { GridLine, GridLineKind, GridNamedLine, GridArea }
+import grid_lines { LineNames, prepareLineNames, resolveSpan }
+
+fn line(number: i32, name: usize) -> GridLine {
+  return GridLine { kind: GridLineKind.Line, number: number, name: name }
+}
+
+fn span(number: i32, name: usize) -> GridLine {
+  return GridLine { kind: GridLineKind.Span, number: number, name: name }
+}
+
+effect fn intern(values: &[string]) -> List<String>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  let mut result = List<String>.make()
+  let mut at: usize = 0
+  while at < values.length {
+    run result.append(run String.copy(values[at]))
+    at = at + 1
+  }
+  return move result
+}
+
+// These coordinates follow Grid 2 §8.3; all positions are zero-based.
+test effect fn namedLineOccurrencesDeduplicateAndCountBothDirections()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let labels: [string; 2] = ["", "edge"]
+  let names = run intern(&labels) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines: [GridNamedLine; 5] = [
+    GridNamedLine { line: 5, name: 1, repeat: 0 },
+    GridNamedLine { line: 2, name: 1, repeat: 1 },
+    GridNamedLine { line: 0, name: 1, repeat: 0 },
+    GridNamedLine { line: 2, name: 1, repeat: 2 },
+    GridNamedLine { line: 5, name: 1, repeat: 0 },
+  ]
+  let areas: [GridArea; 0] = []
+  let mut index = LineNames.make()
+  run prepareLineNames(&lines, &areas, names.asSlice(), true, &mut index)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let positive = resolveSpan(&line(2, 1), &GridLine.auto(), 6, &index)
+  let negative = resolveSpan(&line(-2, 1), &GridLine.auto(), 6, &index)
+  let overflow = resolveSpan(&line(5, 1), &line(-5, 1), 6, &index)
+  run Testing.expect(
+    positive.definite && positive.start == 2 && positive.end == 3,
+    "second occurrence ignores duplicate names on a merged boundary",
+  )
+  run Testing.expect(
+    negative.start == 2 && negative.end == 3,
+    "negative occurrences count unique lines from the explicit end",
+  )
+  run Testing.expect(
+    overflow.start == -2 && overflow.end == 8,
+    "unmatched occurrence counts continue beyond the corresponding explicit edge",
+  )
+}
+
+test effect fn bareAreaAliasesMergeWithExplicitGeneratedNames()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let labels: [string; 4] = ["", "panel", "panel-start", "panel-end"]
+  let names = run intern(&labels) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines: [GridNamedLine; 4] = [
+    GridNamedLine { line: 1, name: 2, repeat: 0 },
+    GridNamedLine { line: 2, name: 2, repeat: 0 },
+    GridNamedLine { line: 5, name: 3, repeat: 0 },
+    GridNamedLine { line: 0, name: 1, repeat: 0 },
+  ]
+  let areas: [GridArea; 1] = [
+    GridArea { name: 1, rowStart: 0, rowEnd: 2, columnStart: 2, columnEnd: 4 },
+  ]
+  let mut index = LineNames.make()
+  run prepareLineNames(&lines, &areas, names.asSlice(), true, &mut index)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let bare = resolveSpan(&line(0, 1), &line(0, 1), 6, &index)
+  let exact = resolveSpan(&line(1, 1), &GridLine.auto(), 6, &index)
+  let merged = resolveSpan(&line(2, 2), &line(-2, 3), 6, &index)
+  let deduplicated = resolveSpan(&line(3, 2), &GridLine.auto(), 6, &index)
+  run Testing.expect(
+    bare.start == 1 && bare.end == 4,
+    "bare sides choose the first generated-name line, whether explicit or area-derived",
+  )
+  run Testing.expect(
+    exact.start == 0 && exact.end == 1,
+    "integer plus name never searches the bare-side aliases",
+  )
+  run Testing.expect(
+    merged.start == 2 && merged.end == 4,
+    "explicit and implicit generated names merge for positive and negative occurrences",
+  )
+  run Testing.expect(
+    deduplicated.start == 7,
+    "an explicit name coinciding with its area boundary counts only once",
+  )
+}
+
+test effect fn implicitAreaAliasesNeedNoGeneratedInternedStrings()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let labels: [string; 2] = ["", "content"]
+  let names = run intern(&labels) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines: [GridNamedLine; 0] = []
+  let areas: [GridArea; 1] = [
+    GridArea { name: 1, rowStart: 1, rowEnd: 4, columnStart: 2, columnEnd: 5 },
+  ]
+  let mut index = LineNames.make()
+  run prepareLineNames(&lines, &areas, names.asSlice(), false, &mut index)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let rows = resolveSpan(&line(0, 1), &line(0, 1), 6, &index)
+  run Testing.expect(
+    rows.start == 1 && rows.end == 4,
+    "area-only names resolve row edges without allocating generated strings",
+  )
+  run prepareLineNames(&lines, &areas, names.asSlice(), true, &mut index)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let columns = resolveSpan(&line(0, 1), &line(0, 1), 6, &index)
+  run Testing.expect(
+    columns.start == 2 && columns.end == 5,
+    "repreparation replaces row aliases with column aliases",
+  )
+  let noAreas: [GridArea; 0] = []
+  run prepareLineNames(&lines, &noAreas, names.asSlice(), true, &mut index)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let cleared = resolveSpan(&line(0, 1), &GridLine.auto(), 6, &index)
+  run Testing.expect(cleared.start == 7, "reusable indexes do not retain removed area aliases")
+}
+
+test effect fn explicitGeneratedNamesProvideBareAliasesWithoutAreas()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let labels: [string; 6] = ["", "zone-end", "zone", "zone-start", "plain", "other"]
+  let names = run intern(&labels) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines: [GridNamedLine; 4] = [
+    GridNamedLine { line: 4, name: 1, repeat: 0 },
+    GridNamedLine { line: 1, name: 3, repeat: 0 },
+    GridNamedLine { line: 0, name: 2, repeat: 0 },
+    GridNamedLine { line: 2, name: 4, repeat: 0 },
+  ]
+  let areas: [GridArea; 0] = []
+  let mut index = LineNames.make()
+  run prepareLineNames(&lines, &areas, names.asSlice(), true, &mut index)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let bare = resolveSpan(&line(0, 2), &line(0, 2), 5, &index)
+  let fallback = resolveSpan(&line(0, 4), &GridLine.auto(), 5, &index)
+  let missing = resolveSpan(&line(0, 5), &line(-2, 5), 5, &index)
+  run Testing.expect(
+    bare.start == 1 && bare.end == 4,
+    "explicit suffixed names create bare aliases even with no declared area",
+  )
+  run Testing.expect(
+    fallback.start == 2,
+    "a bare name without an alias falls back to its first exact line",
+  )
+  run Testing.expect(
+    missing.start == -2 && missing.end == 6,
+    "missing names use implicit lines and still repair reversed endpoints",
+  )
+}
+
+test effect fn namedSpansSkipOppositeSideImplicitLines()
+  ! AssertionError<'static> {
+  let index = LineNames.make()
+  let backwards = resolveSpan(&span(2, 1), &line(9, 0), 4, &index)
+  let forwards = resolveSpan(&line(-9, 0), &span(2, 1), 4, &index)
+  let beyondEnd = resolveSpan(&line(9, 0), &span(2, 1), 4, &index)
+  let beforeStart = resolveSpan(&span(2, 1), &line(-9, 0), 4, &index)
+  run Testing.expect(
+    backwards.start == -2 && backwards.end == 8,
+    "a startward named span skips unnamed endward implicit lines",
+  )
+  run Testing.expect(
+    forwards.start == -4 && forwards.end == 6,
+    "an endward named span skips unnamed startward implicit lines",
+  )
+  run Testing.expect(
+    beyondEnd.start == 8 && beyondEnd.end == 10,
+    "an anchor already beyond the end counts subsequent implicit lines",
+  )
+  run Testing.expect(
+    beforeStart.start == -6 && beforeStart.end == -4,
+    "an anchor already before the start counts preceding implicit lines",
+  )
+}
+
+test effect fn namedSpansCountStrictlyBeyondTheirAnchor()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let labels: [string; 2] = ["", "mark"]
+  let names = run intern(&labels) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines: [GridNamedLine; 3] = [
+    GridNamedLine { line: 0, name: 1, repeat: 0 },
+    GridNamedLine { line: 2, name: 1, repeat: 0 },
+    GridNamedLine { line: 5, name: 1, repeat: 0 },
+  ]
+  let areas: [GridArea; 0] = []
+  let mut index = LineNames.make()
+  run prepareLineNames(&lines, &areas, names.asSlice(), true, &mut index)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let forward = resolveSpan(&line(3, 0), &span(2, 1), 5, &index)
+  let backward = resolveSpan(&span(2, 1), &line(3, 0), 5, &index)
+  let fromBefore = resolveSpan(&line(-9, 0), &span(2, 1), 5, &index)
+  let fromAfter = resolveSpan(&span(2, 1), &line(9, 0), 5, &index)
+  run Testing.expect(
+    forward.start == 2 && forward.end == 6,
+    "forward span excludes its named anchor and continues after explicit matches",
+  )
+  run Testing.expect(
+    backward.start == -1 && backward.end == 2,
+    "backward span excludes its named anchor and continues before explicit matches",
+  )
+  run Testing.expect(
+    fromBefore.start == -3 && fromBefore.end == 2,
+    "forward search from before the grid counts explicit boundary names",
+  )
+  run Testing.expect(
+    fromAfter.start == 2 && fromAfter.end == 8,
+    "backward search from after the grid counts explicit boundary names",
+  )
+}
+
+test effect fn namedPlacementRepairsEqualLinesAndUnanchoredSpans()
+  ! AssertionError<'static> {
+  let index = LineNames.make()
+  let equal = resolveSpan(&line(1, 1), &line(1, 1), 3, &index)
+  let lone = resolveSpan(&GridLine.auto(), &span(8, 1), 3, &index)
+  let bothNamed = resolveSpan(&span(8, 1), &span(3, 0), 3, &index)
+  let firstNumeric = resolveSpan(&span(3, 0), &span(8, 1), 3, &index)
+  run Testing.expect(
+    equal.definite && equal.start == 4 && equal.end == 5,
+    "equal named endpoints discard the end and use a one-track span",
+  )
+  run Testing.expect(
+    !lone.definite && lone.start == 0 && lone.end == 1,
+    "an unanchored named span becomes one regardless of its count",
+  )
+  run Testing.expect(
+    !bothNamed.definite && bothNamed.end == 1,
+    "discarding the second span leaves the first named span as one",
+  )
+  run Testing.expect(
+    !firstNumeric.definite && firstNumeric.end == 3,
+    "discarding the second named span preserves a first numeric span",
+  )
+}
+
+test effect fn namedAndNumericOccurrencesBoundLargeCoordinates()
+  ! AssertionError<'static> {
+  let index = LineNames.make()
+  let bounded = resolveSpan(&line(20000, 0), &span(20000, 0), 20000, &index)
+  let namedBounded = resolveSpan(&line(20000, 1), &GridLine.auto(), 20000, &index)
+  run Testing.expect(
+    bounded.start == 9999 && bounded.end == 19999,
+    "numeric coordinates preserve bounded 10000-track arithmetic",
+  )
+  run Testing.expect(
+    namedBounded.start == 20000 && namedBounded.end == 20001,
+    "missing named occurrences and explicit extent are individually bounded",
+  )
+}

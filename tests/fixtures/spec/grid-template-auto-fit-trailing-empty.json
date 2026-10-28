@@ -1,0 +1,82 @@
+{
+  "name": "grid-template-auto-fit-trailing-empty",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-repeat",
+    "https://drafts.csswg.org/css-grid-2/#gutters",
+    "https://drafts.csswg.org/css-grid-2/#fr-unit"
+  ],
+  "derivation": "Three repetitions fit the fixed 20px minima. One empty track collapses. Two remaining fr tracks share 90px after one 10px gutter; interior collapsed gutters coincide rather than adding.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fit",
+                "tracks": [
+                  {
+                    "minmax": [
+                      20,
+                      {
+                        "fr": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "columnGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 45,
+        "height": 10
+      },
+      {
+        "x": 55,
+        "y": 0,
+        "width": 45,
+        "height": 10
+      }
+    ]
+  }
+}

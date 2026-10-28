@@ -1,0 +1,60 @@
+{
+  "name": "grid-template-auto-fit-row-axis-column-flow-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "The 100px block axis admits four rows. Column flow occupies the first three; the empty fourth row and trailing gutter collapse, leaving 70px of fixed track extent.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "height": 100,
+          "gridTemplateColumns": [
+            30,
+            30
+          ],
+          "gridTemplateRows": [
+            {
+              "repeat": {
+                "count": "auto-fit",
+                "tracks": [
+                  20
+                ]
+              }
+            }
+          ],
+          "rowGap": 5,
+          "gridAutoFlow": "column"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  }
+}

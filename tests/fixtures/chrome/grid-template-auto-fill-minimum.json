@@ -1,0 +1,61 @@
+{
+  "name": "grid-template-auto-fill-minimum-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "The smallest count meeting the 70px minimum is three: 3*20+2*5=70.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fill",
+                "tracks": [
+                  20
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "gridAutoRows": [
+            10
+          ],
+          "columnGap": 5,
+          "minWidth": 70
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  }
+}

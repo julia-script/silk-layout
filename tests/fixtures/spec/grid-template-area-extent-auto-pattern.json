@@ -1,0 +1,125 @@
+{
+  "name": "grid-template-area-extent-auto-pattern",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Areas establish three explicit columns and two explicit rows. Unsized columns cycle 10,15 after the authored 20; the unsized row is 8. Negative lines use the area-defined explicit end.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 45,
+          "gridTemplateColumns": [
+            20
+          ],
+          "gridAutoColumns": [
+            10,
+            15
+          ],
+          "gridTemplateRows": [
+            12
+          ],
+          "gridAutoRows": [
+            8
+          ],
+          "gridTemplateAreas": [
+            [
+              "head",
+              "head",
+              "head"
+            ],
+            [
+              "side",
+              "main",
+              "main"
+            ]
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": "head",
+          "gridRowEnd": "head",
+          "gridColumnStart": "head",
+          "gridColumnEnd": "head"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": "side",
+          "gridRowEnd": "side",
+          "gridColumnStart": "side",
+          "gridColumnEnd": "side"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": "main",
+          "gridRowEnd": "main",
+          "gridColumnStart": "main",
+          "gridColumnEnd": "main"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": -2,
+          "gridColumnEnd": -1,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 45,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 45,
+        "height": 12
+      },
+      {
+        "x": 0,
+        "y": 12,
+        "width": 20,
+        "height": 8
+      },
+      {
+        "x": 20,
+        "y": 12,
+        "width": 25,
+        "height": 8
+      },
+      {
+        "x": 30,
+        "y": 0,
+        "width": 15,
+        "height": 12
+      }
+    ]
+  }
+}

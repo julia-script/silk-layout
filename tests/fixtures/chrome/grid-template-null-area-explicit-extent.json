@@ -1,0 +1,74 @@
+{
+  "name": "grid-template-null-area-explicit-extent-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Even null cells establish a three-column, two-row explicit grid. With no authored sizes, automatic patterns provide 10px columns and 7,9px rows.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 30,
+          "gridTemplateAreas": [
+            [
+              ".",
+              ".",
+              "."
+            ],
+            [
+              ".",
+              ".",
+              "."
+            ]
+          ],
+          "gridAutoColumns": [
+            10
+          ],
+          "gridAutoRows": [
+            7,
+            9
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  }
+}

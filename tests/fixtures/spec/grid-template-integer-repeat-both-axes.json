@@ -1,0 +1,225 @@
+{
+  "name": "grid-template-integer-repeat-both-axes",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Each two-track pattern repeats twice. Columns total 60 plus three 2px gutters; rows total 32 plus three 1px gutters.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 66,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": 2,
+                "tracks": [
+                  10,
+                  20
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            {
+              "repeat": {
+                "count": 2,
+                "tracks": [
+                  7,
+                  9
+                ]
+              }
+            }
+          ],
+          "columnGap": 2,
+          "rowGap": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 66,
+        "height": 35
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 7
+      },
+      {
+        "x": 12,
+        "y": 0,
+        "width": 20,
+        "height": 7
+      },
+      {
+        "x": 34,
+        "y": 0,
+        "width": 10,
+        "height": 7
+      },
+      {
+        "x": 46,
+        "y": 0,
+        "width": 20,
+        "height": 7
+      },
+      {
+        "x": 0,
+        "y": 8,
+        "width": 10,
+        "height": 9
+      },
+      {
+        "x": 12,
+        "y": 8,
+        "width": 20,
+        "height": 9
+      },
+      {
+        "x": 34,
+        "y": 8,
+        "width": 10,
+        "height": 9
+      },
+      {
+        "x": 46,
+        "y": 8,
+        "width": 20,
+        "height": 9
+      },
+      {
+        "x": 0,
+        "y": 18,
+        "width": 10,
+        "height": 7
+      },
+      {
+        "x": 12,
+        "y": 18,
+        "width": 20,
+        "height": 7
+      },
+      {
+        "x": 34,
+        "y": 18,
+        "width": 10,
+        "height": 7
+      },
+      {
+        "x": 46,
+        "y": 18,
+        "width": 20,
+        "height": 7
+      },
+      {
+        "x": 0,
+        "y": 26,
+        "width": 10,
+        "height": 9
+      },
+      {
+        "x": 12,
+        "y": 26,
+        "width": 20,
+        "height": 9
+      },
+      {
+        "x": 34,
+        "y": 26,
+        "width": 10,
+        "height": 9
+      },
+      {
+        "x": 46,
+        "y": 26,
+        "width": 20,
+        "height": 9
+      }
+    ]
+  }
+}

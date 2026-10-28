@@ -1,0 +1,106 @@
+{
+  "name": "grid-template-adjacent-repeat-outer-names-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Expanded tracks are 10,10,20,20. Outer join names the shared repeat boundary at 20, end is at 60, and the second inner z is also at 20.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "gridTemplateColumns": [
+            {
+              "names": [
+                "outer"
+              ]
+            },
+            {
+              "repeat": {
+                "count": 2,
+                "tracks": [
+                  {
+                    "names": [
+                      "a"
+                    ]
+                  },
+                  10,
+                  {
+                    "names": [
+                      "z"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "names": [
+                "join"
+              ]
+            },
+            {
+              "repeat": {
+                "count": 2,
+                "tracks": [
+                  {
+                    "names": [
+                      "b"
+                    ]
+                  },
+                  20,
+                  {
+                    "names": [
+                      "q"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "names": [
+                "end"
+              ]
+            }
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": "join",
+          "gridColumnEnd": "end",
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "line": 2,
+            "name": "z"
+          },
+          "gridRowStart": 2
+        }
+      }
+    ]
+  }
+}

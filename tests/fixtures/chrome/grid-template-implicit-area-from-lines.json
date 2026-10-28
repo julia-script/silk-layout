@@ -1,0 +1,69 @@
+{
+  "name": "grid-template-implicit-area-from-lines-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Explicit panel-start/panel-end names create the referenced area even without grid-template-areas; its column interval is 10..30 and row interval 5..20.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "gridTemplateColumns": [
+            10,
+            {
+              "names": [
+                "panel-start"
+              ]
+            },
+            20,
+            {
+              "names": [
+                "panel-end"
+              ]
+            },
+            30
+          ],
+          "gridTemplateRows": [
+            5,
+            {
+              "names": [
+                "panel-start"
+              ]
+            },
+            15,
+            {
+              "names": [
+                "panel-end"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": "panel",
+          "gridRowEnd": "panel",
+          "gridColumnStart": "panel",
+          "gridColumnEnd": "panel"
+        }
+      }
+    ]
+  }
+}

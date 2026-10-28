@@ -5,7 +5,7 @@ import silk.ownership { Copy }
 import silk.usize
 import context { Input }
 import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind, Rect }
-import fragments { FragmentArena }
+import fragments { FragmentArena, Shift }
 import bfc { FloatBox }
 import silk.slice { Slice }
 import inline_prepared { KeptText }
@@ -103,6 +103,14 @@ fn sameInput(a: &Input, b: &Input) -> bool {
 // clearance side effects. LayoutTree keeps the cache between computes, and
 // compute clears the boxes whose sources changed, their subtrees and their
 // ancestors, because an ancestor's size can depend on any descendant.
+fn shiftedRange(range: FinalRange, shift: Shift) -> FinalRange {
+  if !range.valid || range.end <= shift.start { return range }
+  let mut result = range
+  result.start = shift.apply(range.start)
+  result.end = shift.apply(range.end)
+  return result
+}
+
 pub struct LayoutCache {
   heads: List<usize>,
   entries: List<Entry>,
@@ -203,6 +211,23 @@ impl LayoutCache {
   // A box of a subtree kept in place has its previous range again.
   pub fn keepRange(self: &mut Self, id: usize) {
     if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { self.ranges.set(id, self.keptRanges.get(self.rangeSlots.get(id))) }
+  }
+  // Moves the previous compute's ranges along with its fragments (see
+  // FragmentArena.shiftPrevious); a range across the shift's start grows or
+  // shrinks with it.
+  pub fn shiftRanges(self: &mut Self, shift: Shift) {
+    let mut id: usize = 0
+    while id < self.ranges.length() {
+      if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation {
+        let slot = self.rangeSlots.get(id)
+        let kept = shiftedRange(self.keptRanges.get(slot), shift)
+        self.keptRanges.set(slot, kept)
+      } else {
+        let range = shiftedRange(self.ranges.get(id), shift)
+        self.ranges.set(id, range)
+      }
+      id = id + 1
+    }
   }
   pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize, floats: &[FloatBox], beside: bool) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.results.length() {

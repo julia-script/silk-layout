@@ -159,9 +159,11 @@ test effect fn tabStopsUseReplaceableSpaceAndZeroGlyphMetrics() ! OutOfMemoryErr
   run compute(&tree, &mut output, &mut provider, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect((run output.sourceBounds(text)).width == 33.0, "tab stops use measured space advance, not a fraction of font size")
   provider.spaceAdvance = 3.0
+  output.invalidate()
   run compute(&tree, &mut output, &mut provider, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect((run output.sourceBounds(text)).width == 17.0, "replacing space metrics recomputes tab stops without changing the source tree")
   provider.zeroAdvance = 20.0
+  output.invalidate()
   run compute(&tree, &mut output, &mut provider, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect((run output.sourceBounds(text)).width == 29.0, "half-ch clearance uses the replacement zero-glyph metric")
 }
@@ -281,6 +283,7 @@ test effect fn textProviderReplacementClearsForcedLinesAndRecomputesAdvances() !
   let forced = run output.sourceBounds(text)
   run Testing.expect(forced.x == 25.0 && forced.width == 15.0 && forced.height == 20.0, "a forced break survives nowrap and applies last-line alignment before the paragraph end")
   let mut replacement = Paragraph { forced: false, advance: 7.0, zeroHeight: false, levelBoundary: false }
+  output.invalidate()
   run compute(&tree, &mut output, &mut replacement, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   let joined = run output.sourceBounds(text)
   run Testing.expect(joined.x == 5.0 && joined.width == 35.0 && joined.height == 10.0, "replacement text measurements discard previous fragments, line breaks, and advances without changing the source tree")
@@ -358,6 +361,8 @@ test effect fn measurementProviderCanBeReplacedWithoutChangingTree() ! OutOfMemo
   run Testing.expect(first.size.width == 80.0 && first.size.height == 18.0, "inline block shrink-to-fit uses provider's intrinsic widths")
   content.maximum = 45.0
   content.height = 30.0
+  // New content behind an unchanged measurement key is invisible to the tree.
+  run tree.markDirty(root)
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(80.0, 200.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   let second = output.boxes.get(output.firstBySource.get(root.index))
   run Testing.expect(second.size.width == 45.0 && second.size.height == 30.0, "recomputation must not retain stale external measurements")
@@ -379,6 +384,7 @@ test effect fn naturalMeasurementReplacementUpdatesPreferredRatioWithoutTreeChan
   let first = output.boxes.get(output.firstBySource.get(image.index))
   run Testing.expect(first.size.width == 40.0 && first.size.height == 20.0, "natural ratio transfers the specified height")
   let mut replacement = Content { minimum: 0.0, maximum: 90.0, height: 30.0 }
+  output.invalidate()
   run compute(&tree, &mut output, &mut replacement, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   let second = output.boxes.get(output.firstBySource.get(image.index))
   run Testing.expect(second.size.width == 60.0 && second.size.height == 20.0, "provider replacement refreshes natural dimensions and ratio")
@@ -403,12 +409,14 @@ test effect fn reusedOutputClearsOverflowAcrossBoxGenerationChanges() ! OutOfMem
   let hiddenStyles = tree.styles.asMutSlice()
   hiddenStyles[rootStyleIndex].display = Display.None
   drop hiddenStyles
+  run tree.markDirty(root)
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(60.0, 40.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   let hiddenChild = run output.sourceBounds(child)
   run Testing.expect(output.viewportOverflow.width == 60.0 && output.viewportOverflow.height == 40.0 && output.firstBySource.get(root.index) == NO_NODE && output.firstBySource.get(child.index) == NO_NODE && hiddenChild.width == 0.0 && hiddenChild.height == 0.0, "suppression clears prior overflow and generated boxes and uses the new viewport")
   let contentsStyles = tree.styles.asMutSlice()
   contentsStyles[rootStyleIndex].display = Display.Contents
   drop contentsStyles
+  run tree.markDirty(root)
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(60.0, 40.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   let boxlessRoot = run output.sourceBounds(root)
   run Testing.expect(output.viewportOverflow.width == 300.0 && output.viewportOverflow.height == 200.0 && output.firstBySource.get(root.index) == NO_NODE && output.firstBySource.get(child.index) != NO_NODE && boxlessRoot.width == 0.0 && boxlessRoot.height == 0.0, "contents restores generated descendants without a root box")
@@ -481,6 +489,8 @@ test effect fn rootAutoMarginsUseClampedBorderBoxWidth() ! OutOfMemoryError | Te
   let styles = tree.styles.asMutSlice()
   styles[rootStyleIndex].margin.right = Dimension.auto()
   drop styles
+  let rootId = tree.root()
+  run tree.markDirty(rootId)
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   let centered = output.boxes.get(output.firstBySource.get(tree.root().index))
   run Testing.expect(centered.location.x == 331.5, "two auto margins split positive space")
@@ -575,4 +585,68 @@ test effect fn blockInterruptionKeepsGeometryWithoutClonedPaintOrOverflow() ! Ou
     index = index + 1
   }
   run Testing.expect(interruptions == 1 && painted == 2, "one nonpainting interruption separates the two real inline continuations")
+}
+
+test effect fn keptSizesSurviveUntilTheirSourcesChange() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  style.width = Dimension.px(300.0)
+  let mut tree = run Tree.make(move style) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let first = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let second = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let third = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(first, 0)
+  run tree.setMeasurement(third, 0)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 20.0, maximum: 60.0, height: 18.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let probes = output.stats.sizeProbes
+  run Testing.expect(probes > 0 && output.boxes.get(output.firstBySource.get(third.index)).location.x == 60.0, "flex items are sized by probes")
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.stats.sizeProbes == 0 && output.stats.fullLayouts == 0, "an unchanged tree reuses every kept result")
+  let mut wide = Style.make()
+  wide.width = Dimension.px(100.0)
+  run tree.setStyle(second, move wide)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.stats.sizeProbes < probes && output.boxes.get(output.firstBySource.get(third.index)).location.x == 160.0, "a style change recomputes its box and ancestors and moves later siblings")
+  content.maximum = 80.0
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.boxes.get(output.firstBySource.get(third.index)).location.x == 160.0, "provider changes are invisible until the caller reports them")
+  output.invalidate()
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.boxes.get(output.firstBySource.get(third.index)).location.x == 180.0 && output.stats.cacheHits == 0, "invalidate discards every kept result")
+}
+
+test effect fn cleanSubtreesAreCopiedNotLaidOut() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  style.width = Dimension.px(300.0)
+  let mut tree = run Tree.make(move style) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut panelStyle = Style.make()
+  panelStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  let first = run tree.append(root, move panelStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let second = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let leaf = run tree.append(first, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(leaf, 0)
+  run tree.setMeasurement(second, 0)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 20.0, maximum: 60.0, height: 18.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let fragments = output.fragments.values.length()
+  let leafBounds = run output.sourceBounds(leaf)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let copied = run output.sourceBounds(leaf)
+  run Testing.expect(output.stats.fullLayouts == 0 && output.stats.reusedLayouts == 1 && output.fragments.values.length() == fragments && copied.x == leafBounds.x && copied.width == leafBounds.width, "an unchanged tree copies the root's previous fragments")
+  let mut wide = Style.make()
+  wide.width = Dimension.px(100.0)
+  run tree.setStyle(second, move wide)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let moved = run output.sourceBounds(second)
+  run Testing.expect(moved.x == 60.0 && moved.width == 100.0, "a sibling change moves the sibling")
+  run Testing.expect(output.stats.reusedLayouts == 1, "a sibling change re-lays the root and copies the clean panel")
+  run Testing.expect(output.fragments.values.length() == fragments, "copied fragments replace, not add to, the panel")
 }

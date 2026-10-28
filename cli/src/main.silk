@@ -379,14 +379,47 @@ fn elapsed(start: &Instant, end: &Instant) -> i64 {
     + SystemClock.nanoseconds(end) - SystemClock.nanoseconds(start)
 }
 
-// Benchmark mode: one line on stderr with every compute duration in nanoseconds.
-effect fn reportSamples(samples: &List<i64>) ! JsonError | WriterError {
-  let mut stderr = StderrWriter.make()
-  run writeSamples(samples) |> Effect.provideMut<Writer>(&mut stderr)
+// Work summed over the timed computes of a benchmark run.
+struct Work {
+  computes: usize, passes: usize, fullLayouts: usize, sizeProbes: usize, cacheHits: usize, reused: usize,
 }
 
-effect fn writeSamples(samples: &List<i64>) ! JsonError | WriterError ? &mut Writer {
-  run Writer.writeString("{\"layoutNs\":[")
+fn addWork(work: &mut Work, output: &LayoutTree) {
+  work.computes = work.computes + 1
+  work.passes = work.passes + output.stats.passes
+  work.fullLayouts = work.fullLayouts + output.stats.fullLayouts
+  work.sizeProbes = work.sizeProbes + output.stats.sizeProbes
+  work.cacheHits = work.cacheHits + output.stats.cacheHits
+  work.reused = work.reused + output.stats.reusedLayouts
+}
+
+// Benchmark mode: one line on stderr with every compute duration in
+// nanoseconds and the average work per timed compute.
+effect fn reportSamples(samples: &List<i64>, work: &Work, fixtures: &Fixtures) ! JsonError | WriterError {
+  let mut stderr = StderrWriter.make()
+  run writeSamples(samples, work, fixtures) |> Effect.provideMut<Writer>(&mut stderr)
+}
+
+effect fn writeSamples(samples: &List<i64>, work: &Work, fixtures: &Fixtures) ! JsonError | WriterError ? &mut Writer {
+  let computes = work.computes
+  let passes = work.passes / computes
+  let fullLayouts = work.fullLayouts / computes
+  let sizeProbes = work.sizeProbes / computes
+  let cacheHits = work.cacheHits / computes
+  let reused = work.reused / computes
+  let measures = fixtures.measureCalls / computes
+  let analyses = fixtures.analyzeCalls / computes
+  let shapes = fixtures.shapeCalls / computes
+  run Writer.writeString("{\"passes\":")
+  run Json.serialize(&passes, &JsonOptions.compact())
+  run field("fullLayouts", &fullLayouts)
+  run field("sizeProbes", &sizeProbes)
+  run field("cacheHits", &cacheHits)
+  run field("reusedLayouts", &reused)
+  run field("measureCalls", &measures)
+  run field("analyzeCalls", &analyses)
+  run field("shapeCalls", &shapes)
+  run Writer.writeString(",\"layoutNs\":[")
   let mut index: usize = 0
   while index < samples.length() {
     if index > 0 { run Writer.writeString(",") }
@@ -396,13 +429,55 @@ effect fn writeSamples(samples: &List<i64>) ! JsonError | WriterError ? &mut Wri
   run Writer.writeString("]}\n")
 }
 
+fn resetCounters(fixtures: &mut Fixtures) {
+  fixtures.measureCalls = 0
+  fixtures.analyzeCalls = 0
+  fixtures.shapeCalls = 0
+}
+
+// One step of an update benchmark: `viewport` replaces the viewport, and each
+// `set` entry replaces a node's whole style or a text node's text.
+effect fn applyStep(step: &Value, tree: &mut Tree, current: OptionalSize, fonts: usize) -> OptionalSize
+  ! ProtocolError | OutOfMemoryError | InvalidNode ? &mut Allocator {
+  let mut viewport = current
+  run P.fields(step, &["viewport", "set"])
+  if P.has(step, "viewport") {
+    let value = run P.required(step, "viewport")
+    run P.fields(value, &["width", "height"])
+    viewport = OptionalSize.definite(
+      run P.number(run P.required(value, "width")),
+      run P.number(run P.required(value, "height")))
+  }
+  if !P.has(step, "set") { return viewport }
+  let changes = run P.array(run P.required(step, "set"))
+  let mut index: usize = 0
+  while index < changes.length {
+    let change = run P.item(&changes[index])
+    run P.fields(change, &["node", "style", "text"])
+    let node = run P.integer(run P.required(change, "node"))
+    if node < 0 { fail P.invalid("set.node must be a node index") }
+    let id = NodeId { index: i32.toUsize(node) }
+    if P.has(change, "style") {
+      let style = run Styles.parse(run P.required(change, "style"))
+      if style.fontKey >= fonts { fail P.invalid("fontKey does not identify a supplied font") }
+      run tree.setStyle(id, move style)
+    }
+    if P.has(change, "text") {
+      let text = run String.copy(run P.text(run P.required(change, "text")))
+      run tree.setText(id, move text)
+    }
+    index = index + 1
+  }
+  return viewport
+}
+
 effect fn execute(document: &Value)
   ! ProtocolError | OutOfMemoryError | InvalidNode | JsonError | WriterError | TextError | FragmentationError
   ? &mut Allocator | &mut Writer {
-  run P.fields(document, &["viewport", "viewportScrollOffset", "scrollbars", "fonts", "nodes", "fragmentation", "benchmark"])
+  run P.fields(document, &["viewport", "viewportScrollOffset", "scrollbars", "fonts", "nodes", "fragmentation", "benchmark", "updates"])
   let viewportValue = run P.required(document, "viewport")
   run P.fields(viewportValue, &["width", "height"])
-  let viewport = OptionalSize.definite(
+  let mut viewport = OptionalSize.definite(
     run P.nonnegative(run P.required(viewportValue, "width")),
     run P.nonnegative(run P.required(viewportValue, "height"))
   )
@@ -420,6 +495,7 @@ effect fn execute(document: &Value)
     values: List<Fixture>.make(), objects: List<NaturalDimensions>.make(),
     fonts: List<FontMetrics>.make(),
     autoScrollbars: ScrollbarMetrics.zero(), thinScrollbars: ScrollbarMetrics.zero(),
+    measureCalls: 0, analyzeCalls: 0, shapeCalls: 0,
   }
   run fixtures.fonts.append(FontMetrics.zero())
   if P.has(document, "fonts") {
@@ -495,6 +571,8 @@ effect fn execute(document: &Value)
     let iterations = run P.integer(run P.required(benchmark, "iterations"))
     if iterations < 1 { fail P.invalid("benchmark.iterations must be positive") }
     let mut samples = List<i64>.make()
+    let mut work = Work { computes: 0, passes: 0, fullLayouts: 0, sizeProbes: 0, cacheHits: 0, reused: 0 }
+    resetCounters(&mut fixtures)
     let mut clock = OsMonotonicClock.make()
     let mut iteration: i32 = 0
     while iteration < iterations {
@@ -502,9 +580,35 @@ effect fn execute(document: &Value)
       run Engine.compute<Fixtures>(&tree, &mut output, &mut fixtures, viewport)
       let end = run MonotonicClock.now() |> Effect.provideMut<MonotonicClock>(&mut clock)
       run samples.append(elapsed(&start, &end))
+      addWork(&mut work, &output)
       iteration = iteration + 1
     }
-    run reportSamples(&samples)
+    run reportSamples(&samples, &work, &fixtures)
+  }
+  // Update benchmark: apply cycle steps in turn, timing only each compute.
+  // The final output is the geometry after the last step.
+  if P.has(document, "updates") {
+    let updates = run P.required(document, "updates")
+    run P.fields(updates, &["iterations", "cycle"])
+    let iterations = run P.integer(run P.required(updates, "iterations"))
+    if iterations < 1 { fail P.invalid("updates.iterations must be positive") }
+    let cycle = run P.array(run P.required(updates, "cycle"))
+    if cycle.length == 0 { fail P.invalid("updates.cycle must not be empty") }
+    let mut samples = List<i64>.make()
+    let mut work = Work { computes: 0, passes: 0, fullLayouts: 0, sizeProbes: 0, cacheHits: 0, reused: 0 }
+    resetCounters(&mut fixtures)
+    let mut clock = OsMonotonicClock.make()
+    let mut iteration: usize = 0
+    while iteration < i32.toUsize(iterations) {
+      viewport = run applyStep(run P.item(&cycle[iteration % cycle.length]), &mut tree, viewport, fixtures.fonts.length())
+      let start = run MonotonicClock.now() |> Effect.provideMut<MonotonicClock>(&mut clock)
+      run Engine.compute<Fixtures>(&tree, &mut output, &mut fixtures, viewport)
+      let end = run MonotonicClock.now() |> Effect.provideMut<MonotonicClock>(&mut clock)
+      run samples.append(elapsed(&start, &end))
+      addWork(&mut work, &output)
+      iteration = iteration + 1
+    }
+    run reportSamples(&samples, &work, &fixtures)
   }
   run writeOutput(&tree, &output)
 }

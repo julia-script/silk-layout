@@ -1,0 +1,178 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.option { Option }
+import silk.ownership { Copy }
+import silk.usize
+import context { Input }
+import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind }
+import fragments { FragmentArena }
+
+const ABSENT: usize = usize.MAX
+pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
+// `generation` is the last compute that created or hit the entry.
+struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }
+impl Copy for Entry {}
+
+// The last full layout of an independent formatting context: its request,
+// its result, and the contiguous fragment range [start, end) it emitted,
+// whose first fragment is the box's own.
+pub struct FinalLayout { pub valid: bool, pub input: Input, pub layout: Layout, pub start: usize, pub end: usize }
+impl Copy for FinalLayout {}
+impl FinalLayout {
+  pub fn none() -> FinalLayout {
+    return FinalLayout { valid: false, input: Input.make(OptionalSize.definite(0.0, 0.0)), layout: Layout.zero(), start: 0, end: 0 }
+  }
+}
+
+fn sameOptional(a: &OptionalSize, b: &OptionalSize) -> bool {
+  return a.widthDefinite == b.widthDefinite && a.heightDefinite == b.heightDefinite && (!a.widthDefinite || a.width == b.width) && (!a.heightDefinite || a.height == b.height)
+}
+fn sameAvailable(a: &AvailableSpace, b: &AvailableSpace) -> bool {
+  return a.kind == b.kind && (a.kind != AvailableKind.Definite || a.value == b.value)
+}
+fn sameInput(a: &Input, b: &Input) -> bool {
+  if a.parentMaxSize.width != b.parentMaxSize.width || a.parentMaxSize.height != b.parentMaxSize.height || a.scrollportSize.width != b.scrollportSize.width || a.scrollportSize.height != b.scrollportSize.height { return false }
+  return sameOptional(&a.parent, &b.parent) && sameOptional(&a.initialContainingBlock, &b.initialContainingBlock) && sameOptional(&a.known, &b.known) && sameAvailable(&a.availableWidth, &b.availableWidth) && sameAvailable(&a.availableHeight, &b.availableHeight) && a.blockRoot == b.blockRoot && a.blockify == b.blockify && a.atomicInline == b.atomicInline && a.intrinsicWidth == b.intrinsicWidth && a.intrinsicHeight == b.intrinsicHeight && a.shrinkToFit == b.shrinkToFit && a.indefiniteWidth == b.indefiniteWidth && a.indefiniteHeight == b.indefiniteHeight && a.parentWritingMode == b.parentWritingMode && a.parentTextOrientation == b.parentTextOrientation && a.parentJustifyItems == b.parentJustifyItems && a.parentJustifyItemsSafety == b.parentJustifyItemsSafety
+}
+
+// Size-only results of independent formatting contexts, keyed by generated
+// box and the exact Input that produced them. Full layout always visits
+// descendants; shared BFC participants never bypass their exclusion and
+// clearance side effects. LayoutTree keeps the cache between computes, and
+// compute clears the boxes whose sources changed, their subtrees and their
+// ancestors, because an ancestor's size can depend on any descendant.
+pub struct LayoutCache {
+  heads: List<usize>,
+  entries: List<Entry>,
+  // Entries no longer reachable from a head; compacted when they dominate.
+  dead: usize,
+  // The current compute, and how many entries the previous one used.
+  generation: usize, touched: usize, previouslyTouched: usize,
+  // Final layouts recorded by this compute, and those of the previous one,
+  // whose fragments are in the LayoutTree's snapshot.
+  finals: List<FinalLayout>,
+  kept: List<FinalLayout>,
+}
+impl LayoutCache {
+  pub fn make() -> LayoutCache {
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, finals: List<FinalLayout>.make(), kept: List<FinalLayout>.make() }
+  }
+  pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
+  pub fn clear(self: &mut Self) {
+    self.heads.clear()
+    self.entries.clear()
+    self.dead = 0
+    self.touched = 0
+    self.finals.clear()
+    self.kept.clear()
+  }
+  // Starts a compute: the previous compute's final layouts become reusable.
+  pub fn rotateFinals(self: &mut Self) {
+    self.generation = self.generation + 1
+    self.previouslyTouched = self.touched
+    self.touched = 0
+    let previous = Intrinsic.replace(self.finals, List<FinalLayout>.make())
+    let spare = Intrinsic.replace(self.kept, move previous)
+    self.finals = move spare
+    self.finals.clear()
+  }
+  pub fn keptFinal(self: &Self, id: usize) -> FinalLayout {
+    if id >= self.kept.length() { return FinalLayout.none() }
+    return self.kept.get(id)
+  }
+  pub effect fn recordFinal(self: &mut Self, id: usize, value: FinalLayout) ! OutOfMemoryError ? &mut Allocator {
+    if id >= self.finals.length() {
+      let missing = id + 1 - self.finals.length()
+      run self.finals.reserve(missing)
+      while self.finals.length() <= id { run self.finals.append(FinalLayout.none()) }
+    }
+    self.finals.set(id, value)
+  }
+  pub fn clearBox(self: &mut Self, id: usize) {
+    if id < self.kept.length() { self.kept.set(id, FinalLayout.none()) }
+    if id < self.finals.length() { self.finals.set(id, FinalLayout.none()) }
+    if id >= self.heads.length() { return }
+    let mut index = self.heads.get(id)
+    while index != ABSENT {
+      self.dead = self.dead + 1
+      index = self.entries.get(index).next
+    }
+    self.heads.set(id, ABSENT)
+  }
+  pub fn sameRequest(a: &Input, b: &Input) -> bool { return sameInput(a, b) }
+  pub fn lookup(self: &mut Self, id: usize, input: Input, kind: CacheKind) -> Option<Layout> {
+    if id >= self.heads.length() { return Option<Layout>.None }
+    let mut index = self.heads.get(id)
+    while index != ABSENT {
+      let entries = self.entries.asSlice()
+      let entry = &entries[index]
+      if entry.kind == kind && sameInput(&entry.input, &input) {
+        let layout = entry.layout
+        if entry.generation != self.generation {
+          let mutable = self.entries.asMutSlice()
+          mutable[index].generation = self.generation
+          self.touched = self.touched + 1
+        }
+        return Option<Layout>.Some { value: layout }
+      }
+      index = entry.next
+    }
+    return Option<Layout>.None
+  }
+  pub effect fn remember(self: &mut Self, id: usize, input: Input, kind: CacheKind, layout: Layout) ! OutOfMemoryError ? &mut Allocator {
+    if id >= self.heads.length() {
+      let missing = id + 1 - self.heads.length()
+      run self.heads.reserve(missing)
+      while self.heads.length() <= id { run self.heads.append(ABSENT) }
+    }
+    run self.entries.reserve(1)
+    let index = self.entries.length()
+    let previous = self.heads.get(id)
+    run self.entries.append(Entry { input: input, kind: kind, layout: layout, next: previous, generation: self.generation })
+    self.touched = self.touched + 1
+    self.heads.set(id, index)
+  }
+  // Rebuilds the entry list without unreachable entries and, once entries the
+  // previous compute did not use dominate (a drag-resize leaves one set per
+  // size), without those either. Each box keeps its lookup order.
+  pub effect fn compact(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
+    let live = self.entries.length() - self.dead
+    let stale = live > 2 * self.previouslyTouched + 256
+    if !stale && (self.dead < 256 || self.dead * 2 < self.entries.length()) { return }
+    let mut oldest: usize = 0
+    if stale && self.generation > 0 { oldest = self.generation - 1 }
+    let mut kept = List<Entry>.make()
+    run kept.reserveExact(self.entries.length() - self.dead)
+    let mut chain = List<usize>.make()
+    let mut id: usize = 0
+    while id < self.heads.length() {
+      chain.clear()
+      let mut index = self.heads.get(id)
+      while index != ABSENT {
+        if self.entries.get(index).generation >= oldest { run chain.append(index) }
+        index = self.entries.get(index).next
+      }
+      let mut next = ABSENT
+      let mut at = chain.length()
+      while at > 0 {
+        at = at - 1
+        let mut entry = self.entries.get(chain.get(at))
+        entry.next = next
+        next = kept.length()
+        run kept.append(entry)
+      }
+      self.heads.set(id, next)
+      id = id + 1
+    }
+    self.entries = move kept
+    self.dead = 0
+  }
+}
+
+// Fragments and box records as they stood after the final pass's normal-flow
+// layout, before positioning moved, offset or extended any of them. Reused
+// subtrees are copied from here into the next compute.
+pub struct Snapshot { pub fragments: FragmentArena, pub boxes: List<Layout> }
+impl Snapshot {
+  pub fn make() -> Snapshot { return Snapshot { fragments: FragmentArena.make(), boxes: List<Layout>.make() } }
+}

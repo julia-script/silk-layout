@@ -1,0 +1,83 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import context { outOfFlow }
+import tree { Tree, NO_NODE }
+import box_tree { BoxTree, BoxNode }
+import layout_cache { LayoutCache }
+
+// Kept results are addressed by generated box index, so they survive only
+// while box construction yields the same boxes. Scroll offsets only move
+// fragments after layout, and every other field is compared.
+pub fn sameBoxes(previous: &[BoxNode], next: &[BoxNode]) -> bool {
+  if previous.length != next.length { return false }
+  let mut index: usize = 0
+  while index < next.length {
+    let a = &previous[index]
+    let b = &next[index]
+    if a.source != b.source || a.styleOwner != b.styleOwner || a.anonymousStyle != b.anonymousStyle || a.kind != b.kind
+      || a.parent != b.parent || a.firstChild != b.firstChild || a.lastChild != b.lastChild || a.nextSibling != b.nextSibling
+      || a.previousContinuation != b.previousContinuation || a.nextContinuation != b.nextContinuation
+      || a.firstForSource != b.firstForSource || a.lastForSource != b.lastForSource
+      || a.interruptionFirst != b.interruptionFirst || a.interruptionLast != b.interruptionLast
+      || a.anonymousBlock != b.anonymousBlock || a.blockify != b.blockify || a.independentRoot != b.independentRoot
+      || a.firstFormattedRun != b.firstFormattedRun || a.needsFragmentGeometry != b.needsFragmentGeometry
+      || a.fragmentMonolithic != b.fragmentMonolithic
+      || a.beforeControl != b.beforeControl || a.dynamicBefore != b.dynamicBefore
+      || a.afterControl != b.afterControl || a.dynamicAfter != b.dynamicAfter
+      || a.measureKey != b.measureKey || a.measurement != b.measurement { return false }
+    index = index + 1
+  }
+  return true
+}
+
+fn clearSubtree(nodes: &BoxTree, cache: &mut LayoutCache, root: usize) {
+  cache.clearBox(root)
+  let mut child = nodes.node(root).firstChild
+  while child != NO_NODE {
+    clearSubtree(nodes, &mut cache, child)
+    child = nodes.node(child).nextSibling
+  }
+}
+
+// Clears what a changed source can affect: every generated box of the
+// source with its descendants (they may read the changed style), and every
+// ancestor (its size may depend on any descendant). A text source shares its
+// parent's style and has no descendants.
+pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, since: usize) {
+  let mut source: usize = 0
+  while source < tree.nodes.length() {
+    if tree.changedAt(source) > since {
+      let mut box = nodes.firstBySource.get(source)
+      while box != NO_NODE {
+        clearSubtree(nodes, &mut cache, box)
+        let mut ancestor = nodes.node(box).parent
+        while ancestor != NO_NODE {
+          cache.clearBox(ancestor)
+          ancestor = nodes.node(ancestor).parent
+        }
+        box = nodes.node(box).nextContinuation
+      }
+    }
+    source = source + 1
+  }
+}
+
+// Which boxes head a subtree whose finished layout may be copied into the
+// next compute: no box in it is out of flow or lifts inline interruptions,
+// since positioning, not normal-flow layout, completes those.
+pub effect fn reusableSubtrees(nodes: &BoxTree) -> List<bool> ! OutOfMemoryError ? &mut Allocator {
+  let count = nodes.boxes.length()
+  let mut result = List<bool>.make()
+  run result.reserveExact(count)
+  while result.length() < count { run result.append(true) }
+  // Generated parents precede their children.
+  let mut index = count
+  while index > 0 {
+    index = index - 1
+    let node = nodes.node(index)
+    let ok = result.get(index) && !outOfFlow(nodes.style(index)) && node.interruptionFirst == NO_NODE
+    result.set(index, ok)
+    if !ok && node.parent != NO_NODE { result.set(node.parent, false) }
+  }
+  return move result
+}

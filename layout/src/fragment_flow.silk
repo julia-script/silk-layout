@@ -104,6 +104,8 @@ effect fn fitWithWidows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
 
 pub effect fn computeFragmented<'frames, 'source, M: Measure + TextMeasure>(tree: &'source Tree, output: &'frames mut LayoutTree, measurer: &mut M, viewport: OptionalSize, frames: Fragmentainers<'frames>) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   run frames.validate()
+  // Fragmented results are not kept between computes.
+  output.invalidate()
   TextMeasure.beginTextLayout(&mut measurer)
   let mut nodes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), frames.writingMode, frames.direction)
   nodes.prepareFragmentation(frames.writingMode)

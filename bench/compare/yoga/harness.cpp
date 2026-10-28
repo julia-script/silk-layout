@@ -91,6 +91,8 @@ static void applyStyle(YGNodeRef n, const json& s) {
   edges(n, s, "padding", YGNodeStyleSetPadding, YGNodeStyleSetPaddingPercent);
   edges(n, s, "margin", YGNodeStyleSetMargin, YGNodeStyleSetMarginPercent);
   edges(n, s, "border", YGNodeStyleSetBorder, nullptr);
+  if (s.value("position", "") == "absolute") YGNodeStyleSetPositionType(n, YGPositionTypeAbsolute);
+  edges(n, s, "inset", YGNodeStyleSetPosition, YGNodeStyleSetPositionPercent);
   dimension(s, "columnGap", [&](float v) { YGNodeStyleSetGap(n, YGGutterColumn, v); }, [&](float v) { YGNodeStyleSetGapPercent(n, YGGutterColumn, v); }, [] {});
   dimension(s, "rowGap", [&](float v) { YGNodeStyleSetGap(n, YGGutterRow, v); }, [&](float v) { YGNodeStyleSetGapPercent(n, YGGutterRow, v); }, [] {});
   if (s.contains("alignItems")) YGNodeStyleSetAlignItems(n, align(s["alignItems"]));

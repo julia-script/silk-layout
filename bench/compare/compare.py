@@ -11,6 +11,9 @@ from timing-ratio and geometry summaries.
   python3 bench/compare/compare.py --silk build/.../release/silk_layout_cli \\
       --taffy bench/compare/taffy/target/release/taffy-harness \\
       --yoga bench/compare/yoga/build/yoga-harness [--iterations 15] [--only NAME,...]
+
+--docs DIR runs the documents in DIR instead of the built-in workloads, for example the
+trees from taffy's README benchmark table (bench/compare/taffy-readme exports them).
 """
 import argparse
 import json
@@ -61,8 +64,12 @@ def main():
     parser.add_argument("--iterations", type=int, default=15)
     parser.add_argument("--only", help="comma-separated workload names")
     parser.add_argument("--json", help="write results to this file")
+    parser.add_argument("--docs", help="directory of documents to run instead of the built-in workloads")
     args = parser.parse_args()
-    names = args.only.split(",") if args.only else list(W.WORKLOADS)
+    workloads = W.WORKLOADS
+    if args.docs:
+        workloads = {p.stem: (lambda p=p: json.loads(p.read_text())) for p in sorted(Path(args.docs).glob("*.json"))}
+    names = args.only.split(",") if args.only else list(workloads)
     engines = [("taffy", args.taffy), ("yoga", args.yoga)]
     engines = [(n, b) for n, b in engines if b]
     results = {}
@@ -71,7 +78,7 @@ def main():
     print(header)
     with tempfile.TemporaryDirectory() as tmp:
         for name in names:
-            document = W.WORKLOADS[name]()
+            document = workloads[name]()
             is_grid = any(node.get("style", {}).get("display") == "grid" for node in document["nodes"])
             path = Path(tmp) / f"{name}.json"
             path.write_text(json.dumps(document))

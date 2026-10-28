@@ -1,0 +1,16 @@
+[package]
+name = "taffy-readme-export"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Exports the trees behind the benchmark table in taffy's README, built by taffy's own
+# benchmark generators with their fixed seed, as silk-layout CLI documents.
+[dependencies]
+taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "4204e369079fa5ca30c8200976ff24c8e08e6a3c" }
+taffy_benchmarks = { git = "https://github.com/DioxusLabs/taffy", rev = "4204e369079fa5ca30c8200976ff24c8e08e6a3c" }
+rand = "0.9"
+rand_chacha = "0.9"
+serde_json = "1"
+
+[workspace]

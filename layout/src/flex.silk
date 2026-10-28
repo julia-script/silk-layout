@@ -9,7 +9,7 @@ import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrie
 import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
 import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, isFlex, scrollable, overflowForAxis, UNBOUNDED }
-import engine { layoutNode, probeNode, probeFresh, normalizeKey, constraintFreeProbe }
+import engine { layoutNode, probeNode, probeFresh, normalizeKey, constraintFreeProbe, sizeEmptyBox }
 import layout_pass { LayoutPass, CacheKind }
 import layout_cache { LayoutCache }
 import text { TextMeasure, TextError }
@@ -189,6 +189,15 @@ fn blockAxisConstraint(style: &Style, horizontal: bool, constraint: AvailableSpa
   return AvailableSpace.maxContent()
 }
 effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f64) -> Probe ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  // A childless box without measured content.
+  if constraintFreeProbe(output.keyShape(id)) {
+    let input = probeInput(childInput, horizontal, constraint, crossKnown, cross)
+    let mut sized = Layout.zero()
+    if sizeEmptyBox(nodes, id, &input, &mut sized) {
+      output.stats.sizeProbes = output.stats.sizeProbes + 1
+      return Probe { size: sized.size, preferredRatio: sized.preferredRatio, ratioBorderBox: sized.ratioBorderBox }
+    }
+  }
   // Most probes hit the cache: build the key in place and build the request
   // only on a miss.
   let mut key = probeInput(childInput, horizontal, constraint, crossKnown, cross)

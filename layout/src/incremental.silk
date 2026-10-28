@@ -1,7 +1,7 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.list { List }
 import context { outOfFlow }
-import style { Float, Dimension, Edges }
+import style { Float, Dimension, Edges, Position, WritingMode }
 import tree { Tree, NO_NODE }
 import box_tree { BoxTree, BoxNode }
 import layout_cache { LayoutCache, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW }
@@ -223,4 +223,26 @@ pub fn invalidateUnmatched(nodes: &BoxTree, cache: &mut LayoutCache, changed: &[
     }
     id = id + 1
   }
+}
+
+// Which boxes head a subtree whose layout never reads the initial containing
+// block or the scrollport limits passed down for orthogonal flows: no box in
+// it is replaced, fixed, or orthogonal to its parent.
+pub effect fn viewportFreeSubtrees(nodes: &BoxTree) -> List<bool> ! OutOfMemoryError ? &mut Allocator {
+  let count = nodes.boxes.length()
+  let mut result = List<bool>.make()
+  run result.reserveExact(count)
+  while result.length() < count { run result.append(true) }
+  let mut index = count
+  while index > 0 {
+    index = index - 1
+    let node = nodes.node(index)
+    let style = nodes.style(index)
+    let mut free = result.get(index) && !style.replaced && style.position != Position.Fixed
+    if node.parent != NO_NODE && (style.writingMode == WritingMode.HorizontalTb) != (nodes.style(node.parent).writingMode == WritingMode.HorizontalTb) { free = false }
+    if node.parent == NO_NODE && style.writingMode != WritingMode.HorizontalTb { free = false }
+    result.set(index, free)
+    if !free && node.parent != NO_NODE { result.set(node.parent, false) }
+  }
+  return move result
 }

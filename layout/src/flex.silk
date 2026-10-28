@@ -106,16 +106,20 @@ fn blockReverse(style: &Style) -> bool {
 struct Item {
   id: usize, base: f64, hypothetical: f64, target: f64, minimum: f64, maximum: f64, inset: f64,
   grow: f64, shrink: f64, marginStart: f64, marginEnd: f64, crossStart: f64, crossEnd: f64,
-  autoStart: bool, autoEnd: bool, autoCrossStart: bool, autoCrossEnd: bool,
-  cross: f64, crossMin: f64, crossMax: f64, crossAuto: bool, align: Align,
-  baseline: f64, lastBaseline: f64, baselineEligible: bool, baselineSizesLine: bool, baselineEnd: bool,
-  frozen: bool, violation: f64, collapsed: bool, strut: f64,
-  minContribution: f64, maxContribution: f64, mainDefinite: bool,
+  cross: f64, crossMin: f64, crossMax: f64,
+  baseline: f64, lastBaseline: f64, violation: f64, strut: f64,
+  minContribution: f64, maxContribution: f64,
   // The cross size known before layout (§9.2 step 3B).
-  knownCross: f64, knownCrossDefinite: bool,
-  // An automatic minimum still to measure, and the preferred main size it
-  // depends on; see deferredMinimum.
-  minimumPending: bool, pendingPreferred: f64,
+  knownCross: f64,
+  // The preferred main size a pending automatic minimum depends on.
+  pendingPreferred: f64,
+  // Flags last so they pack without padding between the f64 fields.
+  align: Align,
+  autoStart: bool, autoEnd: bool, autoCrossStart: bool, autoCrossEnd: bool, crossAuto: bool,
+  baselineEligible: bool, baselineSizesLine: bool, baselineEnd: bool,
+  frozen: bool, collapsed: bool, mainDefinite: bool, knownCrossDefinite: bool,
+  // An automatic minimum still to measure; see deferredMinimum.
+  minimumPending: bool,
 }
 impl Copy for Item {}
 impl Item {
@@ -141,6 +145,10 @@ effect fn collect(nodes: &BoxTree, id: usize, items: &mut List<Item>) ! OutOfMem
 fn sort(items: &mut [Item], nodes: &BoxTree, count: usize) {
   let mut index: usize = 1
   while index < count {
+    // Items are almost always in order already; only an out-of-order item
+    // is copied out and shifted back.
+    if nodes.style(items[index - 1].id).order <= nodes.style(items[index].id).order { index = index + 1
+      continue }
     let item = items[index]
     let mut at = index
     while at > 0 && nodes.style(items[at - 1].id).order > nodes.style(item.id).order {
@@ -170,10 +178,10 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sourc
   let layout = &output.boxes[id]
   return Probe { size: layout.size, preferredRatio: layout.preferredRatio, ratioBorderBox: layout.ratioBorderBox }
 }
-effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) -> Item ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let id = item.id
   let style = nodes.style(id)
   let box = resolveBox(style, &childInput)
-  let mut item = Item.make(id)
   // Flex weights use allotted inner bases; used content layout deducts gutters.
   item.inset = edgeTotal(box.inset, axis.horizontal)
   let crossInset = edgeTotal(box.inset, !axis.horizontal)
@@ -319,9 +327,8 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
       maximumContributionSize = transfer(contentCross, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
     }
   }
-  item.minContribution = contribution(minimumContributionSize, preferredContribution, &item)
-  item.maxContribution = contribution(maximumContributionSize, preferredContribution, &item)
-  return item
+  item.minContribution = contribution(minimumContributionSize, preferredContribution, &item.*)
+  item.maxContribution = contribution(maximumContributionSize, preferredContribution, &item.*)
 }
 fn active(item: &Item, collapsed: bool) -> bool { return !collapsed || !item.collapsed }
 fn gaps(count: usize, gap: f64) -> f64 { if count == 0 { return 0.0 }
@@ -524,19 +531,19 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut hasMirrorOffset = false
   let mut index = line.start
   while index < line.end {
-    let mut item = items[index]
+    let item = &mut items[index]
     // A stretched item in a line whose cross size is already known (§9.4
     // step 8) takes the line's size; its hypothetical cross size is unused.
-    if lineKnown && item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd && active(&item, collapsed) {
+    if lineKnown && item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd && active(&item.*, collapsed) {
       item.cross = item.crossMin
       item.baseline = 0.0
       item.lastBaseline = 0.0
-    } else if fixedCross(nodes, &item, parentStyle) && !input.fragmentation.active && item.align != Align.Baseline && item.align != Align.LastBaseline && !(input.baselines && !input.performLayout) && active(&item, collapsed) {
+    } else if fixedCross(nodes, &item.*, parentStyle) && !input.fragmentation.active && item.align != Align.Baseline && item.align != Align.LastBaseline && !(input.baselines && !input.performLayout) && active(&item.*, collapsed) {
       item.cross = item.knownCross
       item.baseline = 0.0
       item.lastBaseline = 0.0
       result.cross = max(result.cross, item.cross + item.crossStart + item.crossEnd)
-    } else if active(&item, collapsed) {
+    } else if active(&item.*, collapsed) {
       let mut childInput = input.*
       childInput.performLayout = false
       // Baseline alignment reads the item's baselines; a probed container's
@@ -582,7 +589,6 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         } else { result.cross = max(result.cross, item.cross + item.crossStart + item.crossEnd) }
       } else { result.cross = max(result.cross, item.cross + item.crossStart + item.crossEnd) }
     } else { strut = max(strut, item.strut) }
-    items[index] = item
     index = index + 1
   }
   result.cross = max(strut, max(result.cross, max(sizingBefore + sizingAfter, lastSizingBefore + lastSizingAfter)))
@@ -816,9 +822,8 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   let mut index: usize = 0
   let mut hasCollapsed = false
   while index < count {
-    let item = run prepare(nodes, &mut output, &mut measurer, items.get(index).id, &childInput, &axis, style, mainConstraint, !mainKnown, mainDefinite)
-    hasCollapsed = hasCollapsed || item.collapsed
-    items.set(index, item)
+    run prepare(nodes, &mut output, &mut measurer, &mut items.asMutSlice()[index], &childInput, &axis, style, mainConstraint, !mainKnown, mainDefinite)
+    hasCollapsed = hasCollapsed || items.asSlice()[index].collapsed
     index = index + 1
   }
   if !mainKnown {
@@ -829,7 +834,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     let mut activeCount: usize = 0
     index = 0
     while index < count {
-      let item = items.get(index)
+      let item = &items.asSlice()[index]
       if !item.collapsed {
         let mut contributionSize = item.maxContribution
         if mainConstraint.kind == AvailableKind.MinContent { contributionSize = item.minContribution }
@@ -947,8 +952,8 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     let mut used = gaps(line.count, mainGap)
     let mut autoCount: usize = 0
     index = line.start
-    while index < line.end { let item = items.get(index)
-      if active(&item, collapsed) {
+    while index < line.end { let item = &items.asSlice()[index]
+      if active(item, collapsed) {
         used = used + item.target + item.marginStart + item.marginEnd
         if item.autoStart { autoCount = autoCount + 1 }
         if item.autoEnd { autoCount = autoCount + 1 }
@@ -962,8 +967,8 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     let mut cursor = distribution.offset
     index = line.start
     while index < line.end {
-      let item = items.get(index)
-      if !active(&item, collapsed) { run zeroSubtree(nodes, &mut output, item.id) }
+      let item = &items.asSlice()[index]
+      if !active(item, collapsed) { run zeroSubtree(nodes, &mut output, item.id) }
       else {
         let mut childCross = item.cross
         let mut finalInput = childInput
@@ -979,7 +984,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
         // once, with the final cross constraint and percentage definiteness.
         let mut childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &finalInput)
         childCross = axisSize(childLayout.size, !axis.horizontal)
-        let crossOffset = fragmentCrossOffset(nodes, &item, &line, style, &axis, childCross)
+        let crossOffset = fragmentCrossOffset(nodes, item, &line, style, &axis, childCross)
         if item.autoStart { setEdge(&mut childLayout.usedMargin, axis.horizontal, axis.mainReverse, autoShare) }
         if item.autoEnd { setEdge(&mut childLayout.usedMargin, axis.horizontal, !axis.mainReverse, autoShare) }
         if item.autoCrossStart || item.autoCrossEnd {

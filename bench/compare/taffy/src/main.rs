@@ -3,14 +3,15 @@
 //! Prints {"layoutNs": [...]} and, with --dump, every node's border box in absolute coordinates.
 //! With --updates, one tree is kept: each iteration applies the next step of the cycle (a new
 //! viewport and/or node styles, as in the silk-layout CLI's "updates" field) and times one layout.
-//! Grid mapping is intentionally limited to numeric lines/spans, non-repeated tracks
-//! (fixed, percent, fr, auto, intrinsic keywords, minmax and fit-content), row/column
-//! sparse/dense flow, gaps and item/self alignment. Named placement/areas, repeat and calc are rejected
-//! rather than approximated. Fixture wrapping models horizontal text without
+//! Grid maps parsed tracks, count/auto repeats, named lines/spans, area matrices,
+//! all four auto-flow modes, gaps and item/self alignment to taffy's native APIs.
+//! Subgrid, masonry, calc, shorthands and nonzero order are rejected rather than
+//! approximated. Fixture wrapping models horizontal text without
 //! floats; it does not expose line boxes or baseline data to taffy.
 use serde_json::Value;
 use std::time::Instant;
 use taffy::prelude::*;
+use taffy::style::{CheapCloneStr, GridTemplateArea, GridTemplateAreas, GridTemplateRepetition};
 
 #[derive(Clone, Copy)]
 struct Fixture {
@@ -143,16 +144,131 @@ fn grid_track(value: &Value) -> TrackSizingFunction {
     }
 }
 
-fn grid_template<S: taffy::style::CheapCloneStr>(value: Option<&Value>) -> Vec<GridTemplateComponent<S>> {
-    match value {
-        None => Vec::new(),
-        Some(Value::String(s)) if s == "none" => Vec::new(),
-        Some(Value::Array(tracks)) => {
-            assert!(tracks.len() <= 10_000, "grid template exceeds 10000 tracks");
-            tracks.iter().map(|v| GridTemplateComponent::Single(grid_track(v))).collect()
-        }
-        Some(other) => panic!("unsupported grid template {other}"),
+fn grid_name(value: &Value, area: bool) -> &str {
+    let name = value.as_str().unwrap_or_else(|| panic!("grid name must be a string: {value}"));
+    let start = |byte: u8| byte >= 128 || byte == b'_' || byte.is_ascii_alphabetic();
+    let bytes = name.as_bytes();
+    assert!(!bytes.is_empty() && bytes.iter().all(|&b| start(b) || b == b'-' || b.is_ascii_digit()),
+        "invalid grid name {value}");
+    if !area {
+        assert!(start(bytes[0]) || bytes[0] == b'-' && bytes.len() > 1 && (start(bytes[1]) || bytes[1] == b'-'),
+            "invalid grid identifier {value}");
+        assert!(!["auto", "span", "default", "inherit", "initial", "unset", "revert", "revert-layer"]
+            .iter().any(|keyword| name.eq_ignore_ascii_case(keyword)), "reserved grid identifier {value}");
     }
+    name
+}
+
+fn grid_names<S: CheapCloneStr>(value: &Value, names: &mut Vec<S>) {
+    let object = value.as_object().unwrap();
+    assert!(object.len() == 1, "unsupported grid line names {value}");
+    let list = object["names"].as_array().unwrap_or_else(|| panic!("grid names require an array: {value}"));
+    names.extend(list.iter().map(|name| S::from(grid_name(name, false))));
+}
+
+fn fixed_repeat_track(track: &TrackSizingFunction) -> bool {
+    // Of the supported breadths, only length/percentage minima are neither
+    // intrinsic nor flexible. fit-content maxima are not definite values.
+    (!track.min.is_intrinsic() && !track.min.is_fr()) || track.max.has_definite_value(Some(0.0))
+}
+
+fn grid_template<S: CheapCloneStr>(value: Option<&Value>) -> (Vec<GridTemplateComponent<S>>, Vec<Vec<S>>) {
+    let entries = match value {
+        None => return (Vec::new(), Vec::new()),
+        Some(Value::String(s)) if s == "none" => return (Vec::new(), Vec::new()),
+        Some(Value::Array(entries)) => entries,
+        Some(other) => panic!("unsupported grid template {other}"),
+    };
+    let mut tracks = Vec::new();
+    // Outer names are indexed by template components, not expanded tracks.
+    let mut names = vec![Vec::new()];
+    let mut expanded_count = 0usize;
+    let mut automatic = false;
+    let mut all_fixed = true;
+    for entry in entries {
+        if entry.get("names").is_some() {
+            grid_names(entry, names.last_mut().unwrap());
+            continue;
+        }
+        let component = if let Some(repeat) = entry.get("repeat") {
+            assert!(entry.as_object().unwrap().len() == 1, "unsupported grid repeat {entry}");
+            let object = repeat.as_object().unwrap_or_else(|| panic!("grid repeat requires an object: {entry}"));
+            assert!(object.len() == 2 && object.contains_key("count") && object.contains_key("tracks"),
+                "grid repeat requires count and tracks: {entry}");
+            let count = match &object["count"] {
+                Value::String(s) if s == "auto-fill" || s == "auto-fit" => {
+                    assert!(!automatic, "only one automatic repeat is allowed");
+                    automatic = true;
+                    if s == "auto-fill" { RepetitionCount::AutoFill } else { RepetitionCount::AutoFit }
+                }
+                number => {
+                    let count = number.as_f64().unwrap_or_else(|| panic!("unsupported grid repeat count {number}"));
+                    assert!(count.fract() == 0.0 && (1.0..=10_000.0).contains(&count), "grid repeat count must be 1..10000");
+                    RepetitionCount::Count(count as u16)
+                }
+            };
+            let pattern = object["tracks"].as_array().unwrap_or_else(|| panic!("grid repeat tracks require an array: {entry}"));
+            let mut repeated = Vec::new();
+            let mut line_names = vec![Vec::new()];
+            for part in pattern {
+                if part.get("names").is_some() {
+                    grid_names(part, line_names.last_mut().unwrap());
+                } else {
+                    // grid_track rejects nested repeats.
+                    let track = grid_track(part);
+                    all_fixed &= fixed_repeat_track(&track);
+                    repeated.push(track);
+                    line_names.push(Vec::new());
+                }
+            }
+            assert!(!repeated.is_empty(), "grid repeat requires at least one track");
+            expanded_count += repeated.len() * match count { RepetitionCount::Count(n) => n as usize, _ => 1 };
+            GridTemplateComponent::Repeat(GridTemplateRepetition { count, tracks: repeated, line_names })
+        } else {
+            let track = grid_track(entry);
+            all_fixed &= fixed_repeat_track(&track);
+            expanded_count += 1;
+            GridTemplateComponent::Single(track)
+        };
+        assert!(expanded_count <= 10_000, "grid template exceeds 10000 tracks");
+        tracks.push(component);
+        names.push(Vec::new());
+    }
+    assert!(!tracks.is_empty(), "grid template requires at least one track or none");
+    assert!(!automatic || all_fixed, "automatic repeat requires fixed-size tracks throughout the template");
+    (tracks, names)
+}
+
+fn grid_areas<S: CheapCloneStr>(value: Option<&Value>) -> Option<GridTemplateAreas<S>> {
+    let value = value?;
+    let rows = value.as_array().unwrap_or_else(|| panic!("grid areas require a matrix: {value}"));
+    assert!(rows.len() <= 10_000, "grid areas exceed 10000 rows");
+    let columns = rows.first().map(|row| row.as_array().expect("grid area row requires an array").len()).unwrap_or(0);
+    assert!(rows.is_empty() || (1..=10_000).contains(&columns), "grid areas require 1..10000 columns");
+    // Convert the protocol's cell matrix to native area rectangles. Placement
+    // and the generated area line names remain entirely taffy's responsibility.
+    let mut bounds = std::collections::BTreeMap::<&str, (usize, usize, usize, usize, usize)>::new();
+    for (y, row) in rows.iter().enumerate() {
+        let cells = row.as_array().expect("grid area row requires an array");
+        assert!(cells.len() == columns, "grid areas must be a rectangular matrix");
+        for (x, cell) in cells.iter().enumerate() {
+            if cell.as_str() == Some(".") { continue; }
+            let name = grid_name(cell, true);
+            let area = bounds.entry(name).or_insert((y, y + 1, x, x + 1, 0));
+            area.1 = y + 1;
+            area.2 = area.2.min(x);
+            area.3 = area.3.max(x + 1);
+            area.4 += 1;
+        }
+    }
+    let areas = bounds.into_iter().map(|(name, (top, bottom, left, right, count))| {
+        assert!(count == (bottom - top) * (right - left), "each named grid area must fill a rectangle");
+        GridTemplateArea {
+            name: S::from(name), row_start: (top + 1) as u16, row_end: (bottom + 1) as u16,
+            column_start: (left + 1) as u16, column_end: (right + 1) as u16,
+        }
+    }).collect();
+    Some(GridTemplateAreas { areas, row_count: rows.len() as u16, column_count: columns as u16 })
 }
 
 fn grid_auto_tracks(value: Option<&Value>) -> Vec<TrackSizingFunction> {
@@ -178,11 +294,19 @@ fn grid_placement(value: Option<&Value>) -> GridPlacement {
         None => GridPlacement::Auto,
         Some(Value::String(s)) if s == "auto" => GridPlacement::Auto,
         Some(value @ Value::Number(_)) => line(grid_line_number(value)),
-        Some(Value::Object(o)) if o.len() == 1 && o.contains_key("line") => line(grid_line_number(&o["line"])),
-        Some(Value::Object(o)) if o.len() == 1 && o.contains_key("span") => {
-            let count = grid_line_number(&o["span"]);
-            assert!(count > 0, "grid span must be positive");
-            span(count as u16)
+        Some(value @ Value::String(_)) => GridPlacement::NamedLine(grid_name(value, false).into(), 0),
+        Some(Value::Object(o)) if o.contains_key("line") || o.contains_key("span") => {
+            let is_span = o.contains_key("span");
+            let key = if is_span { "span" } else { "line" };
+            assert!(o.keys().all(|name| name == key || name == "name"), "unsupported grid placement {}", value.unwrap());
+            let count = grid_line_number(&o[key]);
+            assert!(!is_span || count > 0, "grid span must be positive");
+            match (is_span, o.get("name")) {
+                (false, Some(name)) => GridPlacement::NamedLine(grid_name(name, false).into(), count),
+                (true, Some(name)) => GridPlacement::NamedSpan(grid_name(name, false).into(), count as u16),
+                (false, None) => line(count),
+                (true, None) => span(count as u16),
+            }
         }
         Some(other) => panic!("unsupported grid placement {other}"),
     }
@@ -193,9 +317,12 @@ fn style(value: &Value) -> Style {
     for name in s.keys().filter(|name| name.starts_with("grid")) {
         assert!(matches!(name.as_str(),
             "gridTemplateRows" | "gridTemplateColumns" | "gridAutoRows" | "gridAutoColumns" |
-            "gridAutoFlow" | "gridRowStart" | "gridRowEnd" | "gridColumnStart" | "gridColumnEnd"),
+            "gridTemplateAreas" | "gridAutoFlow" | "gridRowStart" | "gridRowEnd" | "gridColumnStart" | "gridColumnEnd"),
             "unsupported grid property {name}");
     }
+    assert!(s.get("order").is_none_or(|value| value.as_f64() == Some(0.0)), "nonzero order is unsupported by the taffy harness");
+    let (columns, column_names) = grid_template(s.get("gridTemplateColumns"));
+    let (rows, row_names) = grid_template(s.get("gridTemplateRows"));
     let num = |name: &str, default: f32| s.get(name).map(|v| v.as_f64().unwrap() as f32).unwrap_or(default);
     let border = edges(s, "border", length_percentage);
     Style {
@@ -239,8 +366,11 @@ fn style(value: &Value) -> Style {
         justify_self: self_align(s.get("justifySelf")),
         align_content: justify(s.get("alignContent")),
         justify_content: justify(s.get("justifyContent")),
-        grid_template_columns: grid_template(s.get("gridTemplateColumns")),
-        grid_template_rows: grid_template(s.get("gridTemplateRows")),
+        grid_template_columns: columns,
+        grid_template_rows: rows,
+        grid_template_column_names: column_names,
+        grid_template_row_names: row_names,
+        grid_template_areas: grid_areas(s.get("gridTemplateAreas")),
         grid_auto_columns: grid_auto_tracks(s.get("gridAutoColumns")),
         grid_auto_rows: grid_auto_tracks(s.get("gridAutoRows")),
         grid_auto_flow: match s.get("gridAutoFlow") {
@@ -432,6 +562,88 @@ mod tests {
     }
 
     #[test]
+    fn named_repeat_boundaries_and_spans_reach_layout() {
+        let document = json!({
+            "viewport": {"width": 200, "height": 100},
+            "nodes": [
+                {"parent": null, "style": {
+                    "display": "grid", "width": 110, "height": 20,
+                    "gridTemplateColumns": [
+                        {"names": ["outer"]},
+                        {"repeat": {"count": 2, "tracks": [
+                            {"names": ["edge"]}, 20, {"names": ["middle"]}, 30, {"names": ["edge"]}
+                        ]}},
+                        {"names": ["tail"]}, 10
+                    ],
+                    "gridTemplateRows": [20]
+                }},
+                {"parent": 0, "style": {"gridColumnStart": {"line": 2, "name": "edge"}, "gridRowStart": 1}},
+                {"parent": 0, "style": {
+                    "gridColumnStart": "outer", "gridColumnEnd": {"span": 2, "name": "middle"}, "gridRowStart": 1
+                }},
+                {"parent": 0, "style": {"gridColumnStart": {"line": -1, "name": "edge"}, "gridRowStart": 1}},
+                {"parent": 0, "style": {"gridColumnStart": "tail", "gridRowStart": 1}}
+            ]
+        });
+        let mut workload = build(&document);
+        layout(&mut workload);
+        for (index, x, width) in [(1, 50.0, 20.0), (2, 0.0, 70.0), (3, 100.0, 10.0), (4, 100.0, 10.0)] {
+            let rect = workload.tree.layout(workload.nodes[index]).unwrap();
+            assert_eq!((rect.location.x, rect.size.width), (x, width));
+        }
+    }
+
+    #[test]
+    fn area_aliases_and_unnamed_template_extent_reach_layout() {
+        for (areas, placement, expected) in [
+            (json!([["side", "main", "main"], ["side", "main", "main"]]),
+             json!({"gridColumnStart": "main", "gridColumnEnd": "main", "gridRowStart": "main", "gridRowEnd": "main"}),
+             (20.0, 0.0, 50.0, 40.0)),
+            (json!([[".", ".", "."], [".", ".", "."]]),
+             json!({"gridColumnStart": -2, "gridColumnEnd": -1, "gridRowStart": -2, "gridRowEnd": -1}),
+             (50.0, 20.0, 20.0, 20.0)),
+        ] {
+            let document = json!({
+                "viewport": {"width": 100, "height": 100},
+                "nodes": [
+                    {"parent": null, "style": {
+                        "display": "grid", "width": 100, "height": 100,
+                        "gridTemplateAreas": areas,
+                        "gridAutoColumns": [20, 30], "gridAutoRows": 20,
+                        "justifyContent": "start", "alignContent": "start"
+                    }},
+                    {"parent": 0, "style": placement}
+                ]
+            });
+            let mut workload = build(&document);
+            layout(&mut workload);
+            let rect = workload.tree.layout(workload.nodes[1]).unwrap();
+            assert_eq!((rect.location.x, rect.location.y, rect.size.width, rect.size.height), expected);
+        }
+    }
+
+    #[test]
+    fn auto_repeat_preserves_empty_tracks_only_for_auto_fill() {
+        for (count, expected_width) in [("auto-fill", 80.0 / 3.0), ("auto-fit", 100.0)] {
+            let document = json!({
+                "viewport": {"width": 100, "height": 100},
+                "nodes": [
+                    {"parent": null, "style": {
+                        "display": "grid", "width": 100, "height": 20,
+                        "gridTemplateColumns": [{"repeat": {"count": count, "tracks": [{"minmax": [20, {"fr": 1}]}]}}],
+                        "gridTemplateRows": [20], "columnGap": 10
+                    }},
+                    {"parent": 0, "style": {}}
+                ]
+            });
+            let mut workload = build(&document);
+            layout(&mut workload);
+            let rect = workload.tree.layout(workload.nodes[1]).unwrap();
+            assert!((rect.size.width - expected_width).abs() < 0.001, "{count}: {rect:?}");
+        }
+    }
+
+    #[test]
     fn unsupported_grid_syntax_is_not_approximated() {
         for unsupported in [
             json!({"gridAutoFlow": "dense"}),
@@ -439,8 +651,27 @@ mod tests {
             json!({"gridTemplateAreas": ["main"]}),
             json!({"gridTemplateColumns": [{"repeat": [2, 20]}]}),
             json!({"gridTemplateRows": "subgrid"}),
-            json!({"gridRowStart": "main"}),
-            json!({"gridColumnStart": {"line": 1, "name": "main"}}),
+            json!({"gridRowStart": "span"}),
+            json!({"gridColumnStart": {"line": 0, "name": "main"}}),
+            json!({"gridColumnEnd": {"span": -1, "name": "main"}}),
+            json!({"gridColumnStart": {"line": 1, "name": "main", "extra": true}}),
+            json!({"gridTemplateColumns": [{"names": ["bad name"]}, 20]}),
+            json!({"gridTemplateColumns": [{"repeat": {"count": 0, "tracks": [20]}}]}),
+            json!({"gridTemplateColumns": [{"repeat": {"count": 1.5, "tracks": [20]}}]}),
+            json!({"gridTemplateColumns": [{"repeat": {"count": 2, "tracks": []}}]}),
+            json!({"gridTemplateColumns": [{"repeat": {"count": 2, "tracks": [{"repeat": {"count": 2, "tracks": [20]}}]}}]}),
+            json!({"gridTemplateColumns": [{"repeat": {"count": 10000, "tracks": [20, 30]}}]}),
+            json!({"gridTemplateColumns": [{"repeat": {"count": "auto-fill", "tracks": [{"fr": 1}]}}]}),
+            json!({"gridTemplateColumns": ["auto", {"repeat": {"count": "auto-fit", "tracks": [20]}}]}),
+            json!({"gridTemplateColumns": [
+                {"repeat": {"count": "auto-fill", "tracks": [20]}},
+                {"repeat": {"count": "auto-fit", "tracks": [20]}}
+            ]}),
+            json!({"gridTemplateColumns": [{"percent": 0.5, "length": 20}]}),
+            json!({"gridTemplateAreas": [["a", "a"], ["a", "."]]}),
+            json!({"gridTemplateAreas": [["a"], ["b", "b"]]}),
+            json!({"gridTemplateAreas": [["bad name"]]}),
+            json!({"order": 1}),
         ] {
             assert!(std::panic::catch_unwind(|| style(&unsupported)).is_err(), "{unsupported}");
         }

@@ -1266,11 +1266,74 @@ function gridFuzzInput(random, index) {
       justifyContent: 'start', alignContent: 'start', justifyItems: 'start', alignItems: 'start'
     }
   }] };
-  const count = integer(8, 20);
+  // Rotate template families independently of flow, so each family exercises
+  // all four flows. This consumes only the domain-separated grid RNG.
+  const family = Math.floor(index / 4) % 6;
+  const rootStyle = input.nodes[0].style;
+  const namedTracks = (count, name) => [
+    { names: [`${name}-start`, name] },
+    ...tracks(count).flatMap(track => [track, { names: [name] }]),
+    { names: [`${name}-end`] }
+  ];
+  const namedPlacement = name => pick([
+    [name, 'auto'],
+    [{ line: integer(1, 3), name }, { span: 1 }],
+    [{ line: -integer(1, 3), name }, 'auto'],
+    [1, { span: integer(1, 3), name }],
+    [{ span: integer(1, 3), name }, -1],
+    [{ line: integer(1, 2), name: `${name}-missing` }, 'auto']
+  ]);
+  if (family === 1) {
+    rootStyle.gridTemplateRows = namedTracks(rows, 'row-edge');
+    rootStyle.gridTemplateColumns = namedTracks(columns, 'column-edge');
+  } else if (family === 2) {
+    rootStyle.gridTemplateAreas = [
+      ['header', 'header', 'header'],
+      ['nav', 'main', 'main'],
+      ['nav', '.', '.']
+    ];
+    // Sometimes areas, rather than authored sizes, establish explicit extent.
+    rootStyle.gridTemplateRows = pick(['none', [32], [32, 48, 24]]);
+    rootStyle.gridTemplateColumns = pick(['none', [48], [48, 64, 32]]);
+  } else if (family >= 3) {
+    const count = family === 3 ? integer(2, 4) : family === 4 ? 'auto-fill' : 'auto-fit';
+    const fixed = () => pick([
+      integer(32, 56), { percent: 0.15 },
+      { minmax: [integer(24, 40), { fr: integer(1, 2) }] },
+      { minmax: ['min-content', integer(40, 56)] }
+    ]);
+    const pattern = [
+      { names: ['column-edge'] }, fixed(), { names: ['column-middle'] }
+    ];
+    if (integer(0, 1)) pattern.push(fixed(), { names: ['column-edge'] });
+    rootStyle.width = integer(220, 320);
+    rootStyle.gridTemplateColumns = [
+      { names: ['shell-start'] }, 24,
+      { names: ['repeat-start'] }, { repeat: { count, tracks: pattern } },
+      { names: ['repeat-end'] }, 24, { names: ['shell-end'] }
+    ];
+    // A second, adjacent integer repetition remains legal beside an auto repeat.
+    if (integer(0, 1)) rootStyle.gridTemplateColumns.splice(4, 0,
+      { repeat: { count: 2, tracks: [{ names: ['column-edge'] }, 16] } });
+  }
+  const count = family >= 4 ? integer(1, 6) : integer(8, 20);
   for (let i = 0; i < count; i++) {
     // Mix automatic, row-locked, column-locked and definite items in source order.
-    const [gridRowStart, gridRowEnd] = placement(rows, i % 6 === 3 || i % 6 === 5);
-    const [gridColumnStart, gridColumnEnd] = placement(columns, i % 6 === 4 || i % 6 === 5);
+    let [gridRowStart, gridRowEnd] = placement(rows, i % 6 === 3 || i % 6 === 5);
+    let [gridColumnStart, gridColumnEnd] = placement(columns, i % 6 === 4 || i % 6 === 5);
+    if (family === 1 && i % 2 === 0) {
+      [gridRowStart, gridRowEnd] = namedPlacement('row-edge');
+      [gridColumnStart, gridColumnEnd] = namedPlacement('column-edge');
+    } else if (family === 2 && i % 2 === 0) {
+      const area = pick(['header', 'nav', 'main']);
+      gridRowStart = gridRowEnd = gridColumnStart = gridColumnEnd = area;
+      if (i % 4 === 0) {
+        gridRowStart = `${area}-start`;
+        gridColumnEnd = `${area}-end`;
+      }
+    } else if (family >= 3 && i % 3 === 0) {
+      [gridColumnStart, gridColumnEnd] = namedPlacement('column-edge');
+    }
     input.nodes.push({ parent: 0, style: {
       display: 'block', boxSizing: 'border-box', width: integer(6, 18), height: integer(6, 18),
       order: [-2, 1, -2, 0, 1][i % 5],
@@ -1338,7 +1401,7 @@ async function main() {
   const gridRandom = randomSource((options.seed ^ 0x67726964) >>> 0);
   for (let index = 0; index < options.gridFuzz; index++) {
     const input = gridFuzzInput(gridRandom, index), name = `grid-fuzz-${options.seed}-${index}`;
-    const result = await runFixture({ name, kind: 'chrome', input, features: ['seeded-grid-auto-placement'] }, name, true);
+    const result = await runFixture({ name, kind: 'chrome', input, features: ['seeded-grid-auto-placement', 'seeded-grid-names-areas-repeat'] }, name, true);
     if (result.mismatches?.length) {
       const reduced = await reduceFailure(input, result.mismatches[0]);
       result.reducedReproduction = await saveFailure(name, reduced.input, {

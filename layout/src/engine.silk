@@ -1100,7 +1100,6 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   while true {
     let viewportLayout = run layoutNode(&nodes, &mut boxes, &mut measurer, 0, &input)
     drop viewportLayout
-    if !boxes.hasAutoScrollbars { run boxes.captureSnapshot() }
     let overflow = run positionTree(&nodes, &mut boxes, &mut measurer, viewport, tree.viewportScrollOffset)
     boxes.stats.passes = boxes.stats.passes + 1
     if !boxes.needsRelayout {

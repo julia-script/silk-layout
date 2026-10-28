@@ -4,7 +4,7 @@ import context { outOfFlow }
 import style { Float, Dimension, Edges, Position, WritingMode }
 import tree { Tree, NO_NODE }
 import box_tree { BoxTree, BoxNode }
-import layout_cache { LayoutCache, BoxFacts, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW, REUSE_LEVEL, REUSE_STATIC, FACT_FREE }
+import layout_cache { LayoutCache, BoxFacts, REUSE_NONE, REUSE_INDEPENDENT, REUSE_IN_FLOW, REUSE_LEVEL, FACT_FREE }
 
 // Kept results are addressed by generated box index, so they survive only
 // while box construction yields the same boxes. Scroll offsets only move
@@ -204,9 +204,6 @@ pub fn invalidateUnmatched(nodes: &BoxTree, cache: &mut LayoutCache, changed: &[
 // floats would otherwise join exclusions it shares with its siblings. So is
 // one with negative margins, which could lift a box into the floats above it.
 //
-// It also carries REUSE_STATIC where no box in the subtree is relatively or
-// sticky positioned, so positioning moves none of its fragments.
-//
 // viewportFree: which boxes head a subtree whose layout never reads the
 // initial containing block or the scrollport limits passed down for
 // orthogonal flows: no box in it is replaced, fixed, or orthogonal to its
@@ -224,7 +221,7 @@ pub effect fn markSubtrees(nodes: &BoxTree, facts: &mut BoxFacts) ! OutOfMemoryE
     run facts.own.append(ownFacts(nodes, index))
     index = index + 1
   }
-  run facts.reusable.appendRepeated(REUSE_IN_FLOW | REUSE_STATIC, count)
+  run facts.reusable.appendRepeated(REUSE_IN_FLOW, count)
   run facts.viewportFree.appendRepeated(true, count)
   let own = facts.own.asSlice()
   let levels = facts.reusable.asMutSlice()
@@ -235,18 +232,14 @@ pub effect fn markSubtrees(nodes: &BoxTree, facts: &mut BoxFacts) ! OutOfMemoryE
     index = index - 1
     let mut level = levels[index] & REUSE_LEVEL
     if (own[index] & REUSE_LEVEL) < level { level = own[index] & REUSE_LEVEL }
-    let still = levels[index] & own[index] & REUSE_STATIC
     let free = frees[index] && (own[index] & FACT_FREE) != 0
-    levels[index] = level | still
+    levels[index] = level
     frees[index] = free
     let parent = nodes.node(index).parent
     if parent != NO_NODE {
       if !free { frees[parent] = false }
       let inherited = passedUp(nodes, index, level)
-      let parentLevel = levels[parent] & REUSE_LEVEL
-      let parentStill = levels[parent] & still
-      if inherited < parentLevel { levels[parent] = inherited | parentStill }
-      else { levels[parent] = parentLevel | parentStill }
+      if inherited < levels[parent] { levels[parent] = inherited }
     }
   }
 }
@@ -264,7 +257,6 @@ fn ownFacts(nodes: &BoxTree, index: usize) -> u8 {
   let mut facts = REUSE_IN_FLOW
   if outOfFlow(style) || node.interruptionFirst != NO_NODE { facts = REUSE_NONE }
   else if !nonNegative(&style.margin) { facts = REUSE_INDEPENDENT }
-  if style.position != Position.Relative && style.position != Position.Sticky { facts = facts | REUSE_STATIC }
   let horizontal = style.writingMode == WritingMode.HorizontalTb
   let mut free = !style.replaced && style.position != Position.Fixed
   if node.parent == NO_NODE { free = free && horizontal }
@@ -334,17 +326,15 @@ pub effect fn remarkSubtrees(tree: &Tree, nodes: &BoxTree, since: usize, facts: 
     at = at - 1
     let box = order.get(at)
     let mut level = own[box] & REUSE_LEVEL
-    let mut still = own[box] & REUSE_STATIC
     let mut free = (own[box] & FACT_FREE) != 0
     let mut child = nodes.node(box).firstChild
     while child != NO_NODE {
       let inherited = passedUp(nodes, child, levels[child] & REUSE_LEVEL)
       if inherited < level { level = inherited }
-      still = still & levels[child]
       free = free && frees[child]
       child = nodes.node(child).nextSibling
     }
-    levels[box] = level | still
+    levels[box] = level
     frees[box] = free
   }
   return move changed

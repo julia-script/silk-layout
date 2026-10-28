@@ -218,7 +218,8 @@ impl LayoutCache {
     self.layouts.clear()
     self.dead = 0
     self.touched = 0
-    self.results.clear()
+    // Results stay allocated and written: one is read only through a valid
+    // range, and ranges are cleared, so reserveBoxes need not refill them.
     self.ranges.clear()
     self.rotatedFloats = true
     self.floats.clear()

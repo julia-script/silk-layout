@@ -798,6 +798,34 @@ test effect fn unreadComputesResolveLikeFreshOnes() ! OutOfMemoryError | TextErr
   run Testing.expect(same, "world locations resolved after unread computes match a fresh compute")
 }
 
+test effect fn deferredContentMinimumsStillStopShrinking() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  style.width = Dimension.px(30.0)
+  let mut tree = run Tree.make(move style) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let first = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let second = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(first, 0)
+  run tree.setMeasurement(second, 0)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 20.0, maximum: 60.0, height: 18.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  // §4.5: the automatic minimum is the min-content width, measured only once
+  // the line shrinks.
+  let firstBox = output.boxes.get(output.firstBySource.get(first.index))
+  let secondBox = output.boxes.get(output.firstBySource.get(second.index))
+  run Testing.expect(firstBox.size.width == 20.0 && secondBox.size.width == 20.0 && secondBox.location.x == 20.0, "shrinking items stop at their min-content width")
+  let mut wide = Style.make()
+  wide.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  wide.width = Dimension.px(300.0)
+  run tree.setStyle(root, move wide)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let grown = output.boxes.get(output.firstBySource.get(second.index))
+  run Testing.expect(grown.size.width == 60.0 && grown.location.x == 60.0, "a line with room keeps max-content widths")
+}
+
 test effect fn repeatedResizesLayOutAfresh() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)

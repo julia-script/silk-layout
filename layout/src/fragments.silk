@@ -917,7 +917,7 @@ impl FragmentArena {
   }
   // Keeps the previous range [start, end) in place as the next fragments,
   // under `parent`, recorded as settled; see canKeep.
-  pub effect fn keepRange(self: &mut Self, start: usize, end: usize, parent: usize) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn keepRange(self: &mut Self, start: usize, end: usize, parent: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
     run self.settled.reserve(1)
     let overflow = self.values.asSlice()[start].scrollableOverflow
     let mut texts = self.textMarks.get(end - 1)

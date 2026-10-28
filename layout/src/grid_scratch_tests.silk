@@ -14,11 +14,17 @@ test effect fn gridScratchResetInvalidatesPlacementIdentity()
   run first.value.items.append(7) |> Effect.provideMut<Allocator>(&mut allocator)
   pool.put(move first)
   let repeated = run pool.take(3, 8) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(!repeated.fresh && repeated.value.items.get(0) == 7, "probes share placement within a compute")
+  run Testing.expect(
+    !repeated.fresh && repeated.value.items.get(0) == 7,
+    "probes share placement within a compute",
+  )
   pool.put(move repeated)
   pool.reset()
   let regenerated = run pool.take(3, 12) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(regenerated.fresh && regenerated.value.items.length() == 0, "regenerated box ids cannot retain old placement")
+  run Testing.expect(
+    regenerated.fresh && regenerated.value.items.length() == 0,
+    "regenerated box ids cannot retain old placement",
+  )
   pool.put(move regenerated)
 }
 
@@ -36,8 +42,14 @@ test effect fn nestedGridScratchKeepsParentAndChildSeparate()
   pool.put(move parent)
   let parentAgain = run pool.take(0, 8) |> Effect.provideMut<Allocator>(&mut allocator)
   let childAgain = run pool.take(1, 8) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(!parentAgain.fresh && !childAgain.fresh, "both nested placements remain cached")
-  run Testing.expect(parentAgain.value.items.get(0) == 1 && childAgain.value.items.get(0) == 2, "nested grid slots remain distinct after return")
+  run Testing.expect(
+    !parentAgain.fresh && !childAgain.fresh,
+    "both nested placements remain cached",
+  )
+  run Testing.expect(
+    parentAgain.value.items.get(0) == 1 && childAgain.value.items.get(0) == 2,
+    "nested grid slots remain distinct after return",
+  )
   pool.put(move childAgain)
   pool.put(move parentAgain)
 }

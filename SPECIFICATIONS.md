@@ -34,6 +34,8 @@ This phase accepts `grid`, `block grid`, `inline-grid`, and `inline grid`, build
 
 Grid containers are **monolithic in fragmented layout**: internal row breaks and grid-specific break propagation from [Grid §13](https://drafts.csswg.org/css-grid-2/#pagination) are not implemented. This is a known coverage gap, not a specification-permitted substitute for the grid fragmentation algorithm.
 
+Grid probes and final layout share the generated in-flow item list within a compute. A grid-specific scratch pool keeps nested grids' lists separate and retains their capacity across normal, early-cutoff and fragmented computes. Its box-id index is rebuilt lazily when a compute encounters a grid; no item identity survives into the next compute. This is scratch reuse, not cross-compute placement caching or additional track-layout coverage.
+
 Original `grid-*.json` phase-1 fixtures include hand-derived geometry and normative anchors for the narrow box-generation behavior. Their Chrome counterparts use only cases whose normative geometry should agree with the single-column phase; no browser result is claimed until those controls are executed. The Chrome adapter serializes the full structured longhand schema and retains requested, specified, computed and `CSS.supports` evidence, including used-value track-list serialization. Grid fuzzing and a Grid performance/conformance headline are deferred.
 
 ### Existing block and flex coverage

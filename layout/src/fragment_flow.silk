@@ -7,6 +7,7 @@ import tree { Tree, LayoutTree, NO_NODE }
 import box_tree as Boxes
 import box_tree { BoxTree }
 import layout_pass { LayoutPass }
+import grid_scratch { GridScratchPool }
 import context { Input }
 import fragmentation { Fragmentainers, Fragmentainer, FragmentAncestor, FragmentationError }
 import breaks { BreakRelaxation, nextRelaxation }
@@ -106,11 +107,13 @@ pub effect fn computeFragmented<'frames, 'source, M: Measure + TextMeasure>(tree
   run frames.validate()
   // Fragmented results are not kept between computes.
   output.invalidate()
+  output.gridScratch.reset()
   TextMeasure.beginTextLayout(&mut measurer)
   let mut nodes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), frames.writingMode, frames.direction)
   nodes.prepareFragmentation(frames.writingMode)
   run output.prepare(nodes.boxes.length())
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
+  pass.gridScratch = Intrinsic.replace(output.gridScratch, GridScratchPool.make())
   pass.frames = move frames
   run pass.beginFrame(0)
   let first = run pass.requiredFrame(0)
@@ -128,7 +131,9 @@ pub effect fn computeFragmented<'frames, 'source, M: Measure + TextMeasure>(tree
     }
     let overflow = run positionFragmentedTree(&nodes, &mut pass, &mut measurer, viewport, tree.viewportScrollOffset)
     if !pass.needsRelayout {
+      let keptGridScratch = Intrinsic.replace(pass.gridScratch, GridScratchPool.make())
       drop pass
+      output.gridScratch = move keptGridScratch
       output.fragments.deferLocations()
       output.viewportOverflow = overflow
       output.adopt(move nodes)

@@ -1,0 +1,72 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.usize
+
+// Generated, in-flow child box ids in source order, shared by this compute's
+// probes and final layout. Geometry-dependent placement is not retained here.
+pub struct GridScratch {
+  pub items: List<usize>
+}
+
+impl GridScratch {
+  pub fn make() -> GridScratch {
+    return GridScratch { items: List<usize>.make() }
+  }
+}
+
+// Moving the list out lets recursive child layout borrow the pool independently.
+// A box must return its lease before taking that same box again.
+pub struct GridLease {
+  pub fresh: bool,
+  pub value: GridScratch,
+  slot: usize
+}
+
+pub struct GridScratchPool {
+  index: List<usize>,
+  slots: List<GridScratch>,
+  used: usize,
+}
+
+impl GridScratchPool {
+  pub fn make() -> GridScratchPool {
+    return GridScratchPool { index: List<usize>.make(), slots: List<GridScratch>.make(), used: 0 }
+  }
+
+  // Box ids can change meaning between computes. Keep every list's capacity,
+  // but lazily rebuild the index only if this compute actually encounters grid.
+  pub fn reset(self: &mut Self) {
+    self.index.clear()
+    self.used = 0
+  }
+
+  pub effect fn take(self: &mut Self, boxId: usize, boxCount: usize) -> GridLease
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    if self.index.length() < boxCount {
+      let additional = boxCount - self.index.length()
+      run self.index.appendRepeated(usize.MAX, additional)
+    }
+    let mut slot = self.index.get(boxId)
+    let fresh = slot == usize.MAX
+    if fresh {
+      slot = self.used
+      if slot == self.slots.length() {
+        run self.slots.append(GridScratch.make())
+      }
+      self.used = self.used + 1
+      self.index.set(boxId, slot)
+    }
+    let slots = self.slots.asMutSlice()
+    let mut value = Intrinsic.replace(slots[slot], GridScratch.make())
+    if fresh {
+      value.items.clear()
+    }
+    return GridLease { fresh: fresh, value: move value, slot: slot }
+  }
+
+  pub fn put(self: &mut Self, lease: GridLease) {
+    let slots = self.slots.asMutSlice()
+    slots[lease.slot] = move lease.value
+  }
+}

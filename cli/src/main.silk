@@ -12,6 +12,9 @@ import silk.json_output { JsonOptions }
 import silk.os_standard_input { OsStandardInput }
 import silk.standard_input { StandardInput, StreamReadError }
 import silk.os_writer { StdoutWriter, StderrWriter }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
+import silk.system_clock { Instant, SystemClock }
 import silk.writer { Writer, WriterError }
 import silk.i32
 import layout.lib as Engine
@@ -371,10 +374,32 @@ effect fn parseScrollOffset(value: &Value) -> Point ! ProtocolError {
   return Point { x: x, y: y }
 }
 
+fn elapsed(start: &Instant, end: &Instant) -> i64 {
+  return (SystemClock.seconds(end) - SystemClock.seconds(start)) * 1000000000
+    + SystemClock.nanoseconds(end) - SystemClock.nanoseconds(start)
+}
+
+// Benchmark mode: one line on stderr with every compute duration in nanoseconds.
+effect fn reportSamples(samples: &List<i64>) ! JsonError | WriterError {
+  let mut stderr = StderrWriter.make()
+  run writeSamples(samples) |> Effect.provideMut<Writer>(&mut stderr)
+}
+
+effect fn writeSamples(samples: &List<i64>) ! JsonError | WriterError ? &mut Writer {
+  run Writer.writeString("{\"layoutNs\":[")
+  let mut index: usize = 0
+  while index < samples.length() {
+    if index > 0 { run Writer.writeString(",") }
+    run Json.serialize(&samples.asSlice()[index], &JsonOptions.compact())
+    index = index + 1
+  }
+  run Writer.writeString("]}\n")
+}
+
 effect fn execute(document: &Value)
   ! ProtocolError | OutOfMemoryError | InvalidNode | JsonError | WriterError | TextError | FragmentationError
   ? &mut Allocator | &mut Writer {
-  run P.fields(document, &["viewport", "viewportScrollOffset", "scrollbars", "fonts", "nodes", "fragmentation"])
+  run P.fields(document, &["viewport", "viewportScrollOffset", "scrollbars", "fonts", "nodes", "fragmentation", "benchmark"])
   let viewportValue = run P.required(document, "viewport")
   run P.fields(viewportValue, &["width", "height"])
   let viewport = OptionalSize.definite(
@@ -463,6 +488,23 @@ effect fn execute(document: &Value)
     run Engine.computeFragmented<Fixtures>(&tree, &mut output, &mut fixtures, viewport, request.view())
   } else {
     run Engine.compute<Fixtures>(&tree, &mut output, &mut fixtures, viewport)
+  }
+  if P.has(document, "benchmark") {
+    let benchmark = run P.required(document, "benchmark")
+    run P.fields(benchmark, &["iterations"])
+    let iterations = run P.integer(run P.required(benchmark, "iterations"))
+    if iterations < 1 { fail P.invalid("benchmark.iterations must be positive") }
+    let mut samples = List<i64>.make()
+    let mut clock = OsMonotonicClock.make()
+    let mut iteration: i32 = 0
+    while iteration < iterations {
+      let start = run MonotonicClock.now() |> Effect.provideMut<MonotonicClock>(&mut clock)
+      run Engine.compute<Fixtures>(&tree, &mut output, &mut fixtures, viewport)
+      let end = run MonotonicClock.now() |> Effect.provideMut<MonotonicClock>(&mut clock)
+      run samples.append(elapsed(&start, &end))
+      iteration = iteration + 1
+    }
+    run reportSamples(&samples)
   }
   run writeOutput(&tree, &output)
 }

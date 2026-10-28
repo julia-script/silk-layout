@@ -4,10 +4,10 @@ MIT-licensed block and flexbox layout in safe Silk, with specification-derived a
 
 ## Build and check
 
-The workspace pins published Silk `0.1.0-dev.20+10a8c67813a1`. Use an LLVM 22 clang; set `SILK_CLANG` to its absolute path if it is not automatically discovered.
+The workspace pins published Silk `0.1.0-dev.22+5cd5bc433c4e`. Use an LLVM 22 clang; set `SILK_CLANG` to its absolute path if it is not automatically discovered.
 
 ```sh
-silk toolchain install 0.1.0-dev.20+10a8c67813a1
+silk toolchain install 0.1.0-dev.22+5cd5bc433c4e
 scripts/check
 silk build --package silk_layout_cli
 python3 scripts/fetch-specs.py
@@ -188,5 +188,7 @@ python3 scripts/bench.py --cli "$CLI"
 Spec fixtures carry normative URLs and authored expected geometry. Every supplied assertion, including `rects`, is checked regardless of feature labels. The `inline-fragments` label only opts browser comparisons into rectangle-by-rectangle matching. Browser runs use the installed Chrome (or `--chrome PATH`); `--chrome-version Chrome/VERSION` rejects a different version. Failures and reduced inputs stay under ignored `.cache/chrome-diff/`. Unsupported oracle adapters are reported and exit nonzero, not counted as passes. Differential/fuzz runs are not a PR gate.
 
 Benchmarks cover block stacks, growing/wrapping flex items, nested containers and measured leaves. They check output geometry before reporting end-to-end median wall time, including process startup and JSON I/O. `--record` explicitly writes the baseline; wall time is not an instruction-count or browser-performance comparison.
+
+`scripts/bench-compare` measures layout time against [taffy](https://github.com/DioxusLabs/taffy) (Rust, pinned crates.io release) and [yoga](https://github.com/facebook/yoga) (C++, pinned commit) on the shared workloads in `bench/compare/workloads.py`: random deep flex trees, block stacks, growing and wrapping flex lines, a nested chain, measured leaves, and a card feed. Every harness reads the same document, times only `compute` (no process startup, JSON or tree construction), and dumps absolute border boxes, which the script compares at 0.05 px. Taffy and yoga rebuild their tree for every iteration so their caches never help. Yoga has no block layout, so its harness models block containers as non-shrinking columns, and it has no CSS automatic minimum size, so random flex trees differ from it by design. The CLI's root `"benchmark":{"iterations":N}` field repeats `compute` and prints the per-call nanoseconds on stderr. The comparison needs cargo, cmake and a C++20 compiler and is not a PR gate.
 
 Compiler workarounds are recorded in [LIMITATIONS.md](LIMITATIONS.md). No compiler or stdlib patches are vendored.

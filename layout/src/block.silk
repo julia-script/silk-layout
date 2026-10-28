@@ -147,6 +147,33 @@ pub effect fn layoutBlock<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   return result
 }
 
+/// `layoutBlockPass` for a block without in-flow children outside fragmentation: no child
+/// loop, so the box's size and margins follow from its own style alone.
+fn leafBlock(style: &Style, input: &Input, physicalBox: &ResolvedBox, box: &ResolvedBox, axes: &Axes, formattingRoot: bool, collapseTop: bool, collapseBottom: bool, bfc: &BfcState) -> Layout {
+  let externalAxes = Axes.make(input.parentWritingMode)
+  let externalMargin = externalAxes.edges(physicalBox.margin)
+  let top = Margins.single(externalMargin.top)
+  let mut bottom = Margins.single(externalMargin.bottom)
+  let mut width = clamp(0.0 + box.inset.horizontal(), box.min.width, box.max.width)
+  if box.size.widthDefinite { width = box.size.width }
+  let bottomAdjoins = collapseBottom && !(collapseTop && box.min.height > box.inset.vertical())
+  if bottomAdjoins { bottom = bottom.join(Margins.zero()) }
+  let mut cursor = 0.0
+  if formattingRoot { cursor = max(cursor, bfc.bottom(input.bfcContentOrigin)) }
+  let mut height = max(0.0, cursor) + box.inset.vertical()
+  height = clamp(height, box.min.height, box.max.height)
+  if box.size.heightDefinite { height = box.size.height }
+  let mut result = Layout.zero()
+  result.size = axes.size(Size { width: width, height: height })
+  result.marginTopPositive = top.positive
+  result.marginTopNegative = top.negative
+  result.marginBottomPositive = bottom.positive
+  result.marginBottomNegative = bottom.negative
+  result.collapsesThrough = !formattingRoot && box.inset.vertical() == 0.0 && box.min.height == 0.0 && height == 0.0
+  if result.collapsesThrough { result.collapsesThrough = selfCollapsingSize(style, input.parent, box.size.widthDefinite) }
+  return result
+}
+
 effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, style: &Style, input: &Input, physicalBox: &ResolvedBox, bfc: &mut BfcState, endBefore: usize, endBreak: ForcedBreaks) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let axes = Axes.make(style.writingMode)
   let box = axes.box(physicalBox.*)
@@ -166,6 +193,9 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   if physicalBox.size.heightDefinite {
     parent.height = max(0.0, physicalBox.size.height - physicalBox.inset.vertical())
     parent.heightDefinite = axes.vertical || !input.indefiniteHeight
+  }
+  if !fragmented && !afterProbe && boxChild(nodes, nodes.node(id).firstChild) == NO_NODE {
+    return leafBlock(style, &input, &physicalBox, &box, &axes, formattingRoot, collapseTop, collapseBottom, &bfc)
   }
   let mut availableInline = input.availableWidth
   if axes.vertical { availableInline = input.availableHeight }
@@ -260,7 +290,8 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
         else { childId = run output.popPending(id) }
       } else { childId = boxChild(nodes, nodes.node(childId).nextSibling) }
     }
-    let mut item = children.get(index)
+    let slots = children.asMutSlice()
+    let item = &mut slots[index]
     if fragmented && stopped && !item.parallel { index = index + 1
       continue }
     if fragmented && !item.parallel && item.id == endBefore {

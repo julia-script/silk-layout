@@ -3,6 +3,8 @@ import silk.list { List }
 import silk.usize
 import grid_placement { GridItem, GridBounds, PlacementScratch }
 import grid_tracks { TrackState, TrackContribution }
+import grid_lines { LineNames }
+import grid_template { ExpandedAxis }
 
 pub struct GridAxisScratch {
   pub tracks: List<TrackState>,
@@ -23,6 +25,32 @@ impl GridAxisScratch {
   }
 }
 
+pub struct GridTemplateScratch {
+  pub columns: ExpandedAxis,
+  pub rows: ExpandedAxis,
+  pub columnNames: LineNames,
+  pub rowNames: LineNames,
+  pub collapsedColumns: List<usize>,
+  pub collapsedRows: List<usize>,
+  pub columnRepeat: usize,
+  pub rowRepeat: usize,
+}
+
+impl GridTemplateScratch {
+  pub fn make() -> GridTemplateScratch {
+    return GridTemplateScratch {
+      columns: ExpandedAxis.make(),
+      rows: ExpandedAxis.make(),
+      columnNames: LineNames.make(),
+      rowNames: LineNames.make(),
+      collapsedColumns: List<usize>.make(),
+      collapsedRows: List<usize>.make(),
+      columnRepeat: 0,
+      rowRepeat: 0,
+    }
+  }
+}
+
 // Placement is shared by this compute's probes and final layout. Track sizes
 // are request-dependent and are initialized again before each sizing pass.
 pub struct GridScratch {
@@ -32,6 +60,9 @@ pub struct GridScratch {
   pub columns: GridAxisScratch,
   pub rows: GridAxisScratch,
   pub trackWork: List<usize>,
+  // Lazy zero-or-one payload: ordinary numeric grids need no expanded-template
+  // vectors, and leases do not move all those empty vectors on every probe.
+  pub template: List<GridTemplateScratch>,
 }
 
 impl GridScratch {
@@ -43,6 +74,7 @@ impl GridScratch {
       columns: GridAxisScratch.make(),
       rows: GridAxisScratch.make(),
       trackWork: List<usize>.make(),
+      template: List<GridTemplateScratch>.make(),
     }
   }
 }

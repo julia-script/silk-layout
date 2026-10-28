@@ -7,7 +7,7 @@ import tree { Tree, InvalidNode, NO_NODE }
 import box_tree as Boxes
 import box_tree { BoxKind }
 import grid_style { GridLine, GridLineKind }
-import grid_placement { numericSpan }
+import grid_lines { numericSpan }
 import grid_tracks { TrackState, resolveFlexible }
 
 // Grid §6.1 blockifies grid items and suppresses their float behavior.

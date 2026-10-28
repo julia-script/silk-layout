@@ -102,6 +102,7 @@ pub enum GridLineKind {
 
 pub struct GridLine {
   pub kind: GridLineKind,
+  // Zero with a name is a bare custom-ident; nonzero counts exact named lines.
   pub number: i32,
   pub name: usize
 }
@@ -123,7 +124,7 @@ impl GridLine {
     if self.kind == GridLineKind.Span {
       return self.number > 0
     }
-    return self.number != 0
+    return self.number != 0 || self.name != 0
   }
 
   pub fn same(self: &Self, other: &Self) -> bool {

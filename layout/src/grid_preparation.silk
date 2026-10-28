@@ -1,0 +1,250 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.i32
+import silk.usize
+import axes { Axes }
+import box_tree { BoxTree }
+import context {
+  Input,
+  ResolvedBox,
+  resolves,
+  effectiveDisplay,
+  blockJustification,
+  outOfFlow
+}
+import geometry { OptionalSize, AvailableKind, max, clamp }
+import style { Style, DimensionKind, DisplayOutside, Float, Align, WritingMode }
+import grid_style { GridTemplate }
+import grid_lines { prepareLineNames }
+import grid_template { RepeatSizing, repeatCount, expandAxis, expandedLines }
+import grid_placement { GridItem, collectItems }
+import grid_scratch { GridScratch, GridTemplateScratch }
+
+pub fn needsPreparation(template: &GridTemplate) -> bool with Intrinsic.inlineAlways() {
+  return template.rows.repeats.length() != 0 || template.columns.repeats.length() != 0
+    || template.rows.lines.length() != 0
+    || template.columns.lines.length() != 0
+    || template.areaRows != 0
+}
+
+// A shrink-to-fit or min/max relayout gives the engine a used size, not a new
+// definite preferred size for repeat counting. Preserve author/parent constraints
+// and distinguish fill-available sizing from content-derived sizing.
+fn preferredSizes(
+  style: &Style,
+  input: &Input,
+  logical: &ResolvedBox,
+  limits: &ResolvedBox,
+  axis: &Axes,
+) -> OptionalSize {
+  let mut result = axis.optional(limits.size)
+  let used = axis.optional(logical.size)
+  let minimum = axis.size(limits.min)
+  let maximum = axis.size(limits.max)
+  result.widthDefinite = resolves(style.width, input.parent.widthDefinite)
+    || (input.known.widthDefinite && !input.indefiniteWidth)
+  result.heightDefinite = resolves(style.height, input.parent.heightDefinite)
+    || (input.known.heightDefinite && !input.indefiniteHeight)
+  if result.widthDefinite {
+    result.width = clamp(result.width, minimum.width, max(minimum.width, maximum.width))
+  }
+  if result.heightDefinite {
+    result.height = clamp(result.height, minimum.height, max(minimum.height, maximum.height))
+  }
+
+  let horizontal = style.writingMode == WritingMode.HorizontalTb
+  let parentHorizontal = input.parentWritingMode == WritingMode.HorizontalTb
+  let justification = blockJustification(style, input)
+  let mut autoMargin = style.margin.left.kind == DimensionKind.Auto
+    || style.margin.right.kind == DimensionKind.Auto
+  if !parentHorizontal {
+    autoMargin = style.margin.top.kind == DimensionKind.Auto
+      || style.margin.bottom.kind == DimensionKind.Auto
+  }
+  let stretch = justification == Align.Stretch && !autoMargin
+  let fit = justification != Align.Normal && !stretch
+  let floating = style.float != Float.None && !input.blockify
+  let ordinary = effectiveDisplay(style, input).outsideIs(DisplayOutside.Block) && !floating
+    && !outOfFlow(style)
+  let fill = horizontal == parentHorizontal && (ordinary || stretch)
+    && ((!input.shrinkToFit && !fit) || stretch)
+  if fill && horizontal && !result.widthDefinite && !input.intrinsicWidth && !input.indefiniteWidth
+    && style.width.kind == DimensionKind.Auto
+    && input.availableWidth.kind == AvailableKind.Definite
+    && used.widthDefinite {
+    result.width = used.width
+    result.widthDefinite = true
+  }
+  if fill && !horizontal && !result.heightDefinite && !input.intrinsicHeight
+    && !input.indefiniteHeight
+    && style.height.kind == DimensionKind.Auto
+    && input.availableHeight.kind == AvailableKind.Definite
+    && used.heightDefinite {
+    result.height = used.height
+    result.heightDefinite = true
+  }
+
+  // The engine has already performed aspect-ratio transfer and min/max clamping.
+  // Only a definite opposite axis can make this a content-independent size.
+  if style.aspectRatio > 0.0 {
+    if result.heightDefinite && !result.widthDefinite && used.widthDefinite
+      && !input.indefiniteWidth {
+      result.width = used.width
+      result.widthDefinite = true
+    }
+    if result.widthDefinite && !result.heightDefinite && used.heightDefinite
+      && !input.indefiniteHeight {
+      result.height = used.height
+      result.heightDefinite = true
+    }
+  }
+  return axis.optional(result)
+}
+
+// A maximum end at each span start plus a prefix maximum marks occupancy in
+// O(items + repeated tracks), including spans that start outside the fit range.
+effect fn collectCollapsed(
+  items: &[GridItem],
+  columns: bool,
+  origin: i32,
+  first: usize,
+  last: usize,
+  work: &mut List<usize>,
+  result: &mut List<usize>,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  result.clear()
+  if first == last {
+    return
+  }
+  let start = usize.toI32(first) - origin
+  let end = usize.toI32(last) - origin
+  let count = last - first
+  work.clear()
+  run work.appendRepeated(0, count)
+  let mut index: usize = 0
+  while index < items.length {
+    let mut span = items[index].row
+    if columns {
+      span = items[index].column
+    }
+    if span.start < start {
+      span.start = start
+    }
+    if span.end > end {
+      span.end = end
+    }
+    if span.start < span.end {
+      let at = i32.toUsize(span.start - start)
+      let past = i32.toUsize(span.end - start)
+      if past > work.get(at) {
+        work.set(at, past)
+      }
+    }
+    index = index + 1
+  }
+  let mut past: usize = 0
+  index = 0
+  while index < count {
+    if work.get(index) > past {
+      past = work.get(index)
+    }
+    if index >= past {
+      run result.append(i32.toUsize(start) + index)
+    }
+    index = index + 1
+  }
+}
+
+pub effect fn prepareTemplate<'source>(
+  nodes: &BoxTree<'source>,
+  id: usize,
+  fresh: bool,
+  input: &Input,
+  logical: &ResolvedBox,
+  limits: &ResolvedBox,
+  axis: &Axes,
+  scratch: &mut GridScratch,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  let style = nodes.style(id)
+  let template = &nodes.grids[style.grid]
+  let mut columnRepeat: usize = 0
+  let mut rowRepeat: usize = 0
+  if template.columns.repeats.length() != 0 || template.rows.repeats.length() != 0 {
+    let preferred = preferredSizes(style, input, logical, limits, axis)
+    let mut columns = RepeatSizing {
+      size: max(0.0, preferred.width - logical.inset.horizontal()),
+      minimum: max(0.0, limits.min.width - logical.inset.horizontal()),
+      maximum: max(0.0, limits.max.width - logical.inset.horizontal()),
+      definite: preferred.widthDefinite,
+      gap: style.columnGap,
+    }
+    let mut rows = RepeatSizing {
+      size: max(0.0, preferred.height - logical.inset.vertical()),
+      minimum: max(0.0, limits.min.height - logical.inset.vertical()),
+      maximum: max(0.0, limits.max.height - logical.inset.vertical()),
+      definite: preferred.heightDefinite,
+      gap: style.rowGap,
+    }
+    columns.maximum = max(columns.minimum, columns.maximum)
+    rows.maximum = max(rows.minimum, rows.maximum)
+    columnRepeat = repeatCount(&template.columns, &columns)
+    rowRepeat = repeatCount(&template.rows, &rows)
+  }
+  if scratch.template.length() == 0 {
+    run scratch.template.append(GridTemplateScratch.make())
+  }
+  let prepared = &mut scratch.template.asMutSlice()[0]
+  if !fresh && columnRepeat == prepared.columnRepeat && rowRepeat == prepared.rowRepeat {
+    return
+  }
+  run expandAxis(&template.columns, columnRepeat, template.areaColumns, &mut prepared.columns)
+  run expandAxis(&template.rows, rowRepeat, template.areaRows, &mut prepared.rows)
+  run prepareLineNames(
+    expandedLines(&template.columns, &prepared.columns),
+    template.areas.asSlice(),
+    nodes.gridNames,
+    true,
+    &mut prepared.columnNames,
+  )
+  run prepareLineNames(
+    expandedLines(&template.rows, &prepared.rows),
+    template.areas.asSlice(),
+    nodes.gridNames,
+    false,
+    &mut prepared.rowNames,
+  )
+  scratch.bounds = run collectItems(
+    nodes,
+    id,
+    prepared.rows.explicitTracks,
+    prepared.columns.explicitTracks,
+    &prepared.rowNames,
+    &prepared.columnNames,
+    &mut scratch.items,
+    &mut scratch.placement,
+  )
+  run collectCollapsed(
+    scratch.items.asSlice(),
+    true,
+    scratch.bounds.columnOrigin,
+    prepared.columns.autoFitStart,
+    prepared.columns.autoFitEnd,
+    &mut scratch.trackWork,
+    &mut prepared.collapsedColumns,
+  )
+  run collectCollapsed(
+    scratch.items.asSlice(),
+    false,
+    scratch.bounds.rowOrigin,
+    prepared.rows.autoFitStart,
+    prepared.rows.autoFitEnd,
+    &mut scratch.trackWork,
+    &mut prepared.collapsedRows,
+  )
+  prepared.columnRepeat = columnRepeat
+  prepared.rowRepeat = rowRepeat
+}

@@ -1,0 +1,360 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.f64
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.usize
+import context { UNBOUNDED, resolve }
+import geometry { max }
+import grid_style {
+  GridAxis,
+  GridBreadth,
+  GridBreadthKind,
+  GridNamedLine,
+  GridRepeat,
+  GridRepeatKind,
+  GridTrack,
+  MAX_GRID_TRACKS
+}
+import style { Dimension }
+
+pub struct ExpandedAxis {
+  pub tracks: List<GridTrack>,
+  pub lines: List<GridNamedLine>,
+  pub explicitTracks: usize,
+  pub autoFitStart: usize,
+  pub autoFitEnd: usize,
+  // Authored boundaries map outer names once; repeat-owned names use the
+  // mapped start plus their pattern offset. Retained alongside the output.
+  boundaries: List<usize>
+}
+
+impl ExpandedAxis {
+  pub fn make() -> ExpandedAxis {
+    return ExpandedAxis {
+      tracks: List<GridTrack>.make(),
+      lines: List<GridNamedLine>.make(),
+      explicitTracks: 0,
+      autoFitStart: 0,
+      autoFitEnd: 0,
+      boundaries: List<usize>.make(),
+    }
+  }
+}
+
+pub struct RepeatSizing {
+  pub size: f64,
+  pub minimum: f64,
+  pub maximum: f64,
+  pub definite: bool,
+  pub gap: Dimension
+}
+
+impl Copy for RepeatSizing {}
+
+// GridAxis.valid has bounded all integer expansions and permits one automatic
+// repeat. Reserve its complete pattern before counting additional repetitions.
+fn automaticLimit(axis: &GridAxis) -> usize {
+  let repeats = axis.repeats.asSlice()
+  let mut fixedTracks = axis.tracks.length()
+  let mut automaticLength: usize = 0
+  let mut index: usize = 0
+  while index < repeats.length {
+    let repeat = repeats[index]
+    if repeat.kind == GridRepeatKind.Count {
+      fixedTracks = fixedTracks + repeat.length * (repeat.count - 1)
+    } else {
+      automaticLength = repeat.length
+      fixedTracks = fixedTracks - repeat.length
+    }
+    index = index + 1
+  }
+  if automaticLength == 0 {
+    return 0
+  }
+  return (MAX_GRID_TRACKS - fixedTracks) / automaticLength
+}
+
+fn repetitions(repeat: &GridRepeat, automatic: usize) -> usize {
+  if repeat.kind == GridRepeatKind.Count {
+    return repeat.count
+  }
+  return automatic
+}
+
+fn definiteBreadth(value: &GridBreadth, basis: f64) -> f64 {
+  return max(0.0, value.length + value.percent * basis)
+}
+
+// Negative is the sentinel for neither track-sizing function being definite.
+// CSSWG #4480: a definite min/max constraint is not a percentage-track basis.
+fn countingSize(track: &GridTrack, basis: f64, definite: bool) -> f64 {
+  let minimumDefinite = track.min.kind == GridBreadthKind.Length
+    || (definite && track.min.isFixed())
+  let maximumDefinite = track.max.kind == GridBreadthKind.Length
+    || (definite && track.max.isFixed())
+  if !minimumDefinite && !maximumDefinite {
+    return -1.0
+  }
+  let mut size = 1.0
+  if minimumDefinite {
+    size = max(size, definiteBreadth(&track.min, basis))
+  }
+  if maximumDefinite {
+    size = max(size, definiteBreadth(&track.max, basis))
+  }
+  return size
+}
+
+// CSS Grid 2 §7.2.3.2. Count complete multi-track patterns, including fixed
+// siblings and integer repeats, without allocating or expanding the template.
+pub fn repeatCount(axis: &GridAxis, sizing: &RepeatSizing) -> usize {
+  let limit = automaticLimit(axis)
+  if limit == 0 {
+    return 0
+  }
+  let mut basis = sizing.size
+  let mut roundUp = false
+  if !sizing.definite {
+    if sizing.maximum < UNBOUNDED {
+      basis = sizing.maximum
+    } else if sizing.minimum > 0.0 {
+      basis = sizing.minimum
+      roundUp = true
+    } else {
+      return 1
+    }
+  }
+  if !f64.isFinite(basis) || basis <= 0.0 {
+    return 1
+  }
+  let gap = max(0.0, resolve(sizing.gap, basis, sizing.definite, sizing.gap.value))
+  let tracks = axis.tracks.asSlice()
+  let repeats = axis.repeats.asSlice()
+  let mut fixedSize = 0.0
+  let mut automaticSize = 0.0
+  let mut fixedTracks: usize = 0
+  let mut automaticTracks: usize = 0
+  let mut repeatIndex: usize = 0
+  let mut index: usize = 0
+  while index < tracks.length {
+    while repeatIndex < repeats.length
+      && index >= repeats[repeatIndex].start + repeats[repeatIndex].length {
+      repeatIndex = repeatIndex + 1
+    }
+    let size = countingSize(&tracks[index], basis, sizing.definite)
+    if size < 0.0 {
+      return 1
+    }
+    let mut count: usize = 1
+    let mut automatic = false
+    if repeatIndex < repeats.length && index >= repeats[repeatIndex].start {
+      let repeat = repeats[repeatIndex]
+      automatic = repeat.kind != GridRepeatKind.Count
+      count = repeat.count
+    }
+    if automatic {
+      automaticSize = automaticSize + size
+      automaticTracks = automaticTracks + 1
+    } else {
+      fixedSize = fixedSize + size * usize.toF64(count)
+      fixedTracks = fixedTracks + count
+    }
+    index = index + 1
+  }
+
+  // Subtract the cost of the first repetition rather than adding a gap to the
+  // constraint: that addition can overflow even when the count is small.
+  let mut first = fixedSize + automaticSize
+  let gutters = fixedTracks + automaticTracks - 1
+  if gutters != 0 {
+    first = first + gap * usize.toF64(gutters)
+  }
+  if !f64.isFinite(first) || basis <= first || limit == 1 {
+    return 1
+  }
+  let step = automaticSize + gap * usize.toF64(automaticTracks)
+  if !f64.isFinite(step) {
+    if roundUp {
+      return 2
+    }
+    return 1
+  }
+  let extra = (basis - first) / step
+
+  // Clamp before conversion, then compare actual extents at the boundary.
+  // (21 - 2.1) / 2.1 rounds below 9 even though ten 2.1px tracks fit exactly.
+  // No epsilon: a genuinely smaller constraint must still lose a repetition.
+  if !f64.isFinite(extra) || extra < 0.0 {
+    return 1
+  }
+  let mut count = limit
+  if extra < usize.toF64(limit - 1) {
+    count = f64.toUsize(extra) + 1
+  }
+  if roundUp {
+    if count < limit
+      && repeatedExtent(fixedSize, automaticSize, fixedTracks, automaticTracks, gap, count)
+        < basis {
+      count = count + 1
+    }
+    if count > 1
+      && repeatedExtent(fixedSize, automaticSize, fixedTracks, automaticTracks, gap, count - 1)
+        >= basis {
+      count = count - 1
+    }
+  } else {
+    if count < limit
+      && repeatedExtent(fixedSize, automaticSize, fixedTracks, automaticTracks, gap, count + 1)
+        <= basis {
+      count = count + 1
+    }
+    if count > 1
+      && repeatedExtent(fixedSize, automaticSize, fixedTracks, automaticTracks, gap, count)
+        > basis {
+      count = count - 1
+    }
+  }
+  return count
+}
+
+fn repeatedExtent(
+  fixed: f64,
+  automatic: f64,
+  fixedTracks: usize,
+  automaticTracks: usize,
+  gap: f64,
+  count: usize,
+) -> f64 with Intrinsic.inline() {
+  return fixed + automatic * usize.toF64(count)
+    + gap * usize.toF64(fixedTracks + automaticTracks * count - 1)
+}
+
+pub effect fn expandAxis(
+  axis: &GridAxis,
+  autoRepeatCount: usize,
+  areaTracks: usize,
+  result: &mut ExpandedAxis,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  result.tracks.clear()
+  result.lines.clear()
+  result.boundaries.clear()
+  result.autoFitStart = 0
+  result.autoFitEnd = 0
+  result.explicitTracks = axis.tracks.length()
+  if areaTracks > result.explicitTracks {
+    result.explicitTracks = areaTracks
+  }
+  let repeats = axis.repeats.asSlice()
+  if repeats.length == 0 {
+    return
+  }
+  let mut automatic = autoRepeatCount
+  let limit = automaticLimit(axis)
+  if automatic == 0 {
+    automatic = 1
+  }
+  if limit != 0 && automatic > limit {
+    automatic = limit
+  }
+  let tracks = axis.tracks.asSlice()
+  let mut trackCount = tracks.length
+  let mut index: usize = 0
+  while index < repeats.length {
+    let repeat = repeats[index]
+    trackCount = trackCount + repeat.length * (repetitions(&repeat, automatic) - 1)
+    index = index + 1
+  }
+  let lines = axis.lines.asSlice()
+  let mut lineCount: usize = 0
+  index = 0
+  while index < lines.length {
+    let mut count: usize = 1
+    if lines[index].repeat != 0 {
+      count = repetitions(&repeats[lines[index].repeat - 1], automatic)
+    }
+    if count > usize.MAX - lineCount {
+      fail OutOfMemoryError {}
+    }
+    lineCount = lineCount + count
+    index = index + 1
+  }
+  run result.tracks.reserve(trackCount)
+  run result.lines.reserve(lineCount)
+  run result.boundaries.reserve(tracks.length + 1)
+  let mut repeatIndex: usize = 0
+  index = 0
+  while index < tracks.length {
+    let start = result.tracks.length()
+    if repeatIndex < repeats.length && repeats[repeatIndex].start == index {
+      let repeat = repeats[repeatIndex]
+      let count = repetitions(&repeat, automatic)
+      let mut offset: usize = 0
+      while offset < repeat.length {
+        run result.boundaries.append(start + offset)
+        offset = offset + 1
+      }
+      let mut iteration: usize = 0
+      while iteration < count {
+        offset = 0
+        while offset < repeat.length {
+          run result.tracks.append(tracks[index + offset])
+          offset = offset + 1
+        }
+        iteration = iteration + 1
+      }
+      if repeat.kind == GridRepeatKind.AutoFit {
+        result.autoFitStart = start
+        result.autoFitEnd = result.tracks.length()
+      }
+      index = index + repeat.length
+      repeatIndex = repeatIndex + 1
+    } else {
+      run result.boundaries.append(start)
+      run result.tracks.append(tracks[index])
+      index = index + 1
+    }
+  }
+  run result.boundaries.append(result.tracks.length())
+  let boundaries = result.boundaries.asSlice()
+  index = 0
+  while index < lines.length {
+    let line = lines[index]
+    if line.repeat == 0 {
+      run result.lines.append(
+        GridNamedLine { line: boundaries[line.line], name: line.name, repeat: 0 },
+      )
+    } else {
+      let repeat = repeats[line.repeat - 1]
+      let start = boundaries[repeat.start] + line.line - repeat.start
+      let count = repetitions(&repeat, automatic)
+      let mut iteration: usize = 0
+      while iteration < count {
+        run result.lines.append(
+          GridNamedLine { line: start + iteration * repeat.length, name: line.name, repeat: 0 },
+        )
+        iteration = iteration + 1
+      }
+    }
+    index = index + 1
+  }
+  result.explicitTracks = trackCount
+  if areaTracks > result.explicitTracks {
+    result.explicitTracks = areaTracks
+  }
+}
+
+pub fn expandedTracks<'a>(axis: &'a GridAxis, expanded: &'a ExpandedAxis) -> &'a [GridTrack] {
+  if axis.repeats.length() == 0 {
+    return axis.tracks.asSlice()
+  }
+  return expanded.tracks.asSlice()
+}
+
+pub fn expandedLines<'a>(axis: &'a GridAxis, expanded: &'a ExpandedAxis) -> &'a [GridNamedLine] {
+  if axis.repeats.length() == 0 {
+    return axis.lines.asSlice()
+  }
+  return expanded.lines.asSlice()
+}

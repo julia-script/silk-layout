@@ -24,11 +24,15 @@ import axes { Axes }
 import grid_placement { GridItem, collectItems }
 import grid_style { GridTrack, GridBreadthKind }
 import grid_scratch { GridAxisScratch }
+import grid_lines { LineNames }
+import grid_template { expandedTracks }
+import grid_preparation { needsPreparation, prepareTemplate }
 import grid_contributions { measureContribution }
 import grid_tracks {
   TrackState,
   TrackContribution,
   initializeTracks,
+  collapseTracks,
   resolveIntrinsic,
   maximizeTracks,
   expandFlexible,
@@ -366,6 +370,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
   crossSizing: &AxisSizing,
   template: &[GridTrack],
   automatic: &[GridTrack],
+  collapsed: &[usize],
   crossFinal: bool,
   work: &mut List<usize>,
 )
@@ -382,6 +387,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     sizing.definite,
     &mut own.tracks,
   )
+  collapseTracks(own.tracks.asMutSlice(), collapsed)
   drop run collectContributions(
     nodes,
     &mut output,
@@ -414,6 +420,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
       true,
       &mut own.tracks,
     )
+    collapseTracks(own.tracks.asMutSlice(), collapsed)
     drop run collectContributions(
       nodes,
       &mut output,
@@ -495,13 +502,33 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   base.performLayout = false
   base.baselines = false
   let mut lease = run output.gridScratch.take(id, nodes.boxes.length())
-  if lease.fresh {
+  let prepared = needsPreparation(template)
+  if prepared {
+    run prepareTemplate(nodes, id, lease.fresh, input, &logical, &limits, &axis, &mut lease.value)
+  } else if lease.fresh {
+    let emptyNames = LineNames.make()
     lease.value.bounds = run collectItems(
       nodes,
       id,
+      template.rows.tracks.length(),
+      template.columns.tracks.length(),
+      &emptyNames,
+      &emptyNames,
       &mut lease.value.items,
       &mut lease.value.placement,
     )
+  }
+  let mut columnTemplate = template.columns.tracks.asSlice()
+  let mut rowTemplate = template.rows.tracks.asSlice()
+  let noCollapsed: [usize; 0] = []
+  let mut collapsedColumns: &[usize] = &noCollapsed
+  let mut collapsedRows: &[usize] = &noCollapsed
+  if prepared {
+    let value = &lease.value.template.asSlice()[0]
+    columnTemplate = expandedTracks(&template.columns, &value.columns)
+    rowTemplate = expandedTracks(&template.rows, &value.rows)
+    collapsedColumns = value.collapsedColumns.asSlice()
+    collapsedRows = value.collapsedRows.asSlice()
   }
   let bounds = lease.value.bounds
   let items = lease.value.items.asSlice()
@@ -548,7 +575,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
 
   // §12.1's first column pass estimates rows using their definite maxima.
   run initializeTracks(
-    template.rows.tracks.asSlice(),
+    rowTemplate,
     template.autoRows.asSlice(),
     bounds.rowOrigin,
     bounds.rows,
@@ -556,6 +583,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     logical.size.heightDefinite,
     &mut lease.value.rows.tracks,
   )
+  collapseTracks(lease.value.rows.tracks.asMutSlice(), collapsedRows)
   run sizeAxis(
     nodes,
     &mut output,
@@ -568,8 +596,9 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &lease.value.rows,
     &mut columnSizing,
     &rowSizing,
-    template.columns.tracks.asSlice(),
+    columnTemplate,
     template.autoColumns.asSlice(),
+    collapsedColumns,
     false,
     &mut lease.value.trackWork,
   )
@@ -585,8 +614,9 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &lease.value.columns,
     &mut rowSizing,
     &columnSizing,
-    template.rows.tracks.asSlice(),
+    rowTemplate,
     template.autoRows.asSlice(),
+    collapsedRows,
     true,
     &mut lease.value.trackWork,
   )
@@ -617,8 +647,9 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       &lease.value.rows,
       &mut columnSizing,
       &rowSizing,
-      template.columns.tracks.asSlice(),
+      columnTemplate,
       template.autoColumns.asSlice(),
+      collapsedColumns,
       true,
       &mut lease.value.trackWork,
     )
@@ -649,8 +680,9 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
         &lease.value.columns,
         &mut rowSizing,
         &columnSizing,
-        template.rows.tracks.asSlice(),
+        rowTemplate,
         template.autoRows.asSlice(),
+        collapsedRows,
         true,
         &mut lease.value.trackWork,
       )

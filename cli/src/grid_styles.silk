@@ -236,6 +236,7 @@ effect fn line(value: &Value, tree: &mut Tree) -> GridLine
       if name == "auto" {
         return GridLine.auto()
       }
+      result.number = 0
       result.name = run tree.internGridName(name)
     }
     Value.Number { text: _ } => {

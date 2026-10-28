@@ -298,6 +298,22 @@ impl LayoutCache {
     }
   }
   pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize, floats: &[FloatBox], beside: bool) ! OutOfMemoryError ? &mut Allocator {
+    if floats.length != 0 || id >= self.results.length() || id >= self.ranges.length() {
+      run self.recordFinalGrowing(id, input, layout, start, end, floats, beside)
+      return
+    }
+    // writeRange of a range without floats, in lists sized for the box.
+    let generation = self.generation
+    let ranges = self.ranges.asMutSlice()
+    if ranges[id].stamp != generation {
+      ranges[id].stamp = generation
+      self.stamped = self.stamped + 1
+    }
+    ranges[id].range = FinalRange { valid: true, start: start, end: end, floats: self.floats.length(), floatCount: 0 }
+    ranges[id].kept = FinalRange.none()
+    self.writeResult(id, input, layout, beside)
+  }
+  effect fn recordFinalGrowing(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize, floats: &[FloatBox], beside: bool) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.results.length() {
       let missing = id + 1 - self.results.length()
       run self.results.reserve(missing)
@@ -308,6 +324,9 @@ impl LayoutCache {
     run self.writeRange(id, FinalRange { valid: true, start: start, end: end, floats: first, floatCount: floats.length })
     let ranges = self.ranges.asMutSlice()
     ranges[id].kept = FinalRange.none()
+    self.writeResult(id, input, layout, beside)
+  }
+  fn writeResult(self: &mut Self, id: usize, input: &Input, layout: &Layout, beside: bool) with Intrinsic.inlineAlways() {
     let results = self.results.asMutSlice()
     results[id].input = input.*
     results[id].location = layout.location

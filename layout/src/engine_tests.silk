@@ -742,3 +742,58 @@ test effect fn columnItemsShareTheirBlockAxisProbes() ! OutOfMemoryError | TextE
   run Testing.expect(output.stats.sizeProbes == 1 && output.stats.cacheHits == 1, "a column item's min-content height reuses its max-content probe")
   run Testing.expect(output.boxes.get(output.firstBySource.get(item.index)).size.height == 18.0, "the item keeps its content height")
 }
+
+test effect fn unreadComputesResolveLikeFreshOnes() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut panelStyle = Style.make()
+  panelStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  let panel = run tree.append(root, move panelStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut changed = root
+  let mut at: usize = 0
+  while at < 6 {
+    let mut nested = Style.make()
+    nested.margin.left = Dimension.px(3.0)
+    let inner = run tree.append(panel, move nested) |> Effect.provideMut<Allocator>(&mut allocator)
+    let leaf = run tree.append(inner, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+    run tree.setMeasurement(leaf, 0)
+    if at == 2 { changed = leaf }
+    at = at + 1
+  }
+  let below = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(below, 0)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 20.0, maximum: 60.0, height: 18.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  output.fragments.resolveLocations()
+  // Several computes nobody reads: a resize, a change inside the panel,
+  // then one after it that keeps the panel's fragments where they are.
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(500.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut tall = Style.make()
+  tall.height = Dimension.px(70.0)
+  tall.margin.top = Dimension.px(5.0)
+  run tree.setStyle(changed, move tall)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(500.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut short = Style.make()
+  short.height = Dimension.px(9.0)
+  run tree.setStyle(below, move short)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(500.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let bounds = run output.sourceBounds(below)
+  let mut fresh = LayoutTree.make()
+  run compute(&tree, &mut fresh, &mut content, OptionalSize.definite(500.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  fresh.fragments.resolveLocations()
+  let expected = run fresh.sourceBounds(below)
+  run Testing.expect(bounds.x == expected.x && bounds.y == expected.y && bounds.y > 0.0, "source bounds before resolving match a fresh compute")
+  output.fragments.resolveLocations()
+  let values = output.fragments.values.asSlice()
+  let freshValues = fresh.fragments.values.asSlice()
+  run Testing.expect(values.length == freshValues.length, "the same fragments")
+  let mut same = true
+  let mut index: usize = 0
+  while index < values.length {
+    if values[index].worldLocation.x != freshValues[index].worldLocation.x || values[index].worldLocation.y != freshValues[index].worldLocation.y { same = false }
+    index = index + 1
+  }
+  run Testing.expect(same, "world locations resolved after unread computes match a fresh compute")
+}

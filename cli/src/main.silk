@@ -616,6 +616,7 @@ effect fn execute(document: &Value)
     }
     run reportSamples(&samples, &work, &fixtures)
   }
+  output.fragments.resolveLocations()
   run writeOutput(&tree, &output)
 }
 

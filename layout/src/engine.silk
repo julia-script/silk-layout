@@ -1483,7 +1483,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       output.keptViewport = viewport
       output.keptScroll = tree.viewportScrollOffset
       output.keptScrolls = tree.scrollRevision()
-      output.fragments.resolveLocations()
+      output.fragments.deferLocations()
       output.viewportOverflow = overflow
       output.adopt(move nodes)
       return

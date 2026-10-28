@@ -107,6 +107,16 @@ impl Shift {
   }
 }
 
+// Adds up a fragment's location as resolveLocations does, from the root down.
+fn locate(values: &[Fragment], index: usize) -> Point {
+  let x = values[index].location.x + values[index].visualOffset.x
+  let y = values[index].location.y + values[index].visualOffset.y
+  let parent = values[index].parent
+  if parent == NO_NODE { return Point { x: x, y: y } }
+  let above = locate(values, parent)
+  return Point { x: x + above.x, y: y + above.y }
+}
+
 // Previous fragments edited in a compute that resolveLocations tracks.
 const EDITS_TRACKED: usize = 256
 
@@ -160,6 +170,9 @@ pub struct FragmentArena {
   // fragments outside unmoved kept ranges; and the previous fragments
   // edited in this compute, at most EDITS_TRACKED of them.
   resolveAll: bool, edited: List<usize>,
+  // Whether world locations and text first/last flags await
+  // resolveLocations (see deferLocations).
+  stale: bool,
   afterFlow: bool, flowEnd: usize,
   adopted: List<usize>, previousAdopted: List<usize>,
   // How many times this compute moved the previous output.
@@ -184,6 +197,7 @@ impl FragmentArena {
       tailFragments: List<Fragment>.make(), tailTexts: List<TextFragment>.make(),
       offsets: false,
       resolveAll: true, edited: List<usize>.make(),
+      stale: false,
       afterFlow: false, flowEnd: 0,
       adopted: List<usize>.make(), previousAdopted: List<usize>.make(),
       shifts: 0,
@@ -239,6 +253,8 @@ impl FragmentArena {
       self.offsets = false
       self.resolveAll = true
     }
+    // The edits of an unresolved compute are about to be forgotten.
+    if self.stale { self.resolveAll = true }
     self.edited.clear()
     self.afterFlow = false
     self.shifts = 0
@@ -523,9 +539,22 @@ impl FragmentArena {
     self.offsets = true
     self.resolveAll = true
   }
+  // Leaves world locations and text first/last flags to the first
+  // resolveLocations, so a compute whose output nobody reads in full skips
+  // a walk over every fragment.
+  pub fn deferLocations(self: &mut Self) { self.stale = true }
+  // A fragment's final location relative to the initial containing block,
+  // resolved or not.
+  pub fn worldLocation(self: &Self, index: usize) -> Point {
+    let values = self.values.asSlice()
+    if !self.stale { return values[index].worldLocation }
+    return locate(values, index)
+  }
   // Parents precede children in the arena. Resolve final visual coordinates
   // once, rather than repeatedly walking ancestors for source-bound queries.
+  // Readers of worldLocation, first or last call this first.
   pub fn resolveLocations(self: &mut Self) {
+    self.stale = false
     let all = self.resolveAll
     self.resolveAll = false
     // Sort the few edits, in place.
@@ -958,6 +987,8 @@ impl FragmentArena {
   // texts. The first keeps its place among its siblings and its location;
   // world locations follow from it. Between computes only (settledOutput).
   pub fn spliceFrom(self: &mut Self, start: usize, end: usize, source: &FragmentArena) {
+    // Parents' world locations may be out of date.
+    if self.stale { self.resolveAll = true }
     let firstText = self.textsBefore(start)
     let values = self.values.asMutSlice()
     let from = source.values.asSlice()

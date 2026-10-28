@@ -491,21 +491,25 @@ impl SourceRects {
         continue
       }
       let fragments = self.tree.fragments.values.asSlice()
-      let first = &fragments[self.fragment]
+      let firstIndex = self.fragment
+      let first = &fragments[firstIndex]
       self.fragment = first.nextForBox
       if first.positioningShell || first.source != self.source || (first.kind != FragmentKind.Box && first.kind != FragmentKind.Inline && first.kind != FragmentKind.Text) { continue }
-      let mut rect = Rect { x: first.worldLocation.x, y: first.worldLocation.y, width: first.size.width, height: first.size.height }
+      let origin = self.tree.fragments.worldLocation(firstIndex)
+      let mut rect = Rect { x: origin.x, y: origin.y, width: first.size.width, height: first.size.height }
       if first.kind == FragmentKind.Text {
         let text = self.tree.fragments.texts.get(first.textData)
         while text.kind == TextFragmentKind.Glyphs && self.fragment != NO_NODE {
-          let next = &fragments[self.fragment]
+          let nextIndex = self.fragment
+          let next = &fragments[nextIndex]
           if next.source != self.source || next.kind != FragmentKind.Text || next.parent != first.parent { break }
           let nextText = self.tree.fragments.texts.get(next.textData)
           if nextText.kind != TextFragmentKind.Glyphs || nextText.fontKey != text.fontKey || nextText.bidiLevel != text.bidiLevel { break }
-          let sameHorizontal = next.worldLocation.y == first.worldLocation.y && next.size.height == first.size.height
-          let sameVertical = next.worldLocation.x == first.worldLocation.x && next.size.width == first.size.width
+          let at = self.tree.fragments.worldLocation(nextIndex)
+          let sameHorizontal = at.y == origin.y && next.size.height == first.size.height
+          let sameVertical = at.x == origin.x && next.size.width == first.size.width
           if !sameHorizontal && !sameVertical { break }
-          rect = rect.unionWith(Rect { x: next.worldLocation.x, y: next.worldLocation.y, width: next.size.width, height: next.size.height })
+          rect = rect.unionWith(Rect { x: at.x, y: at.y, width: next.size.width, height: next.size.height })
           self.fragment = next.nextForBox
         }
       }

@@ -1,0 +1,95 @@
+{
+  "name": "grid-template-bare-name-versus-integer",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Bare hero selects hero-start/hero-end, bounding the 20px middle track. Integer 1 hero counts the exact hero name at explicit line 1, not its start alias.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "gridTemplateColumns": [
+            {
+              "names": [
+                "hero"
+              ]
+            },
+            10,
+            {
+              "names": [
+                "hero-start"
+              ]
+            },
+            20,
+            {
+              "names": [
+                "hero-end"
+              ]
+            },
+            30
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": "hero",
+          "gridColumnEnd": "hero",
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "line": 1,
+            "name": "hero"
+          },
+          "gridRowStart": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 20
+      },
+      {
+        "x": 10,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

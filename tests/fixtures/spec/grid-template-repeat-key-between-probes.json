@@ -1,0 +1,123 @@
+{
+  "name": "grid-template-repeat-key-between-probes",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "The nested auto-width grid repeats once under intrinsic inline probes, then four times when the outer fr track provides a definite 100px area. Placement must be rebuilt under the changed repeat-count key.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "gridTemplateColumns": [
+            {
+              "fr": 1
+            }
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fill",
+                "tracks": [
+                  20
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "columnGap": 5
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 10
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 25,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 50,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 75,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

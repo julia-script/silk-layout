@@ -1,0 +1,118 @@
+{
+  "name": "grid-template-auto-fill-pattern-and-siblings",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Two pattern repetitions occupy 11+60+7+5*3=93; three require 129 and do not fit the 101px content box.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 101,
+          "gridTemplateColumns": [
+            11,
+            {
+              "repeat": {
+                "count": "auto-fill",
+                "tracks": [
+                  20,
+                  10
+                ]
+              }
+            },
+            7
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "columnGap": 3
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 101,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 11,
+        "height": 10
+      },
+      {
+        "x": 14,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 37,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 50,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 73,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 86,
+        "y": 0,
+        "width": 7,
+        "height": 10
+      }
+    ]
+  }
+}

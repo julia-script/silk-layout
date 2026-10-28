@@ -1,0 +1,90 @@
+{
+  "name": "grid-template-repeated-boundary-deduplication-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Three 10px repetitions yield four distinct a lines at offsets 0,10,20,30. Duplicate names at joined boundaries count once; the third and reverse second occurrences both lie at 20.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 30,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": 3,
+                "tracks": [
+                  {
+                    "names": [
+                      "a"
+                    ]
+                  },
+                  10,
+                  {
+                    "names": [
+                      "a"
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10,
+            10,
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "line": 3,
+            "name": "a"
+          },
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "line": -2,
+            "name": "a"
+          },
+          "gridRowStart": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "line": 1,
+            "name": "a"
+          },
+          "gridColumnEnd": {
+            "span": 2,
+            "name": "a"
+          },
+          "gridRowStart": 3
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "grid-template-auto-fit-shrink-to-fit-keeps-count",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "The definite maximum admits four repeated tracks. Only the third is occupied, so shrink-to-fit inline size is 20px. That content-derived used size must not recount the explicit grid as one track and turn the item into a 40px implicit column.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "inline-grid",
+          "maxWidth": 100,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fit",
+                "tracks": [
+                  20
+                ]
+              }
+            }
+          ],
+          "gridAutoColumns": [
+            40
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "columnGap": 5
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 3
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "name": "grid-template-missing-names-directional-spans-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Explicit coordinates 0..2 bound the 10,20 tracks. Missing positive/negative names select 3/-1. Backward spans skip end-side implicit lines; forward spans skip start-side implicit lines. Origin -2 gives tracks 5,5,10,20,5,5.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 50,
+          "gridTemplateColumns": [
+            10,
+            20
+          ],
+          "gridAutoColumns": [
+            5
+          ],
+          "gridTemplateRows": [
+            10,
+            10,
+            10,
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": "missing",
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "line": -1,
+            "name": "missing"
+          },
+          "gridRowStart": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "span": 1,
+            "name": "missing"
+          },
+          "gridColumnEnd": 4,
+          "gridRowStart": 3
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": -5,
+          "gridColumnEnd": {
+            "span": 1,
+            "name": "missing"
+          },
+          "gridRowStart": 4
+        }
+      }
+    ]
+  }
+}

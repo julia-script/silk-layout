@@ -1,0 +1,83 @@
+{
+  "name": "grid-template-areas-beyond-integer-repeat-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "The area matrix expands the explicit grid to four columns. The two authored repeated tracks are 10 each; subsequent unsized explicit tracks cycle 15,20. Negative line counting uses all four columns.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 55,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": 2,
+                "tracks": [
+                  10
+                ]
+              }
+            }
+          ],
+          "gridAutoColumns": [
+            15,
+            20
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ],
+          "gridTemplateAreas": [
+            [
+              "a",
+              "a",
+              "b",
+              "b"
+            ]
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": 1,
+          "gridRowEnd": 2,
+          "gridColumnStart": "a",
+          "gridColumnEnd": "a"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridRowStart": 1,
+          "gridRowEnd": 2,
+          "gridColumnStart": "b",
+          "gridColumnEnd": "b"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": -2,
+          "gridColumnEnd": -1,
+          "gridRowStart": 2
+        }
+      }
+    ]
+  }
+}

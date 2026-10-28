@@ -1,0 +1,97 @@
+{
+  "name": "grid-template-auto-fill-zero-size-floor",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "The chosen UA counting floor is 1px, yielding three tracks in 3px. Their actual fixed sizes remain zero; the fourth item enters row two.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 3,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fill",
+                "tracks": [
+                  0
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "gridAutoRows": [
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 3,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 0,
+        "height": 10
+      }
+    ]
+  }
+}

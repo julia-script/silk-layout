@@ -1,0 +1,314 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.testing { Testing, AssertionError }
+import context { UNBOUNDED }
+import style { Dimension }
+import grid_style {
+  GridAxis,
+  GridBreadth,
+  GridBreadthKind,
+  GridNamedLine,
+  GridRepeat,
+  GridRepeatKind,
+  GridTrack
+}
+import grid_template {
+  ExpandedAxis,
+  RepeatSizing,
+  expandAxis,
+  expandedTracks,
+  expandedLines,
+  repeatCount
+}
+
+fn fixed(value: f64) -> GridTrack {
+  return GridTrack.breadth(GridBreadth.fixed(value))
+}
+
+fn sizing(size: f64) -> RepeatSizing {
+  return RepeatSizing {
+    size: size,
+    minimum: 0.0,
+    maximum: UNBOUNDED,
+    definite: true,
+    gap: Dimension.px(0.0),
+  }
+}
+
+effect fn axisWith(tracks: &[GridTrack], repeats: &[GridRepeat]) -> GridAxis
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  let mut axis = GridAxis.make()
+  run axis.tracks.appendSlice(tracks)
+  run axis.repeats.appendSlice(repeats)
+  return move axis
+}
+
+fn hasLine(lines: &[GridNamedLine], name: usize, line: usize) -> bool {
+  let mut index: usize = 0
+  while index < lines.length {
+    if lines[index].name == name && lines[index].line == line && lines[index].repeat == 0 {
+      return true
+    }
+    index = index + 1
+  }
+  return false
+}
+
+// CSS Grid 2 §7.2.3.1: adjacent repeat endpoints share one expanded boundary.
+test effect fn gridRepeatAdjacentNamesKeepTheirOwners()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 4] = [fixed(3.0), fixed(11.0), fixed(17.0), fixed(5.0)]
+  let repeats: [GridRepeat; 2] = [
+    GridRepeat { start: 1, length: 1, count: 2, kind: GridRepeatKind.Count },
+    GridRepeat { start: 2, length: 1, count: 3, kind: GridRepeatKind.Count },
+  ]
+  let mut axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let names: [GridNamedLine; 7] = [
+    GridNamedLine { line: 1, name: 1, repeat: 0 },
+    GridNamedLine { line: 1, name: 2, repeat: 1 },
+    GridNamedLine { line: 2, name: 2, repeat: 1 },
+    GridNamedLine { line: 2, name: 3, repeat: 0 },
+    GridNamedLine { line: 2, name: 4, repeat: 2 },
+    GridNamedLine { line: 3, name: 5, repeat: 2 },
+    GridNamedLine { line: 3, name: 6, repeat: 0 },
+  ]
+  run axis.lines.appendSlice(&names) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut expanded = ExpandedAxis.make()
+  run expandAxis(&axis, 0, 0, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let values = expandedTracks(&axis, &expanded)
+  let lines = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    values.length == 7 && values[0].min.length == 3.0 && values[1].min.length == 11.0
+      && values[2].min.length == 11.0
+      && values[3].min.length == 17.0
+      && values[5].min.length == 17.0
+      && values[6].min.length == 5.0,
+    "integer repeats expand independently without auto-repeat",
+  )
+  run Testing.expect(
+    hasLine(lines, 1, 1) && hasLine(lines, 3, 3) && hasLine(lines, 6, 6),
+    "outer names occur only at expanded outer boundaries",
+  )
+  run Testing.expect(
+    hasLine(lines, 2, 1) && hasLine(lines, 2, 2) && hasLine(lines, 2, 3) && hasLine(lines, 4, 3)
+      && hasLine(lines, 4, 4)
+      && hasLine(lines, 4, 5)
+      && hasLine(lines, 5, 4)
+      && hasLine(lines, 5, 5)
+      && hasLine(lines, 5, 6),
+    "inner names follow their repeat owner and adjacent boundary duplicates remain mergeable",
+  )
+}
+
+// One fixed prefix, two fixed-repeat tracks, two tracks per automatic pattern,
+// and one suffix: total size is 47 + 40n, including every 4px gutter.
+test effect fn gridAutomaticRepeatCountsPatternsAndAllGaps()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 5] = [fixed(7.0), fixed(9.0), fixed(12.0), fixed(20.0), fixed(10.0)]
+  let repeats: [GridRepeat; 2] = [
+    GridRepeat { start: 1, length: 1, count: 2, kind: GridRepeatKind.Count },
+    GridRepeat { start: 2, length: 2, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = sizing(167.0)
+  request.gap = Dimension.px(4.0)
+  run Testing.expect(
+    repeatCount(&axis, &request) == 3,
+    "three multi-track patterns fit exactly with fixed-repeat siblings",
+  )
+  request.size = 166.0
+  run Testing.expect(
+    repeatCount(&axis, &request) == 2,
+    "one missing unit removes a complete pattern",
+  )
+  request.size = 0.0
+  run Testing.expect(repeatCount(&axis, &request) == 1, "overflow still produces one repetition")
+}
+
+// CSS Grid 2 §7.2.3.2: preferred/max choose floor, minimum chooses ceiling.
+test effect fn gridAutomaticRepeatConstraintPrecedence()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 1] = [fixed(24.0)]
+  let repeats: [GridRepeat; 1] = [
+    GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = sizing(75.0)
+  request.maximum = 99.0
+  request.minimum = 24.0
+  run Testing.expect(
+    repeatCount(&axis, &request) == 3,
+    "resolved preferred constraint takes precedence",
+  )
+  request.definite = false
+  run Testing.expect(
+    repeatCount(&axis, &request) == 4,
+    "definite maximum takes precedence over minimum",
+  )
+  request.maximum = UNBOUNDED
+  request.minimum = 99.0
+  run Testing.expect(repeatCount(&axis, &request) == 5, "minimum rounds upward")
+  request.minimum = 96.0
+  run Testing.expect(repeatCount(&axis, &request) == 4, "exact minimum does not add a repetition")
+  request.minimum = 0.0
+  run Testing.expect(repeatCount(&axis, &request) == 1, "indefinite constraint repeats once")
+}
+
+test effect fn gridAutomaticRepeatUsesDefiniteMinmaxBounds()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 3] = [
+    GridTrack.minmax(GridBreadth.fixed(30.0), GridBreadth.fixed(12.0)),
+    GridTrack.minmax(GridBreadth.fixed(15.0), GridBreadth.flex(1.0)),
+    GridTrack.minmax(GridBreadth.auto(), GridBreadth.fixed(25.0)),
+  ]
+  let repeats: [GridRepeat; 1] = [
+    GridRepeat { start: 0, length: 3, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let mut axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let request = sizing(210.0)
+  run Testing.expect(
+    repeatCount(&axis, &request) == 3,
+    "maximum is floored by minimum, flexible maximum uses minimum, definite maximum can stand alone",
+  )
+  let values = axis.tracks.asMutSlice()
+  values[1] = GridTrack.minmax(GridBreadth.auto(), GridBreadth.flex(1.0))
+  run Testing.expect(
+    repeatCount(&axis, &request) == 1,
+    "a track with neither definite sizing function forces one repetition",
+  )
+}
+
+test effect fn gridAutomaticRepeatRequiresPreferredPercentageBasis()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 2] = [
+    GridTrack.breadth(GridBreadth { kind: GridBreadthKind.Percent, length: 0.0, percent: 0.1 }),
+    GridTrack.breadth(GridBreadth { kind: GridBreadthKind.Calc, length: 5.0, percent: 0.05 }),
+  ]
+  let repeats: [GridRepeat; 1] = [
+    GridRepeat { start: 0, length: 2, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = sizing(200.0)
+  request.gap = Dimension.calc(1.0, 0.02)
+  run Testing.expect(
+    repeatCount(&axis, &request) == 4,
+    "35px patterns plus 5px gaps permit four repetitions",
+  )
+  request.definite = false
+  request.maximum = 200.0
+  run Testing.expect(
+    repeatCount(&axis, &request) == 1,
+    "a definite maximum is not a percentage basis",
+  )
+  request.maximum = UNBOUNDED
+  request.minimum = 200.0
+  run Testing.expect(
+    repeatCount(&axis, &request) == 1,
+    "a definite minimum is not a percentage basis",
+  )
+}
+
+test effect fn gridAutomaticRepeatFloorsTracksAndCapsBeforeConversion()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 2] = [fixed(0.0), fixed(0.25)]
+  let repeats: [GridRepeat; 1] = [
+    GridRepeat { start: 1, length: 1, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let request = sizing(10.0)
+  let huge = sizing(1.0e90)
+  run Testing.expect(
+    repeatCount(&axis, &request) == 9,
+    "all counting track sizes, including zero siblings, receive the 1px floor",
+  )
+  run Testing.expect(
+    repeatCount(&axis, &huge) == 9999,
+    "large finite constraints cap expanded total before integer conversion",
+  )
+  let pairs: [GridTrack; 3] = [fixed(1.0), fixed(1.0), fixed(1.0)]
+  let pairRepeats: [GridRepeat; 2] = [
+    GridRepeat { start: 0, length: 1, count: 3, kind: GridRepeatKind.Count },
+    GridRepeat { start: 1, length: 2, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let paired = run axisWith(&pairs, &pairRepeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    repeatCount(&paired, &huge) == 4998,
+    "cap accounts for integer expansion and never emits a partial automatic pattern",
+  )
+}
+
+test effect fn gridAutoFitRangeKeepsAreaExtentSeparate()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 4] = [fixed(2.0), fixed(7.0), fixed(13.0), fixed(5.0)]
+  let repeats: [GridRepeat; 2] = [
+    GridRepeat { start: 0, length: 1, count: 2, kind: GridRepeatKind.Count },
+    GridRepeat { start: 1, length: 2, count: 1, kind: GridRepeatKind.AutoFit },
+  ]
+  let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut expanded = ExpandedAxis.make()
+  run expandAxis(&axis, 3, 12, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    expanded.autoFitStart == 2 && expanded.autoFitEnd == 8 && expanded.explicitTracks == 12
+      && expandedTracks(&axis, &expanded).length == 9,
+    "fit range excludes fixed siblings and area extent does not pad authored sizes",
+  )
+  run expandAxis(&axis, 1, 0, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    expanded.autoFitStart == 2 && expanded.autoFitEnd == 4 && expanded.explicitTracks == 5
+      && expandedTracks(&axis, &expanded).length == 5,
+    "reused storage resets count-dependent metadata and discards stale tracks",
+  )
+}
+
+test effect fn gridAutomaticRepeatHandlesOverflowingStepWithoutConvertingInfinity()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 1] = [fixed(1.0e308)]
+  let repeats: [GridRepeat; 1] = [
+    GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = sizing(1.5e308)
+  request.gap = Dimension.px(1.0e308)
+  run Testing.expect(
+    repeatCount(&axis, &request) == 1,
+    "an overflowing second-pattern cost cannot fit a finite preferred size",
+  )
+  request.definite = false
+  request.minimum = 1.5e308
+  run Testing.expect(
+    repeatCount(&axis, &request) == 2,
+    "an overflowing second-pattern cost still satisfies a finite minimum",
+  )
+}
+
+// Grid §7.2.3.2: count the largest fitting pattern, or the smallest meeting a minimum.
+test effect fn gridAutomaticRepeatKeepsExactFractionalBoundaries()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let tracks: [GridTrack; 1] = [fixed(2.1)]
+  let repeats: [GridRepeat; 1] = [
+    GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = sizing(21.0)
+  run Testing.expect(repeatCount(&axis, &request) == 10, "ten 2.1px tracks exactly fit 21px")
+  request.size = 20.9999
+  run Testing.expect(
+    repeatCount(&axis, &request) == 9,
+    "a genuinely smaller constraint loses a track",
+  )
+  request.definite = false
+  request.minimum = 21.0
+  run Testing.expect(repeatCount(&axis, &request) == 10, "an exact minimum does not add a track")
+  request.minimum = 21.0001
+  run Testing.expect(repeatCount(&axis, &request) == 11, "a genuinely larger minimum adds a track")
+}

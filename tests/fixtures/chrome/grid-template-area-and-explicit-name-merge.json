@@ -1,0 +1,71 @@
+{
+  "name": "grid-template-area-and-explicit-name-merge-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "foo-start exists at explicit line 1 and at the area start line 2. Bare foo chooses the first; 2 foo-start chooses the second. The implicit foo-end is at line 4.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "gridTemplateColumns": [
+            {
+              "names": [
+                "foo-start"
+              ]
+            },
+            10,
+            20,
+            30
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ],
+          "gridTemplateAreas": [
+            [
+              ".",
+              "foo",
+              "foo"
+            ]
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": "foo",
+          "gridColumnEnd": "foo",
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "line": 2,
+            "name": "foo-start"
+          },
+          "gridColumnEnd": "foo-end",
+          "gridRowStart": 2
+        }
+      }
+    ]
+  }
+}

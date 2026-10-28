@@ -1,0 +1,76 @@
+{
+  "name": "grid-template-named-placement-conflicts-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#named-lines",
+    "https://drafts.csswg.org/css-grid-2/#repeat-notation",
+    "https://drafts.csswg.org/css-grid-2/#line-placement"
+  ],
+  "derivation": "Two spans discard the end span; the remaining lone named span becomes one. Reversed definite c/b endpoints swap to b/c.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 30,
+          "gridTemplateColumns": [
+            {
+              "names": [
+                "a"
+              ]
+            },
+            10,
+            {
+              "names": [
+                "b"
+              ]
+            },
+            20,
+            {
+              "names": [
+                "c"
+              ]
+            }
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": {
+            "span": 3,
+            "name": "a"
+          },
+          "gridColumnEnd": {
+            "span": 2,
+            "name": "a"
+          },
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": "c",
+          "gridColumnEnd": "b",
+          "gridRowStart": 2
+        }
+      }
+    ]
+  }
+}

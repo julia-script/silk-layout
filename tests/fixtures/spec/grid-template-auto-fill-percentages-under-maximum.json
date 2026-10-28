@@ -1,0 +1,107 @@
+{
+  "name": "grid-template-auto-fill-percentages-under-maximum",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "named-lines",
+    "areas",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-repeat",
+    "https://github.com/w3c/csswg-drafts/issues/4480"
+  ],
+  "derivation": "CSSWG #4480 clarifies that a definite maximum is not a percentage-track basis. Both sizing functions remain indefinite, so repeat() emits one track. Its 10px intrinsic contribution establishes the container width; the final 25% track is 2.5px, while fixed-width 10px items overflow it in four 10px rows.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "maxWidth": 100,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fill",
+                "tracks": [
+                  {
+                    "percent": 0.25
+                  }
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "gridAutoRows": [
+            10
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 30,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

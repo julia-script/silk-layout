@@ -1069,7 +1069,9 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
           childLayout.location.y = box.inset.top + crossPosition }
         else { childLayout.location.x = box.inset.left + crossPosition
           childLayout.location.y = box.inset.top + mainPosition }
-        run output.store(item.id, &childLayout, input.performLayout)
+        // Unfragmented, layoutNode already stored childLayout.
+        if input.performLayout && input.fragmentation.active { run output.store(item.id, &childLayout, input.performLayout) }
+        else { run output.place(item.id, childLayout.location, childLayout.usedMargin, childLayout.hasClearance, input.performLayout) }
         cursor = cursor + item.target + item.marginEnd + mainGap + distribution.between
         if item.autoEnd { cursor = cursor + autoShare }
       }

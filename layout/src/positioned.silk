@@ -1656,6 +1656,8 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
   // Settled ranges already hold their final overflow: skip to their first fragment.
   let mut settled = output.fragments.settled.length()
   if output.frame != NO_NODE { settled = 0 }
+  let mut limitsParent = NO_NODE
+  let mut parentLimits = unlimited
   while index > 0 {
     index = index - 1
     if settled > 0 && index + 1 == output.fragments.settled.get(settled - 1).end {
@@ -1705,9 +1707,14 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
         let mut combined = parent.scrollableOverflow
         let mut limits = unlimited
         if cb != NO_NODE && parentBox {
-          let mut normal = parent.contentRect
-          if output.frame == NO_NODE { normal = output.boxes[cb].normalFlowOverflow() }
-          limits = reachableLimits(nodes.style(cb), parent.paddingRect, normal, cb == 0)
+          // Siblings share their parent's limits; nothing this loop writes changes them.
+          if parentId != limitsParent {
+            let mut normal = parent.contentRect
+            if output.frame == NO_NODE { normal = output.boxes[cb].normalFlowOverflow() }
+            parentLimits = reachableLimits(nodes.style(cb), parent.paddingRect, normal, cb == 0)
+            limitsParent = parentId
+          }
+          limits = parentLimits
         }
         if !nonpainting { combined = addOverflow(combined, border, limits) }
         if !positioned && !nonpainting {

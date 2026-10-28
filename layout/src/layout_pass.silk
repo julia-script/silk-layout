@@ -636,6 +636,44 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
     return Option<Layout>.Some { value: layout }
   }
+  // `store` for a box whose layout from this compute is already stored, after
+  // its parent placed it: only its location, used margins and clearance change,
+  // so they are written in place rather than copying the whole layout again.
+  pub effect fn place(self: &mut Self, id: usize, location: Point, usedMargin: ResolvedEdges, hasClearance: bool, publish: bool) ! OutOfMemoryError ? &mut Allocator {
+    run self.preserveLayout(id)
+    run self.touch(id)
+    if publish {
+      let first = self.publication(id)
+      if first != NO_NODE {
+        let kind = self.fragments.values.asSlice()[first].kind
+        if kind == FragmentKind.Box {
+          run self.fragments.edit(first)
+          let size = self.boxes[id].size
+          let fragments = self.fragments.values.asMutSlice()
+          fragments[first].location = location
+          fragments[first].layoutBounds = Rect { x: -usedMargin.left, y: -usedMargin.top, width: max(0.0, size.width + usedMargin.horizontal()), height: max(0.0, size.height + usedMargin.vertical()) }
+          fragments[first].usedMargin = usedMargin
+        } else if kind == FragmentKind.Line {
+          let delta = Point { x: location.x - self.boxes[id].location.x, y: location.y - self.boxes[id].location.y }
+          if delta.x != 0.0 || delta.y != 0.0 {
+            let mut current = first
+            while current != NO_NODE {
+              run self.fragments.edit(current)
+              let fragments = self.fragments.values.asMutSlice()
+              if fragments[current].kind == FragmentKind.Line {
+                fragments[current].location.x = fragments[current].location.x + delta.x
+                fragments[current].location.y = fragments[current].location.y + delta.y
+              }
+              current = fragments[current].nextForBox
+            }
+          }
+        }
+      }
+    }
+    self.boxes[id].location = location
+    self.boxes[id].usedMargin = usedMargin
+    self.boxes[id].hasClearance = hasClearance
+  }
   // cacheKey's style facts for the box; without them (passes built by hand)
   // the key keeps the full request.
   pub fn keyShape(self: &Self, id: usize) -> u8 {

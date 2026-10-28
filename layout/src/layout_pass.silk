@@ -564,25 +564,35 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // A subtree `kept` where it was (see FragmentArena.keepRange) needs only
   // what this compute rewrote before keeping it restored: the boxes it
   // wrote, and the whole subtrees it laid out again.
-  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize, kept: bool) ! OutOfMemoryError ? &mut Allocator {
+  // `top` is the reused box itself, whose layout the caller stores anew:
+  // only its location, which store reads, is restored.
+  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize, kept: bool, top: bool) ! OutOfMemoryError ? &mut Allocator {
     if kept && id < self.writes.relaid.length() && self.writes.relaid.get(id) != self.writes.generation {
       let generation = self.writes.generation
       if self.writes.written.get(id) == generation {
-        if self.writes.stamps.get(id) == generation { self.boxes[id] = self.writes.saved.asSlice()[self.writes.slots.get(id)] }
+        if self.writes.stamps.get(id) == generation {
+          let saved = &self.writes.saved.asSlice()[self.writes.slots.get(id)]
+          if top { self.boxes[id].location = saved.location } else { self.boxes[id] = saved.* }
+        }
         self.cache.keepRange(id)
       }
       if self.writes.below.get(id) != generation { return }
       let mut child = nodes.node(id).firstChild
       while child != NO_NODE {
         if self.writes.below.get(child) == generation || self.writes.written.get(child) == generation || self.writes.relaid.get(child) == generation {
-          run self.restoreBoxes(nodes, child, from, base, kept)
+          run self.restoreBoxes(nodes, child, from, base, kept, false)
         }
         child = nodes.node(child).nextSibling
       }
       return
     }
-    if !self.inPlace { self.boxes[id] = self.previous.boxes.asSlice()[id] }
-    else if self.writes.stamps.get(id) == self.writes.generation { self.boxes[id] = self.writes.saved.asSlice()[self.writes.slots.get(id)] }
+    if !self.inPlace {
+      let previous = &self.previous.boxes.asSlice()[id]
+      if top { self.boxes[id].location = previous.location } else { self.boxes[id] = previous.* }
+    } else if self.writes.stamps.get(id) == self.writes.generation {
+      let saved = &self.writes.saved.asSlice()[self.writes.slots.get(id)]
+      if top { self.boxes[id].location = saved.location } else { self.boxes[id] = saved.* }
+    }
     if kept {
       self.fragments.keepBox(id, from.start, from.end)
       self.cache.keepRange(id)
@@ -595,7 +605,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
           run self.cache.carryFinal(child, range, range.start - from.start + base, range.end - from.start + base)
         } else { run self.cache.beginLayout(child) }
       }
-      run self.restoreBoxes(nodes, child, from, base, kept)
+      run self.restoreBoxes(nodes, child, from, base, kept, false)
       child = nodes.node(child).nextSibling
     }
   }
@@ -632,7 +642,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       // Positioning appends after normal flow; no copied link may reach it.
       if !run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent) { return Option<Layout>.None }
     }
-    run self.restoreBoxes(nodes, id, slot, base, kept)
+    run self.restoreBoxes(nodes, id, slot, base, kept, true)
     let layout = self.cache.result(id).layout
     run self.store(id, &layout, true)
     run self.cache.carryFinal(id, slot, base, self.fragments.checkpoint())

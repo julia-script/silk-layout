@@ -269,7 +269,11 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   // size or a growing line; only a shrinking line reads it, so measure the
   // content suggestion then (deferredMinimum) instead of probing every item.
   let base = resolve(basis, parentMain, parentDefinite, 0.0) + add
-  let deferMinimum = autoMinimum && !intrinsic && preferredDefinite && basisDefinite && basis.kind == DimensionKind.Length && base >= max(item.inset, preferredSize) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
+  let lengthBase = preferredDefinite && basisDefinite && basis.kind == DimensionKind.Length && base >= max(item.inset, preferredSize)
+  // A content-based flex base is the max-content size, which is at least the
+  // min-content size the content suggestion measures.
+  let contentBase = !basisDefinite && basis.kind == DimensionKind.Auto && mainConstraint.kind != AvailableKind.MinContent
+  let deferMinimum = autoMinimum && !intrinsic && (lengthBase || contentBase) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
   if (autoMinimum && !deferMinimum) || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
     let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, blockAxisConstraint(style, axis.horizontal, AvailableSpace.minContent()), crossDefinite, crossSize)
     minContent = axisSize(measured.size, axis.horizontal)
@@ -297,7 +301,8 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   if deferMinimum {
     item.minimum = item.inset
     item.minimumPending = true
-    item.pendingPreferred = preferredSize
+    item.pendingPreferred = UNBOUNDED
+    if preferredDefinite { item.pendingPreferred = preferredSize }
   } else if autoMinimum {
     let mut contentSuggestion = minContent
     if ratio > 0.0 {

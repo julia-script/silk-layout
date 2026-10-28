@@ -215,6 +215,7 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   request.fragmentation.active = false
   if horizontal {
     request.intrinsicWidth = true
+    request.fullSize = false
     request.known.widthDefinite = false
     request.availableWidth = AvailableSpace.maxContent()
     if minimum { request.availableWidth = AvailableSpace.minContent() }

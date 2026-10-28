@@ -29,6 +29,25 @@ impl BoxFacts {
     return self.own.length() == count && self.reusable.length() == count && self.viewportFree.length() == count && self.keyShapes.length() == count
   }
 }
+// Box layouts rewritten during a compute that keeps the previous compute's
+// box layouts in place: `stamps[id] == generation` marks a box rewritten in
+// this compute, whose previous layout is `saved[slots[id]]`.
+pub struct BoxWrites { pub generation: usize, pub stamps: List<usize>, pub slots: List<usize>, pub saved: List<Layout> }
+impl BoxWrites {
+  pub fn make() -> BoxWrites { return BoxWrites { generation: 0, stamps: List<usize>.make(), slots: List<usize>.make(), saved: List<Layout>.make() } }
+  // Starts a compute over `count` boxes.
+  pub effect fn begin(self: &mut Self, count: usize) ! OutOfMemoryError ? &mut Allocator {
+    self.generation = self.generation + 1
+    self.saved.clear()
+    if self.stamps.length() != count {
+      self.stamps.clear()
+      self.slots.clear()
+      run self.stamps.appendRepeated(0, count)
+      run self.slots.appendRepeated(0, count)
+    }
+  }
+}
+
 pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
 // `generation` is the last compute that created or hit the entry.
 struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }
@@ -319,9 +338,11 @@ pub struct Snapshot { pub fragments: FragmentArena, pub boxes: List<Layout> }
 impl Snapshot {
   pub fn make() -> Snapshot { return Snapshot { fragments: FragmentArena.make(), boxes: List<Layout>.make() } }
   // Takes a finished compute's output, leaving the spare storage in its place.
-  pub fn takeOutput(self: &mut Self, fragments: &mut FragmentArena, boxes: &mut List<Layout>) {
+  // Box layouts stay in place when the next compute keeps them.
+  pub fn takeOutput(self: &mut Self, fragments: &mut FragmentArena, boxes: &mut List<Layout>, keepBoxes: bool) {
     let spareFragments = Intrinsic.replace(self.fragments, FragmentArena.make())
     self.fragments = Intrinsic.replace(fragments.*, move spareFragments)
+    if keepBoxes { return }
     let spareBoxes = Intrinsic.replace(self.boxes, List<Layout>.make())
     self.boxes = Intrinsic.replace(boxes.*, move spareBoxes)
   }

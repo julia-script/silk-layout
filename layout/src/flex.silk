@@ -857,7 +857,12 @@ fn containerBaselines<M: Measure>(nodes: &BoxTree, output: &LayoutPass, measurer
 
 // A flex container without children: no lines, no item contributions and no
 // baselines, so layoutFlexPass reduces to clamping its content-free size.
-pub fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
+fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
+  let mut result = Layout.zero()
+  result.size = emptyFlexSize(style, &box)
+  return result
+}
+pub fn emptyFlexSize(style: &Style, box: &ResolvedBox) -> Size {
   let axis = axes(style)
   let mainInset = edgeTotal(box.inset, axis.horizontal)
   let crossInset = edgeTotal(box.inset, !axis.horizontal)
@@ -865,16 +870,16 @@ pub fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
   let mut cross = max(0.0, optionalSize(box.size, !axis.horizontal) - crossInset)
   if !definite(box.size, axis.horizontal) { main = max(0.0, clamp(mainInset, axisSize(box.min, axis.horizontal), axisSize(box.max, axis.horizontal)) - mainInset) }
   if !definite(box.size, !axis.horizontal) { cross = max(0.0, clamp(crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
-  let mut result = Layout.zero()
-  if axis.horizontal { result.size = Size { width: main + mainInset, height: cross + crossInset } }
-  else { result.size = Size { width: cross + crossInset, height: main + mainInset } }
+  let mut result = Size.zero()
+  if axis.horizontal { result = Size { width: main + mainInset, height: cross + crossInset } }
+  else { result = Size { width: cross + crossInset, height: main + mainInset } }
   if box.gutter.horizontal() > 0.0 {
-    result.size.width = clamp(result.size.width, box.min.width, box.max.width)
-    if box.size.widthDefinite { result.size.width = box.size.width }
+    result.width = clamp(result.width, box.min.width, box.max.width)
+    if box.size.widthDefinite { result.width = box.size.width }
   }
   if box.gutter.vertical() > 0.0 {
-    result.size.height = clamp(result.size.height, box.min.height, box.max.height)
-    if box.size.heightDefinite { result.size.height = box.size.height }
+    result.height = clamp(result.height, box.min.height, box.max.height)
+    if box.size.heightDefinite { result.height = box.size.height }
   }
   return result
 }

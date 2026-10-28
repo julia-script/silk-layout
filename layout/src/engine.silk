@@ -4,9 +4,9 @@ import silk.effect { Effect }
 import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
 import style { Style, Display, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
-import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, isGrid, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
-import block { layoutBlock, leafBlock }
-import flex { layoutFlex, emptyFlex, FlexScratch }
+import context { Input, ResolvedBox, resolveBox, resolves, withGutter, scrollbarGutter, edges, isFlex, isGrid, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
+import block { layoutBlock, leafBlockInto }
+import flex { layoutFlex, emptyFlexSize, FlexScratch }
 import grid { layoutGrid }
 import positioned { positionTree, positionVisits, reachableLimits, addOverflow, subtreeOverflow }
 import bfc { BfcState }
@@ -464,7 +464,10 @@ pub effect fn probeNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
 
 // probeNode after a cache miss for `key`.
 pub effect fn probeFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, key: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  if nodes.node(id).firstChild == NO_NODE && run probeEmptyBox(nodes, &mut output, id, &input, &key) { return }
+  if nodes.node(id).firstChild == NO_NODE && emptyBoxApplies(nodes, id, &input) {
+    run probeEmptyBox(nodes, &mut output, id, &input, &key)
+    return
+  }
   let mut bfc = BfcState.make()
   // layoutBox stores every unfragmented result in output.boxes[id].
   if input.bfcContentOrigin.x == 0.0 && input.bfcContentOrigin.y == 0.0 {
@@ -477,28 +480,34 @@ pub effect fn probeFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   run output.rememberStored(id, &key, CacheKind.IndependentBox)
 }
 
-// probeFresh for a childless block or flex container with plain sizing (no
-// aspect ratio, scrollbars, intrinsic size keywords or orthogonal flow): what
-// layoutBox reduces to when leafBlock or emptyFlex is the whole content
-// algorithm. It stores and caches the same result, or returns false without
-// effects when the general path is needed.
-effect fn probeEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, id: usize, input: &Input, key: &Input) -> bool ! OutOfMemoryError ? &mut Allocator {
+// Whether layoutBox reduces to sizing a childless block or flex container with
+// plain sizing (no aspect ratio, scrollbars, intrinsic size keywords or
+// orthogonal flow) when leafBlock or emptyFlex is its whole content algorithm.
+fn emptyBoxApplies(nodes: &BoxTree, id: usize, input: &Input) -> bool {
   let style = nodes.style(id)
   let node = nodes.node(id)
   if (node.kind != BoxKind.Block && node.kind != BoxKind.Flex) || isGrid(style) || node.measurement == Measurement.Content { return false }
   if input.fragmentation.active || input.fragmentation.boundaryProbe != BoundaryProbe.None || boxInputChanges(nodes, id, &input) { return false }
   let display = effectiveDisplay(style, &input)
   if !plainSizing(style, node, &input, false, &display) { return false }
-  let mut box = resolveBox(style, &input)
+  // prepareSizing's plain branch takes the general path for shrink-to-fit.
+  let widthDefinite = input.known.widthDefinite || (!input.intrinsicWidth && resolves(style.width, input.parent.widthDefinite))
+  if widthDefinite || input.intrinsicWidth || input.availableWidth.kind != AvailableKind.Definite { return true }
+  let justification = blockJustification(style, &input)
+  let autoInlineMargin = style.margin.left.kind == DimensionKind.Auto || style.margin.right.kind == DimensionKind.Auto
+  let fitInline = justification != Align.Normal && !(justification == Align.Stretch && !autoInlineMargin)
+  return !input.shrinkToFit && !fitInline
+}
+
+// layoutAdjustedBox's sizing and result for a box emptyBoxApplies to, before
+// overflow geometry: `box` starts as resolveBox's and `result` as Layout.zero().
+fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut ResolvedBox, result: &mut Layout) {
   // prepareSizing's plain branch.
   let justification = blockJustification(style, &input)
   let autoInlineMargin = style.margin.left.kind == DimensionKind.Auto || style.margin.right.kind == DimensionKind.Auto
   let stretchInline = justification == Align.Stretch && !autoInlineMargin
   let fitInline = justification != Align.Normal && !stretchInline
-  let definite = input.availableWidth.kind == AvailableKind.Definite
-  if !box.size.widthDefinite && !input.intrinsicWidth && definite && (input.shrinkToFit || fitInline) { return false }
-  output.stats.sizeProbes = output.stats.sizeProbes + 1
-  if !box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && definite && ((!input.shrinkToFit && !fitInline) || stretchInline) {
+  if !box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && input.availableWidth.kind == AvailableKind.Definite && ((!input.shrinkToFit && !fitInline) || stretchInline) {
     box.size.width = max(box.inset.horizontal(), input.availableWidth.value - box.margin.horizontal())
     box.size.widthDefinite = true
   }
@@ -506,11 +515,10 @@ effect fn probeEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut L
   if box.size.heightDefinite { box.size.height = clamp(box.size.height, box.min.height, box.max.height) }
   // firstContents, then the min/max relayout.
   let flex = isFlex(style)
-  let mut result = Layout.zero()
-  if flex && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && box.size.widthDefinite && box.size.heightDefinite {
+  if flex && !input.performLayout && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && box.size.widthDefinite && box.size.heightDefinite {
     result.size = Size { width: box.size.width, height: box.size.height }
   } else {
-    result = emptyContents(style, &input, &box, flex)
+    emptyContents(style, &input, &box, &bfc, flex, &mut result)
   }
   let width = clamp(result.size.width, box.min.width, box.max.width)
   let height = clamp(result.size.height, box.min.height, box.max.height)
@@ -519,7 +527,8 @@ effect fn probeEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut L
       box.size.widthDefinite = true }
     if height != result.size.height { box.size.height = height
       box.size.heightDefinite = true }
-    result = emptyContents(style, &input, &box, flex)
+    result.* = Layout.zero()
+    emptyContents(style, &input, &box, &bfc, flex, &mut result)
   }
   result.contentSize = Size { width: max(0.0, result.size.width - box.inset.horizontal()), height: max(0.0, result.size.height - box.inset.vertical()) }
   result.scrollbarGutter = box.gutter
@@ -532,13 +541,48 @@ effect fn probeEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut L
   result.marginBottomNegative = min(result.marginBottomNegative, box.margin.bottom)
   result.widthDefinite = box.size.widthDefinite && !input.indefiniteWidth
   result.heightDefinite = box.size.heightDefinite && !input.indefiniteHeight
+}
+
+// probeFresh for a box emptyBoxApplies to: stores and caches the same result.
+effect fn probeEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, id: usize, input: &Input, key: &Input) ! OutOfMemoryError ? &mut Allocator {
+  output.stats.sizeProbes = output.stats.sizeProbes + 1
+  let style = nodes.style(id)
+  let mut box = resolveBox(style, &input)
+  let mut result = Layout.zero()
+  emptyBoxLayout(style, &input, &BfcState.make(), &mut box, &mut result)
   run output.store(id, &result, false)
   run output.rememberStored(id, &key, CacheKind.IndependentBox)
-  return true
 }
-fn emptyContents(style: &Style, input: &Input, box: &ResolvedBox, flex: bool) -> Layout with Intrinsic.inlineAlways() {
-  if flex { return emptyFlex(style, &box) }
-  return leafBlock(style, &input, &box, &BfcState.make())
+
+// layoutBox's final layout of a box emptyBoxApplies to, outside fragmentation.
+effect fn layoutEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, id: usize, input: &Input, bfc: &BfcState) -> Layout ! OutOfMemoryError ? &mut Allocator {
+  output.stats.fullLayouts = output.stats.fullLayouts + 1
+  let node = nodes.node(id)
+  let previousParent = output.fragmentParent
+  run output.preserveLayout(id)
+  run output.relayout(id)
+  output.boxes[id].location = Point { x: 0.0, y: 0.0 }
+  let mut first = true
+  let mut last = true
+  if node.source != NO_NODE {
+    first = node.firstForSource
+    last = node.lastForSource
+  }
+  let emitted = run output.fragments.appendBox(id, node.source, FragmentKind.Box, previousParent, 0, first, last)
+  output.fragmentParent = emitted.index
+  let style = nodes.style(id)
+  let mut box = resolveBox(style, &input)
+  let mut result = Layout.zero()
+  emptyBoxLayout(style, &input, &bfc, &mut box, &mut result)
+  overflowGeometry(nodes, &output, id, &box, &mut result)
+  run output.store(id, &result, true)
+  output.fragmentParent = previousParent
+  return result
+}
+// emptyFlex or leafBlock, written into a zeroed `result`.
+fn emptyContents(style: &Style, input: &Input, box: &ResolvedBox, bfc: &BfcState, flex: bool, result: &mut Layout) with Intrinsic.inlineAlways() {
+  if flex { result.size = emptyFlexSize(style, &box) }
+  else { leafBlockInto(style, &input, &box, &bfc, &mut result) }
 }
 
 // An in-flow block child of a shared BFC. Its subtree adds no floats and has
@@ -854,6 +898,9 @@ pub effect fn resolveFragmentBox<'pass, 'source, M: Measure + TextMeasure>(nodes
 effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   // Most requests already carry what adjustBoxInput would set: lay those
   // out from the caller's input instead of a copy.
+  if incoming.performLayout && output.frame == NO_NODE && nodes.node(id).firstChild == NO_NODE && emptyBoxApplies(nodes, id, &incoming) {
+    return run layoutEmptyBox(nodes, &mut output, id, &incoming, &bfc)
+  }
   if !incoming.fragmentation.active && !boxInputChanges(nodes, id, &incoming) {
     return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &incoming, &mut bfc, false)
   }

@@ -72,8 +72,12 @@ impl Fragment {
 // their final scrollable overflow: overflow propagation skips from its last
 // fragment to its first. `overflow` is the first fragment's final value.
 // The layout that copied it stored the first fragment's normal-flow value.
-pub struct SettledRange { pub start: usize, pub end: usize, pub overflow: Rect }
+// `kept` marks a range kept in place from the previous compute.
+pub struct SettledRange { pub start: usize, pub end: usize, pub overflow: Rect, pub kept: bool }
 impl Copy for SettledRange {}
+
+// Previous fragments edited in a compute that resolveLocations tracks.
+const EDITS_TRACKED: usize = 256
 
 // Fragments appendRange checks, copies and relinks at a time.
 const RANGE_CHUNK: usize = 64
@@ -118,6 +122,10 @@ pub struct FragmentArena {
   // this and the previous compute; kept ranges must not contain the latter.
   // `flowEnd` is where the normal flow ended (see endFlow).
   offsets: bool,
+  // Whether every world location must be resolved again, else those of
+  // fragments outside unmoved kept ranges; and the previous fragments
+  // edited in this compute, at most EDITS_TRACKED of them.
+  resolveAll: bool, edited: List<usize>,
   afterFlow: bool, flowEnd: usize,
   adopted: List<usize>, previousAdopted: List<usize>,
 }
@@ -139,6 +147,7 @@ impl FragmentArena {
       boxStamps: List<usize>.make(), boxSlots: List<usize>.make(), savedFirst: List<usize>.make(), savedLast: List<usize>.make(),
       tailFragments: List<Fragment>.make(), tailTexts: List<TextFragment>.make(),
       offsets: false,
+      resolveAll: true, edited: List<usize>.make(),
       afterFlow: false, flowEnd: 0,
       adopted: List<usize>.make(), previousAdopted: List<usize>.make(),
     }
@@ -168,6 +177,8 @@ impl FragmentArena {
     self.previousCount = 0
     self.previousTexts = 0
     self.offsets = false
+    self.resolveAll = true
+    self.edited.clear()
     self.afterFlow = false
     self.adopted.clear()
     self.previousAdopted.clear()
@@ -189,7 +200,9 @@ impl FragmentArena {
         at = at + 1
       }
       self.offsets = false
+      self.resolveAll = true
     }
+    self.edited.clear()
     self.afterFlow = false
     let adopted = Intrinsic.replace(self.previousAdopted, List<usize>.make())
     self.previousAdopted = Intrinsic.replace(self.adopted, move adopted)
@@ -279,6 +292,7 @@ impl FragmentArena {
   effect fn saveFragment(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
     if !self.inPlace || index >= self.previousCount || self.fragmentStamps.get(index) == self.generation { return }
     run self.savedFragments.append(self.values.get(index))
+    run self.noteEdit(index)
     self.fragmentStamps.set(index, self.generation)
     self.fragmentSlots.set(index, self.savedFragments.length() - 1)
   }
@@ -299,6 +313,16 @@ impl FragmentArena {
   pub effect fn edit(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
     run self.saveFragment(index)
     if self.inPlace && index + 1 > self.written { self.written = index + 1 }
+    // Positioning edits after the flow, which saves nothing.
+    else if self.viewing && !self.inPlace && index < self.previousCount { run self.noteEdit(index) }
+  }
+  effect fn noteEdit(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
+    if self.resolveAll { return }
+    if self.edited.length() == EDITS_TRACKED {
+      self.resolveAll = true
+      return
+    }
+    run self.edited.append(index)
   }
   // Gives a box chains of this compute, saving its previous ones, before
   // its fragment at `index` is linked to them: the previous ones if they are
@@ -457,11 +481,32 @@ impl FragmentArena {
     self.settled.truncate(kept)
   }
   // Records that positioning may have given fragments visual offsets.
-  pub fn offsetting(self: &mut Self) { self.offsets = true }
+  pub fn offsetting(self: &mut Self) {
+    self.offsets = true
+    self.resolveAll = true
+  }
   // Parents precede children in the arena. Resolve final visual coordinates
   // once, rather than repeatedly walking ancestors for source-bound queries.
   pub fn resolveLocations(self: &mut Self) {
+    let all = self.resolveAll
+    self.resolveAll = false
+    // Sort the few edits, in place.
+    let edited = self.edited.asMutSlice()
+    let mut at: usize = 1
+    while at < edited.length {
+      let value = edited[at]
+      let mut to = at
+      while to > 0 && edited[to - 1] > value {
+        edited[to] = edited[to - 1]
+        to = to - 1
+      }
+      edited[to] = value
+      at = at + 1
+    }
+    let settled = self.settled.asSlice()
     let values = self.values.asMutSlice()
+    let mut range: usize = 0
+    let mut edit: usize = 0
     let mut index: usize = 0
     while index < values.length {
       // Text ownership is finalized from accepted links. Speculative emission
@@ -477,10 +522,25 @@ impl FragmentArena {
         x = x + values[parent].worldLocation.x
         y = y + values[parent].worldLocation.y
       }
+      let moved = values[index].worldLocation.x != x || values[index].worldLocation.y != y
       values[index].worldLocation = Point { x: x, y: y }
+      // A kept range whose root did not move and none of whose fragments
+      // were edited keeps its world locations.
+      if !all && !moved {
+        while range < settled.length && settled[range].start < index { range = range + 1 }
+        if range < settled.length && settled[range].start == index && settled[range].kept {
+          let end = settled[range].end
+          while edit < edited.length && edited[edit] <= index { edit = edit + 1 }
+          if edit == edited.length || edited[edit] >= end {
+            index = end
+            continue
+          }
+        }
+      }
       index = index + 1
     }
   }
+
 
   // Whether the previous range [start, end) can stay where it is as the
   // next fragments: it starts at the write position, nothing of it or its
@@ -512,7 +572,7 @@ impl FragmentArena {
     let values = self.values.asMutSlice()
     values[start].parent = parent
     run self.linkParent(start)
-    run self.settled.append(SettledRange { start: start, end: end, overflow: overflow })
+    run self.settled.append(SettledRange { start: start, end: end, overflow: overflow, kept: true })
   }
   // Appends a copy of the previous range [start, end), as appendRange does
   // from another arena.
@@ -550,7 +610,7 @@ impl FragmentArena {
     }
     let overflow = self.previous(start).scrollableOverflow
     let end = self.count
-    run self.settled.append(SettledRange { start: base, end: end, overflow: overflow })
+    run self.settled.append(SettledRange { start: base, end: end, overflow: overflow, kept: false })
     return true
   }
 
@@ -645,7 +705,7 @@ impl FragmentArena {
       self.textCount = self.texts.length()
       chunk = stop
     }
-    run self.settled.append(SettledRange { start: base, end: base + (end - start), overflow: sourceValues[start].scrollableOverflow })
+    run self.settled.append(SettledRange { start: base, end: base + (end - start), overflow: sourceValues[start].scrollableOverflow, kept: false })
     return true
   }
   // Links an appended range's first fragment after its parent's last child.

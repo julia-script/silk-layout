@@ -125,6 +125,7 @@ fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: 
 }
 
 effect fn contents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if !(input.performLayout && input.fragmentation.active) { return run contentAlgorithm(nodes, &mut output, &mut measurer, id, &input, &box, natural, &mut bfc) }
   let mut resolved = box.*
   let mut request = input.*
   if input.performLayout && input.fragmentation.active {
@@ -425,17 +426,16 @@ pub effect fn probeNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
 // formatting context.
 pub effect fn layoutInFlow<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let reusable = input.performLayout && !input.fragmentation.active && output.frame == NO_NODE && bfc.settled()
+  if !reusable { return run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc) }
   let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
-  if reusable {
-    run bfc.collectBelow(input.bfcContentOrigin, &mut output.floatContext)
-    match run output.reuseFinal(nodes, id, &key, REUSE_IN_FLOW, true) {
-      Option<Layout>.Some { value: reused } => { return reused }
-      Option<Layout>.None => {}
-    }
+  run bfc.collectBelow(input.bfcContentOrigin, &mut output.floatContext)
+  match run output.reuseFinal(nodes, id, &key, REUSE_IN_FLOW, true) {
+    Option<Layout>.Some { value: reused } => { return reused }
+    Option<Layout>.None => {}
   }
   let start = output.fragments.checkpoint()
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
-  if reusable && bfc.settled() {
+  if bfc.settled() {
     run bfc.collectBelow(input.bfcContentOrigin, &mut output.floatContext)
     run output.recordFinal(id, &key, &result, start, true)
   }

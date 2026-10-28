@@ -389,7 +389,7 @@ impl FragmentArena {
     return self.texts.get(index)
   }
   // The previous compute's first fragment of a box.
-  pub fn previousFirst(self: &Self, box: usize) -> usize {
+  pub fn previousFirst(self: &Self, box: usize) -> usize with Intrinsic.inlineAlways() {
     if box < self.boxStamps.length() && self.boxStamps.get(box) == self.generation { return self.savedFirst.get(self.boxSlots.get(box)) }
     return self.firstByBox.get(box)
   }
@@ -460,7 +460,7 @@ impl FragmentArena {
     // Positioning edits after the flow, which saves nothing.
     else if self.viewing && !self.inPlace && index < self.previousCount { run self.noteEdit(index) }
   }
-  effect fn noteEdit(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
+  effect fn noteEdit(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
     if self.resolveAll { return }
     if self.edited.length() == EDITS_TRACKED {
       self.resolveAll = true
@@ -901,7 +901,7 @@ impl FragmentArena {
   // Whether the previous range [start, end) can stay where it is as the
   // next fragments: it starts at the write position, nothing of it or its
   // texts was overwritten, and nothing positioning appended links into it.
-  pub fn canKeep(self: &Self, start: usize, end: usize) -> bool {
+  pub fn canKeep(self: &Self, start: usize, end: usize) -> bool with Intrinsic.inlineAlways() {
     if !self.inPlace || self.damaged || start != self.count || start < self.written || end > self.previousCount || start >= end { return false }
     let firstText = self.textMarks.get(start)
     if firstText != self.textCount || firstText < self.textsWritten { return false }
@@ -1065,7 +1065,7 @@ impl FragmentArena {
     return true
   }
   // Links an appended range's first fragment after its parent's last child.
-  effect fn linkParent(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
+  effect fn linkParent(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
     let parent = self.values.asSlice()[index].parent
     let mut previousSibling = NO_NODE
     if parent != NO_NODE {

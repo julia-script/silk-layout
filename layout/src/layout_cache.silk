@@ -271,11 +271,8 @@ impl LayoutCache {
   }
   pub fn result(self: &Self, id: usize) -> &FinalResult { return &self.results.asSlice()[id] }
   // Saves a box's previous range before its first write in this compute.
-  effect fn writeRange(self: &mut Self, id: usize, range: FinalRange) ! OutOfMemoryError ? &mut Allocator {
-    if id >= self.ranges.length() {
-      let missing = id + 1 - self.ranges.length()
-      run self.ranges.appendRepeated(BoxRanges.none(), missing)
-    }
+  effect fn writeRange(self: &mut Self, id: usize, range: FinalRange) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
+    if id >= self.ranges.length() { run self.growRanges(id) }
     let generation = self.generation
     let ranges = self.ranges.asMutSlice()
     if ranges[id].stamp != generation {
@@ -284,6 +281,10 @@ impl LayoutCache {
       self.stamped = self.stamped + 1
     }
     ranges[id].range = range
+  }
+  effect fn growRanges(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
+    let missing = id + 1 - self.ranges.length()
+    run self.ranges.appendRepeated(BoxRanges.none(), missing)
   }
   // Sizes the per-box records for a compute of `count` boxes up front, so a
   // fresh compute does not grow them a box at a time. A box added here has
@@ -384,7 +385,7 @@ impl LayoutCache {
     results[id].beside = beside
   }
   // Moves a kept range, unchanged in content, to where a copy put it.
-  pub effect fn carryFinal(self: &mut Self, id: usize, kept: FinalRange, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn carryFinal(self: &mut Self, id: usize, kept: FinalRange, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
     run self.writeRange(id, FinalRange { valid: true, start: start, end: end, floats: kept.floats, floatCount: kept.floatCount })
   }
   // Whether a kept range was laid out beside these floats.

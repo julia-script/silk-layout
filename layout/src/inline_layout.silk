@@ -1860,6 +1860,41 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
       while next < points.length() && !start.before(points.get(next).at) { next = next + 1 }
     }
   }
+  // Fast line fitting (see the line loop) needs the advance of every unit,
+  // taken from one shaping of the whole paragraph. It applies to unfragmented
+  // left-to-right text without floats, tabs, preserved spaces or hyphens.
+  let mut fastFit = !fragmented && !hasFloats && hasText && !visualPlan.active && points.length() > 1
+  index = 0
+  while fastFit && index < context.tokens.length {
+    let kind = context.tokens[index].kind
+    fastFit = kind == TextTokenKind.Text || kind == TextTokenKind.Space || kind == TextTokenKind.Open || kind == TextTokenKind.Close || kind == TextTokenKind.Atomic || kind == TextTokenKind.Anchor
+    index = index + 1
+  }
+  index = 0
+  while fastFit && index < points.length() {
+    fastFit = points.get(index).kind != TextBreakKind.Hyphenated
+    index = index + 1
+  }
+  let mut fastPrefix = List<f64>.make()
+  if fastFit {
+    run shapeCandidate(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut fonts, &mut shaped, &mut candidate, TextCursor { unit: 0, offset: 0 }, terminal, false, 0.0, 0.0, &[])
+    run fastPrefix.reserveExact(context.tokens.length + 1)
+    while fastPrefix.length() <= context.tokens.length { run fastPrefix.append(0.0) }
+    let prefix = fastPrefix.asMutSlice()
+    index = 0
+    while index < candidate.items.length() {
+      let item = candidate.items.get(index)
+      if item.kind != ItemKind.Float && item.kind != ItemKind.Anchor && item.start.unit < context.tokens.length {
+        prefix[item.start.unit + 1] = prefix[item.start.unit + 1] + item.advance
+      }
+      index = index + 1
+    }
+    index = 0
+    while index < context.tokens.length {
+      prefix[index + 1] = prefix[index + 1] + prefix[index]
+      index = index + 1
+    }
+  }
   let initialStart = start
   let initialNext = next
   let initialRealLines = realLines
@@ -1904,8 +1939,54 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     let mut end = start
     let mut sourceEnding = false
     let mut total = 0.0
+    let mut lineClosed = false
     let mut band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, 0.0), indent, indentRtl)
-    while next < points.length() {
+    if fastFit && next + 1 < points.length() && bfc.clearBelow(input.bfcContentOrigin.y + cursor) {
+      // Skip the candidates that clearly fit: guess the last point whose
+      // estimated line fits, step back until one exactly fits, and let the
+      // loop below extend from there. Line advances grow with content, so
+      // the loop still stops at the first candidate that overflows.
+      let room = band.right - band.left
+      let mut inlineOrigin = band.left
+      if rtl { inlineOrigin = width - band.right }
+      let mut startUnit = start.unit
+      while startUnit < context.tokens.length && context.tokens[startUnit].kind == TextTokenKind.Space { startUnit = startUnit + 1 }
+      let mut guess = next
+      let mut probe = next
+      while probe < points.length() {
+        let point = points.get(probe)
+        let mut endUnit = point.at.unit
+        while endUnit > startUnit && context.tokens[endUnit - 1].kind == TextTokenKind.Space { endUnit = endUnit - 1 }
+        let mut estimate = 0.0
+        if endUnit > startUnit { estimate = fastPrefix.get(endUnit) - fastPrefix.get(startUnit) }
+        if probe > next && leading + estimate > room { break }
+        guess = probe
+        if point.kind == TextBreakKind.Forced { break }
+        probe = probe + 1
+      }
+      // The first exact fit is accepted as the loop below would accept it.
+      while guess > next {
+        let point = points.get(guess)
+        run shapeCandidate(nodes, &mut measurer, context, &analysis, &mut visualPlan, hasText, original.asSlice(), scopes, &mut fonts, &mut shaped, &mut candidate, start, point.at, false, 0.0, inlineOrigin, &[])
+        let natural = leading + candidate.advance + textEdge(nodes, original.asSlice(), scopes, point.at, false, rtl, visualPlan.active)
+        let proposed = natural - candidate.hanging
+        if proposed <= room {
+          let old = move accepted
+          accepted = move candidate
+          candidate = move old
+          total = proposed
+          if point.kind == TextBreakKind.Forced || point.at.equal(terminal) {
+            total = natural - min(accepted.hanging, max(0.0, natural - room))
+          }
+          end = point.at
+          lineClosed = point.kind == TextBreakKind.Forced
+          break
+        }
+        guess = guess - 1
+      }
+      if guess > next { next = guess + 1 }
+    }
+    while !lineClosed && next < points.length() {
       let offeredPoint = points.get(next)
       let mut point = offeredPoint
       let mut atSource = false

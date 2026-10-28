@@ -6,6 +6,8 @@ import silk.usize
 import context { Input }
 import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind }
 import fragments { FragmentArena }
+import bfc { FloatBox }
+import silk.slice { Slice }
 
 const ABSENT: usize = usize.MAX
 // Reuse levels of a subtree's kept layout; see Incremental.reusableSubtrees.
@@ -23,10 +25,12 @@ impl Copy for Entry {}
 // since carrying a copied subtree forward only moves its ranges.
 pub struct FinalResult { pub input: Input, pub layout: Layout }
 impl Copy for FinalResult {}
-pub struct FinalRange { pub valid: bool, pub start: usize, pub end: usize }
+// `floats` and `floatCount` locate the float exclusions the box was laid out
+// beside, relative to its content origin, in the same compute's float list.
+pub struct FinalRange { pub valid: bool, pub start: usize, pub end: usize, pub floats: usize, pub floatCount: usize }
 impl Copy for FinalRange {}
 impl FinalRange {
-  pub fn none() -> FinalRange { return FinalRange { valid: false, start: 0, end: 0 } }
+  pub fn none() -> FinalRange { return FinalRange { valid: false, start: 0, end: 0, floats: 0, floatCount: 0 } }
 }
 
 fn sameOptional(a: &OptionalSize, b: &OptionalSize) -> bool {
@@ -59,10 +63,12 @@ pub struct LayoutCache {
   results: List<FinalResult>,
   finals: List<FinalRange>,
   kept: List<FinalRange>,
+  finalFloats: List<FloatBox>,
+  keptFloats: List<FloatBox>,
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), finals: List<FinalRange>.make(), kept: List<FinalRange>.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), finals: List<FinalRange>.make(), kept: List<FinalRange>.make(), finalFloats: List<FloatBox>.make(), keptFloats: List<FloatBox>.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
@@ -73,6 +79,8 @@ impl LayoutCache {
     self.results.clear()
     self.finals.clear()
     self.kept.clear()
+    self.finalFloats.clear()
+    self.keptFloats.clear()
   }
   // Starts a compute: the previous compute's final layouts become reusable.
   pub fn rotateFinals(self: &mut Self) {
@@ -83,6 +91,10 @@ impl LayoutCache {
     let spare = Intrinsic.replace(self.kept, move previous)
     self.finals = move spare
     self.finals.clear()
+    let previousFloats = Intrinsic.replace(self.finalFloats, List<FloatBox>.make())
+    let spareFloats = Intrinsic.replace(self.keptFloats, move previousFloats)
+    self.finalFloats = move spareFloats
+    self.finalFloats.clear()
   }
   // The previous compute's range for a box and the result it holds.
   pub fn keptRange(self: &Self, id: usize) -> FinalRange {
@@ -98,21 +110,38 @@ impl LayoutCache {
     }
     self.finals.set(id, range)
   }
-  pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize, floats: &[FloatBox]) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.results.length() {
       let missing = id + 1 - self.results.length()
       run self.results.reserve(missing)
       while self.results.length() <= id { run self.results.append(FinalResult { input: input.*, layout: layout.* }) }
     }
-    run self.setRange(id, FinalRange { valid: true, start: start, end: end })
+    let first = self.finalFloats.length()
+    run self.finalFloats.appendSlice(floats)
+    run self.setRange(id, FinalRange { valid: true, start: start, end: end, floats: first, floatCount: floats.length })
     let results = self.results.asMutSlice()
     results[id].input = input.*
     results[id].layout = layout.*
     if id < self.kept.length() { self.kept.set(id, FinalRange.none()) }
   }
   // Moves a kept range, unchanged in content, to where a copy put it.
-  pub effect fn carryFinal(self: &mut Self, id: usize, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator {
-    run self.setRange(id, FinalRange { valid: true, start: start, end: end })
+  pub effect fn carryFinal(self: &mut Self, id: usize, kept: FinalRange, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator {
+    let first = self.finalFloats.length()
+    if kept.floatCount != 0 { run self.finalFloats.appendSlice(Slice.view(self.keptFloats.asSlice(), kept.floats, kept.floatCount)) }
+    run self.setRange(id, FinalRange { valid: true, start: start, end: end, floats: first, floatCount: kept.floatCount })
+  }
+  // Whether a kept range was laid out beside these floats.
+  pub fn sameFloats(self: &Self, kept: FinalRange, floats: &[FloatBox]) -> bool {
+    if kept.floatCount != floats.length { return false }
+    let recorded = self.keptFloats.asSlice()
+    let mut index: usize = 0
+    while index < floats.length {
+      let a = &recorded[kept.floats + index]
+      let b = &floats[index]
+      if a.side != b.side || a.left != b.left || a.right != b.right || a.top != b.top || a.bottom != b.bottom { return false }
+      index = index + 1
+    }
+    return true
   }
   pub fn clearBox(self: &mut Self, id: usize) {
     if id < self.kept.length() { self.kept.set(id, FinalRange.none()) }

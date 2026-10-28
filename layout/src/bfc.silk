@@ -24,6 +24,21 @@ impl BfcState {
     self.rightDeferred = checkpoint.rightDeferred
     self.pendingFloat = checkpoint.pendingFloat
   }
+  // No exclusions are deferred or pending.
+  pub fn settled(self: &Self) -> bool { return !self.leftDeferred && !self.rightDeferred && !self.pendingFloat }
+  // Replaces `output` with the exclusions that extend below `origin`,
+  // relative to it, in placement order.
+  pub effect fn collectBelow(self: &Self, origin: Point, output: &mut List<FloatBox>) ! OutOfMemoryError ? &mut Allocator {
+    output.clear()
+    let mut index: usize = 0
+    while index < self.count {
+      let item = self.floats.get(index)
+      if item.bottom > origin.y {
+        run output.append(FloatBox { side: item.side, left: item.left - origin.x, right: item.right - origin.x, top: item.top - origin.y, bottom: item.bottom - origin.y })
+      }
+      index = index + 1
+    }
+  }
   // No exclusions extend below `top`, and none are deferred or pending.
   pub fn clearBelow(self: &Self, top: f64) -> bool {
     if self.leftDeferred || self.rightDeferred || self.pendingFloat { return false }

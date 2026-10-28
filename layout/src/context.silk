@@ -196,6 +196,7 @@ pub fn effectiveDisplay(style: &Style, input: &Input) -> Display {
   return style.display
 }
 pub fn isFlex(style: &Style) -> bool { return style.display.insideIs(DisplayInside.Flex) }
+pub fn isGrid(style: &Style) -> bool { return style.display.insideIs(DisplayInside.Grid) }
 pub fn scrollable(value: Overflow) -> bool { return value == Overflow.Auto || value == Overflow.Scroll || value == Overflow.Hidden }
 // Pinned Overflow 3 §3.1: visible becomes auto beside a scrollable axis.
 // Clip remains non-scrollable; the draft permits single-axis scroll containers.
@@ -216,7 +217,7 @@ pub fn usedOverflowForAxis(style: &Style, horizontal: bool) -> Overflow {
 }
 pub fn establishesContext(style: &Style, input: &Input) -> bool {
   let display = effectiveDisplay(style, &input)
-  return display.insideIs(DisplayInside.Flex) || style.alignContent != Align.Normal || (style.float != Float.None && !input.blockify) || display.insideIs(DisplayInside.FlowRoot) || outOfFlow(style) || scrollable(style.overflowX) || scrollable(style.overflowY)
+  return display.insideIs(DisplayInside.Flex) || display.insideIs(DisplayInside.Grid) || style.alignContent != Align.Normal || (style.float != Float.None && !input.blockify) || display.insideIs(DisplayInside.FlowRoot) || outOfFlow(style) || scrollable(style.overflowX) || scrollable(style.overflowY)
 }
 
 // CSS 2.1 §10.3.3: auto margins absorb positive free space; the containing

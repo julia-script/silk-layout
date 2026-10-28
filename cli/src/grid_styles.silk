@@ -1,0 +1,394 @@
+import layout.lib {
+  Tree,
+  NodeId,
+  InvalidNode,
+  GridError,
+  GridTemplate,
+  GridAxis,
+  GridTrack,
+  GridBreadth,
+  GridBreadthKind,
+  GridNamedLine,
+  GridRepeat,
+  GridRepeatKind,
+  GridLine,
+  GridLineKind,
+  GridArea,
+  GridAutoFlow,
+  MAX_GRID_TRACKS
+}
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.json_value { Value }
+import silk.i32
+import silk.f64
+import protocol as P
+import protocol { ProtocolError }
+
+effect fn breadth(value: &Value) -> GridBreadth
+  ! ProtocolError {
+  match &value.* {
+    Value.Number { text: _ } => {
+      return GridBreadth.fixed(run P.nonnegative(value))
+    }
+    Value.String { text: _ } => {
+      let name = run P.text(value)
+      let mut result = GridBreadth.auto()
+      if name == "auto" {
+        return result
+      }
+      if name == "min-content" {
+        result.kind = GridBreadthKind.MinContent
+        return result
+      }
+      if name == "max-content" {
+        result.kind = GridBreadthKind.MaxContent
+        return result
+      }
+      fail P.invalid("invalid grid track breadth")
+    }
+    _ => {
+      if P.has(value, "fr") {
+        run P.fields(value, &["fr"])
+        return GridBreadth.flex(run P.nonnegative(run P.required(value, "fr")))
+      }
+      run P.fields(value, &["length", "percent"])
+      let mut result = GridBreadth.fixed(0.0)
+      result.kind = GridBreadthKind.Percent
+      if P.has(value, "length") {
+        result.kind = GridBreadthKind.Calc
+        result.length = run P.finite(run P.required(value, "length"))
+        result.percent = run P.finite(run P.required(value, "percent"))
+      } else {
+        result.percent = run P.nonnegative(run P.required(value, "percent"))
+      }
+      return result
+    }
+  }
+}
+
+effect fn track(value: &Value) -> GridTrack
+  ! ProtocolError {
+  if P.has(value, "minmax") {
+    run P.fields(value, &["minmax"])
+    let pair = run P.array(run P.required(value, "minmax"))
+    if pair.length != 2 {
+      fail P.invalid("grid minmax requires two breadths")
+    }
+    let result = GridTrack.minmax(
+      run breadth(run P.item(&pair[0])),
+      run breadth(run P.item(&pair[1])),
+    )
+    if !result.valid() {
+      fail P.invalid("grid minmax minimum cannot be flexible")
+    }
+    return result
+  }
+  if P.has(value, "fitContent") {
+    run P.fields(value, &["fitContent"])
+    let result = GridTrack.fitContent(run breadth(run P.required(value, "fitContent")))
+    if !result.valid() {
+      fail P.invalid("grid fitContent requires a length-percentage")
+    }
+    return result
+  }
+  return GridTrack.breadth(run breadth(value))
+}
+
+effect fn component(value: &Value, axis: &mut GridAxis, tree: &mut Tree, repeat: usize)
+  ! ProtocolError | GridError | OutOfMemoryError
+  ? &mut Allocator {
+  if P.has(value, "names") {
+    run P.fields(value, &["names"])
+    let names = run P.array(run P.required(value, "names"))
+    let mut index: usize = 0
+    while index < names.length {
+      let name = run tree.internGridName(run P.text(run P.item(&names[index])))
+      run axis.lines.append(
+        GridNamedLine { line: axis.tracks.length(), name: name, repeat: repeat },
+      )
+      index = index + 1
+    }
+  } else {
+    if axis.tracks.length() >= MAX_GRID_TRACKS {
+      fail P.invalid("grid axis exceeds 10000 tracks")
+    }
+    run axis.tracks.append(run track(value))
+  }
+}
+
+effect fn axis(value: &Value, tree: &mut Tree) -> GridAxis
+  ! ProtocolError | GridError | OutOfMemoryError
+  ? &mut Allocator {
+  let mut result = GridAxis.make()
+  match &value.* {
+    Value.String { text: _ } => {
+      let keyword = run P.text(value)
+      if keyword != "none" {
+        fail P.invalid("grid template requires an array or none")
+      }
+      return move result
+    }
+    _ => {}
+  }
+  let entries = run P.array(value)
+  let mut index: usize = 0
+  while index < entries.length {
+    let entry = run P.item(&entries[index])
+    if P.has(entry, "repeat") {
+      run P.fields(entry, &["repeat"])
+      let repeat = run P.required(entry, "repeat")
+      run P.fields(repeat, &["count", "tracks"])
+      let countValue = run P.required(repeat, "count")
+      let mut kind = GridRepeatKind.Count
+      let mut count: usize = 1
+      match &countValue.* {
+        Value.String { text: _ } => {
+          let name = run P.text(countValue)
+          if name == "auto-fill" {
+            kind = GridRepeatKind.AutoFill
+          } else if name == "auto-fit" {
+            kind = GridRepeatKind.AutoFit
+          } else {
+            fail P.invalid("invalid grid repeat count")
+          }
+        }
+        _ => {
+          let parsed = run P.integer(countValue)
+          if parsed <= 0 || parsed > 10000 {
+            fail P.invalid("grid repeat count must be 1..10000")
+          }
+          count = i32.toUsize(parsed)
+        }
+      }
+      let start = result.tracks.length()
+      let pattern = run P.array(run P.required(repeat, "tracks"))
+      let mut part: usize = 0
+      while part < pattern.length {
+        let repeatIndex = result.repeats.length() + 1
+        run component(run P.item(&pattern[part]), &mut result, &mut tree, repeatIndex)
+        part = part + 1
+      }
+      run result.repeats.append(
+        GridRepeat {
+          start: start,
+          length: result.tracks.length() - start,
+          count: count,
+          kind: kind,
+        },
+      )
+    } else {
+      run component(entry, &mut result, &mut tree, 0)
+    }
+    index = index + 1
+  }
+  if result.tracks.length() == 0 || !result.valid(tree.gridNames.length()) {
+    fail P.invalid("invalid grid track list or repeat grammar")
+  }
+  return move result
+}
+
+effect fn autoTracks(value: &Value) -> List<GridTrack>
+  ! ProtocolError | OutOfMemoryError
+  ? &mut Allocator {
+  let mut result = List<GridTrack>.make()
+  match &value.* {
+    Value.Array { values: _ } => {
+      let entries = run P.array(value)
+      if entries.length == 0 || entries.length > MAX_GRID_TRACKS {
+        fail P.invalid("grid auto tracks require 1..10000 sizes")
+      }
+      let mut index: usize = 0
+      while index < entries.length {
+        run result.append(run track(run P.item(&entries[index])))
+        index = index + 1
+      }
+    }
+    _ => {
+      run result.append(run track(value))
+    }
+  }
+  return move result
+}
+
+effect fn placementNumber(value: &Value) -> i32
+  ! ProtocolError {
+  let number = run P.finite(value)
+  if number == 0.0 || f64.trunc(number) != number {
+    fail P.invalid("grid line must be a nonzero integer")
+  }
+  if number > 10000.0 {
+    return 10000
+  }
+  if number < -10000.0 {
+    return -10000
+  }
+  return run P.integer(value)
+}
+
+effect fn line(value: &Value, tree: &mut Tree) -> GridLine
+  ! ProtocolError | GridError | OutOfMemoryError
+  ? &mut Allocator {
+  let mut result = GridLine { kind: GridLineKind.Line, number: 1, name: 0 }
+  match &value.* {
+    Value.String { text: _ } => {
+      let name = run P.text(value)
+      if name == "auto" {
+        return GridLine.auto()
+      }
+      result.name = run tree.internGridName(name)
+    }
+    Value.Number { text: _ } => {
+      result.number = run placementNumber(value)
+    }
+    _ => {
+      if P.has(value, "span") {
+        run P.fields(value, &["span", "name"])
+        result.kind = GridLineKind.Span
+        result.number = run placementNumber(run P.required(value, "span"))
+        if result.number <= 0 {
+          fail P.invalid("grid span must be positive")
+        }
+      } else {
+        run P.fields(value, &["line", "name"])
+        result.number = run placementNumber(run P.required(value, "line"))
+      }
+      if P.has(value, "name") {
+        result.name = run tree.internGridName(run P.text(run P.required(value, "name")))
+      }
+    }
+  }
+  return result
+}
+
+effect fn areas(value: &Value, result: &mut GridTemplate, tree: &mut Tree)
+  ! ProtocolError | GridError | OutOfMemoryError
+  ? &mut Allocator {
+  let rows = run P.array(value)
+  if rows.length > MAX_GRID_TRACKS {
+    fail P.invalid("grid areas exceed 10000 rows")
+  }
+  result.areaRows = rows.length
+  let mut row: usize = 0
+  let mut cells = List<usize>.make()
+  while row < rows.length {
+    let columns = run P.array(run P.item(&rows[row]))
+    if row == 0 {
+      result.areaColumns = columns.length
+    }
+    if columns.length == 0 || columns.length > MAX_GRID_TRACKS
+      || columns.length != result.areaColumns {
+      fail P.invalid("grid areas must be a rectangular matrix")
+    }
+    let mut column: usize = 0
+    while column < columns.length {
+      let value = run P.text(run P.item(&columns[column]))
+      let mut name: usize = 0
+      if value != "." {
+        name = run tree.internGridAreaName(value)
+      }
+      run cells.append(name)
+      if name != 0 {
+        let mut area: usize = 0
+        while area < result.areas.length() && result.areas.asSlice()[area].name != name {
+          area = area + 1
+        }
+        if area == result.areas.length() {
+          run result.areas.append(
+            GridArea {
+              name: name,
+              rowStart: row,
+              rowEnd: row + 1,
+              columnStart: column,
+              columnEnd: column + 1,
+            },
+          )
+        } else {
+          let entry = &mut result.areas.asMutSlice()[area]
+          entry.rowEnd = row + 1
+          if column < entry.columnStart {
+            entry.columnStart = column
+          }
+          if column >= entry.columnEnd {
+            entry.columnEnd = column + 1
+          }
+        }
+      }
+      column = column + 1
+    }
+    row = row + 1
+  }
+  let mut area: usize = 0
+  while area < result.areas.length() {
+    let entry = result.areas.asSlice()[area]
+    row = entry.rowStart
+    while row < entry.rowEnd {
+      let mut column = entry.columnStart
+      while column < entry.columnEnd {
+        if cells.get(row * result.areaColumns + column) != entry.name {
+          fail P.invalid("each named grid area must fill a rectangle")
+        }
+        column = column + 1
+      }
+      row = row + 1
+    }
+    area = area + 1
+  }
+}
+
+pub effect fn apply(value: &Value, tree: &mut Tree, id: NodeId)
+  ! ProtocolError | GridError | OutOfMemoryError | InvalidNode
+  ? &mut Allocator {
+  let mut result = GridTemplate.make()
+  let present = P.has(value, "gridTemplateRows") || P.has(value, "gridTemplateColumns")
+    || P.has(value, "gridTemplateAreas")
+    || P.has(value, "gridAutoRows")
+    || P.has(value, "gridAutoColumns")
+    || P.has(value, "gridAutoFlow")
+    || P.has(value, "gridRowStart")
+    || P.has(value, "gridRowEnd")
+    || P.has(value, "gridColumnStart")
+    || P.has(value, "gridColumnEnd")
+  if !present && tree.styles.asSlice()[tree.nodes.asSlice()[id.index].styleIndex].grid == 0 {
+    return
+  }
+  if P.has(value, "gridTemplateRows") {
+    result.rows = run axis(run P.required(value, "gridTemplateRows"), &mut tree)
+  }
+  if P.has(value, "gridTemplateColumns") {
+    result.columns = run axis(run P.required(value, "gridTemplateColumns"), &mut tree)
+  }
+  if P.has(value, "gridAutoRows") {
+    result.autoRows = run autoTracks(run P.required(value, "gridAutoRows"))
+  }
+  if P.has(value, "gridAutoColumns") {
+    result.autoColumns = run autoTracks(run P.required(value, "gridAutoColumns"))
+  }
+  if P.has(value, "gridTemplateAreas") {
+    run areas(run P.required(value, "gridTemplateAreas"), &mut result, &mut tree)
+  }
+  if P.has(value, "gridAutoFlow") {
+    let flow = run P.text(run P.required(value, "gridAutoFlow"))
+    if flow == "row" || flow == "row dense" {
+      result.flow = GridAutoFlow.Row
+    } else if flow == "column" || flow == "column dense" {
+      result.flow = GridAutoFlow.Column
+    } else {
+      fail P.invalid("invalid gridAutoFlow")
+    }
+    result.dense = flow == "row dense" || flow == "column dense"
+  }
+  if P.has(value, "gridRowStart") {
+    result.placement.rowStart = run line(run P.required(value, "gridRowStart"), &mut tree)
+  }
+  if P.has(value, "gridRowEnd") {
+    result.placement.rowEnd = run line(run P.required(value, "gridRowEnd"), &mut tree)
+  }
+  if P.has(value, "gridColumnStart") {
+    result.placement.columnStart = run line(run P.required(value, "gridColumnStart"), &mut tree)
+  }
+  if P.has(value, "gridColumnEnd") {
+    result.placement.columnEnd = run line(run P.required(value, "gridColumnEnd"), &mut tree)
+  }
+  run tree.setGrid(id, move result)
+}

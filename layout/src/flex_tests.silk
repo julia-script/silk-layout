@@ -252,7 +252,7 @@ effect fn scenario(case: Case) ! OutOfMemoryError | TextError | FragmentationErr
   run tree.setMeasurement(secondId, 1)
   run tree.setMeasurement(thirdId, 0)
   let mut output = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
@@ -410,7 +410,7 @@ effect fn percentageDescendant(definiteMain: bool) ! OutOfMemoryError | TextErro
   let childId = run tree.append(itemId, move child)
   run tree.setMeasurement(childId, 1)
   let mut output = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
@@ -471,7 +471,7 @@ effect fn preferredColumnContribution(case: ColumnContribution) ! OutOfMemoryErr
     drop overflowId
   }
   let mut output = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
@@ -535,7 +535,7 @@ effect fn crossPercentage(percentItem: bool, definiteParent: bool) ! OutOfMemory
   drop siblingId
   let descendantId = run tree.append(itemId, move descendant)
   let mut output = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
@@ -587,7 +587,7 @@ effect fn negativeBaselineMargin(last: bool) ! OutOfMemoryError | TextError | Fr
   let itemId = run tree.append(rootId, move item)
   run tree.setMeasurement(itemId, 0)
   let mut output = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
@@ -641,7 +641,7 @@ effect fn oppositeBaselineFlows(compatible: bool, reverse: bool) ! OutOfMemoryEr
   run tree.setMeasurement(firstId, 0)
   run tree.setMeasurement(secondId, 1)
   let mut output = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
@@ -698,7 +698,7 @@ effect fn columnPreferredCrossContribution(fit: bool) ! OutOfMemoryError | TextE
   let itemId = run tree.append(rootId, move item)
   let overflowId = run tree.append(itemId, move overflow)
   let mut output = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}
@@ -738,7 +738,7 @@ effect fn partialNegativeInnerBase() ! OutOfMemoryError | TextError | Fragmentat
   let rootId = tree.root()
   let itemId = run tree.append(rootId, move item)
   let mut output = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run output.prepare(constructed.boxes.length())
   let mut measure = BoxMeasure {}

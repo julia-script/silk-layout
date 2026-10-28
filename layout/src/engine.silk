@@ -4,9 +4,10 @@ import silk.effect { Effect }
 import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
 import style { Style, Display, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
-import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
+import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, isGrid, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
 import block { layoutBlock }
 import flex { layoutFlex, FlexScratch }
+import grid { layoutGrid }
 import positioned { positionTree, positionVisits, reachableLimits, addOverflow, subtreeOverflow }
 import bfc { BfcState }
 import silk.option { Option }
@@ -91,7 +92,7 @@ fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: 
   let mut contentBlockSize = max(0.0, layout.size.height - box.inset.vertical())
   if writingMode != WritingMode.HorizontalTb { contentBlockSize = max(0.0, layout.size.width - box.inset.horizontal()) }
   let mut offset = 0.0
-  if !isFlex(nodes.style(id)) && !nodes.style(id).replaced {
+  if !isFlex(nodes.style(id)) && !isGrid(nodes.style(id)) && !nodes.style(id).replaced {
     offset = blockContentOffset(nodes.style(id), contentBlockSize - result.contentBlockSize)
   }
   baselineInset = baselineInset + offset
@@ -157,7 +158,7 @@ effect fn fragmentedContents<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     let style = nodes.style(id)
     // The synthetic frame root supplies available space, not an authored CSS
     // size tail separating the document's contents from the context endpoint.
-    if id != 0 && nodes.node(id).firstChild != NO_NODE && !isFlex(style) && (request.fragmentation.marginStart || request.fragmentation.marginEnd)
+    if id != 0 && nodes.node(id).firstChild != NO_NODE && !isFlex(style) && !isGrid(style) && (request.fragmentation.marginStart || request.fragmentation.marginEnd)
       && (full.size.heightDefinite || full.min.height > full.inset.vertical() || blockContentOffset(style, 1.0) != 0.0) {
       // Break4 §5.2 does not define adjacency through alignment free space.
       // Conservatively use the retained margin envelope (Align3 §5.1.1),
@@ -197,6 +198,7 @@ effect fn contentAlgorithm<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   if nodes.node(id).measurement == Measurement.Content { return measureLeaf(nodes, &mut measurer, id, &request, &resolved, &bfc) }
   if nodes.style(id).replaced { return replacedContents(nodes.style(id), &request, &resolved, natural) }
   if isFlex(nodes.style(id)) { return run layoutFlex(nodes, &mut output, &mut measurer, id, &request, &resolved) }
+  if isGrid(nodes.style(id)) { return run layoutGrid(nodes, &mut output, &mut measurer, id, &request, &resolved) }
   return run layoutBlock(nodes, &mut output, &mut measurer, id, nodes.style(id), &request, &resolved, &mut bfc)
 }
 
@@ -245,7 +247,7 @@ pub fn flowMarginRect(nodes: &BoxTree, id: usize, child: usize, layout: &Layout,
   if !layout.hasBox() || outOfFlow(style) { return Rect.zero() }
   let mut margin = layout.usedMargin
   let parentStyle = nodes.style(id)
-  if !isFlex(parentStyle) {
+  if !isFlex(parentStyle) && !isGrid(parentStyle) {
     let mut basis = parent.contentSize.width
     let mut definite = parent.widthDefinite
     if parentStyle.writingMode != WritingMode.HorizontalTb { basis = parent.contentSize.height
@@ -754,7 +756,7 @@ fn boxInputChanges(nodes: &BoxTree, id: usize, input: &Input) -> bool {
   let style = nodes.style(id)
   let node = nodes.node(id)
   if !input.blockRoot && node.independentRoot { return true }
-  if !input.blockify && node.parent != NO_NODE && nodes.node(node.parent).kind == BoxKind.Flex { return true }
+  if !input.blockify && node.parent != NO_NODE && (nodes.node(node.parent).kind == BoxKind.Flex || nodes.node(node.parent).kind == BoxKind.Grid) { return true }
   let atomicInline = node.kind == BoxKind.Block && !style.replaced && style.display.outsideIs(DisplayOutside.Inline) && style.display.insideIs(DisplayInside.Flow)
   return input.atomicInline != atomicInline
 }
@@ -763,7 +765,7 @@ fn adjustBoxInput(nodes: &BoxTree, id: usize, input: &mut Input) {
   let style = nodes.style(id)
   let node = nodes.node(id)
   input.blockRoot = input.blockRoot || node.independentRoot
-  if node.parent != NO_NODE && nodes.node(node.parent).kind == BoxKind.Flex { input.blockify = true }
+  if node.parent != NO_NODE && (nodes.node(node.parent).kind == BoxKind.Flex || nodes.node(node.parent).kind == BoxKind.Grid) { input.blockify = true }
   input.atomicInline = node.kind == BoxKind.Block && !style.replaced && style.display.outsideIs(DisplayOutside.Inline) && style.display.insideIs(DisplayInside.Flow)
 }
 
@@ -1131,7 +1133,7 @@ fn sameViewport(a: &OptionalSize, b: &OptionalSize) -> bool {
 }
 
 effect fn boxesFor<'source>(tree: &'source Tree, output: &mut LayoutTree, since: usize, restoring: bool) -> BoxTree<'source> ! OutOfMemoryError ? &mut Allocator {
-  if !restoring { return run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) }
+  if !restoring { return run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) }
   let boxes = Intrinsic.replace(output.boxNodes, List<BoxNode>.make())
   let styles = Intrinsic.replace(output.anonymousStyles, List<Style>.make())
   let origins = Intrinsic.replace(output.anonymousOrigins, List<usize>.make())
@@ -1141,7 +1143,7 @@ effect fn boxesFor<'source>(tree: &'source Tree, output: &mut LayoutTree, since:
   // Scroll offsets changed since: those boxes alone take the new offsets.
   let mut scrolled = List<usize>.make()
   let logged = run tree.scrolledNodes(output.keptScrolls, &mut scrolled)
-  let mut nodes = BoxTree.restore(tree.nodes.asSlice(), tree.styles.asSlice(), move boxes, move styles, move origins, move texts, move first, move last, !logged)
+  let mut nodes = BoxTree.restore(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), move boxes, move styles, move origins, move texts, move first, move last, !logged)
   let mut at: usize = 0
   while at < scrolled.length() {
     nodes.refreshScroll(scrolled.get(at))
@@ -1184,7 +1186,7 @@ fn staticSubtree(nodes: &BoxTree, id: usize, seen: &mut usize) -> bool {
 // The block or flex box that lays out a text box's lines.
 fn textContainer(nodes: &BoxTree, id: usize) -> usize {
   let mut box = nodes.node(id).parent
-  while box != NO_NODE && nodes.node(box).kind != BoxKind.Block && nodes.node(box).kind != BoxKind.Flex { box = nodes.node(box).parent }
+  while box != NO_NODE && nodes.node(box).kind != BoxKind.Block && nodes.node(box).kind != BoxKind.Flex && nodes.node(box).kind != BoxKind.Grid { box = nodes.node(box).parent }
   return box
 }
 // Whether every changed source with a box inside `container` is text it

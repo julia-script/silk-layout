@@ -66,7 +66,7 @@ fn sized(width: f64, height: f64) -> Style {
 }
 effect fn arrange(tree: &Tree, width: f64) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut layouts = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run layouts.prepare(constructed.boxes.length())
   let mut measure = FixedMeasure {}
@@ -284,7 +284,7 @@ test effect fn blockIntrinsicWidthsUseMeasuredChildContributions() -> () ! OutOf
   let a = run tree.append(rootId, move child) |> Effect.provideMut<Allocator>(&mut allocator)
   run tree.setMeasurement(a, 0)
   let mut layouts = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) |> Effect.provideMut<Allocator>(&mut allocator)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) |> Effect.provideMut<Allocator>(&mut allocator)
   let rootBox = constructed.firstBySource.get(rootId.index)
   run layouts.prepare(constructed.boxes.length()) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut measure = FixedMeasure {}
@@ -369,7 +369,7 @@ test effect fn blockFlowRootMinimumWidthMovesBelowFloatAndRefills() -> () ! OutO
 
 effect fn arrangeVertical(tree: &Tree, inlineSize: f64) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut layouts = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
   run layouts.prepare(constructed.boxes.length())
   let mut measure = FixedMeasure {}
@@ -954,7 +954,7 @@ test effect fn blockifiedItemIgnoresFloatButPreservesExplicitShrinkRequest() -> 
   child.margin.top = Dimension.px(10.0)
   let childId = run tree.append(rootId, move child) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut layouts = LayoutTree.make()
-  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) |> Effect.provideMut<Allocator>(&mut allocator)
+  let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr) |> Effect.provideMut<Allocator>(&mut allocator)
   let rootBox = constructed.firstBySource.get(rootId.index)
   run layouts.prepare(constructed.boxes.length()) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut measure = FixedMeasure {}

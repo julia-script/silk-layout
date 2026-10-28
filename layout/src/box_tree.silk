@@ -7,8 +7,9 @@ import geometry { Point }
 import style { Style, Display, DisplayOutside, DisplayInside, WritingMode, Direction, Align, Float, Position, BreakBetween, Visibility, DimensionKind, Overflow }
 import tree { Node, Measurement, NO_NODE }
 import context { outOfFlow, scrollable, overflowForAxis }
+import grid_style { GridTemplate }
 
-pub enum BoxKind { Block, Flex, Inline, InlineFormatting, Text }
+pub enum BoxKind { Block, Flex, Grid, Inline, InlineFormatting, Text }
 pub struct BoxNode {
   pub source: usize, pub styleOwner: usize, pub anonymousStyle: usize,
   pub kind: BoxKind,
@@ -38,13 +39,15 @@ pub struct BoxTree<'a> {
   pub firstBySource: List<usize>, pub lastBySource: List<usize>,
   pub sources: &'a [Node],
   pub styles: &'a [Style],
+  pub grids: &'a [GridTemplate],
+  pub gridNames: &'a [String],
   textStyles: List<usize>,
 }
 impl BoxTree {
   // A box tree built from these sources at an earlier revision, when no
   // change since could alter which boxes are generated.
-  pub fn restore<'a>(sources: &'a [Node], styles: &'a [Style], boxes: List<BoxNode>, anonymousStyles: List<Style>, anonymousOrigins: List<usize>, anonymousText: List<bool>, firstBySource: List<usize>, lastBySource: List<usize>, copyScrolls: bool) -> BoxTree<'a> {
-    let mut result = BoxTree { boxes: move boxes, anonymousStyles: move anonymousStyles, anonymousOrigins: move anonymousOrigins, anonymousText: move anonymousText, firstBySource: move firstBySource, lastBySource: move lastBySource, sources: sources, styles: styles, textStyles: List<usize>.make() }
+  pub fn restore<'a>(sources: &'a [Node], styles: &'a [Style], grids: &'a [GridTemplate], gridNames: &'a [String], boxes: List<BoxNode>, anonymousStyles: List<Style>, anonymousOrigins: List<usize>, anonymousText: List<bool>, firstBySource: List<usize>, lastBySource: List<usize>, copyScrolls: bool) -> BoxTree<'a> {
+    let mut result = BoxTree { boxes: move boxes, anonymousStyles: move anonymousStyles, anonymousOrigins: move anonymousOrigins, anonymousText: move anonymousText, firstBySource: move firstBySource, lastBySource: move lastBySource, sources: sources, styles: styles, grids: grids, gridNames: gridNames, textStyles: List<usize>.make() }
     if !copyScrolls { return move result }
     let values = result.boxes.asMutSlice()
     let mut index: usize = 0
@@ -106,8 +109,9 @@ impl BoxTree {
         overflow = x }
       let scrolling = x == Overflow.Auto || x == Overflow.Scroll || y == Overflow.Auto || y == Overflow.Scroll
       let clipped = overflow == Overflow.Hidden && dimension.kind != DimensionKind.Auto && maximum.kind == DimensionKind.None
-      let monolithic = style.replaced || node.measurement != Measurement.None || inlineLevel || orthogonal || scrolling || clipped
-      let applicable = !outOfFlow(style) && (node.kind == BoxKind.Block || node.kind == BoxKind.Flex)
+      // Grid fragmentation is monolithic until Grid §13 is implemented.
+      let monolithic = node.kind == BoxKind.Grid || style.replaced || node.measurement != Measurement.None || inlineLevel || orthogonal || scrolling || clipped
+      let applicable = !outOfFlow(style) && (node.kind == BoxKind.Block || node.kind == BoxKind.Flex || node.kind == BoxKind.Grid)
       let mut before = applicable && style.breakBefore != BreakBetween.Auto
       let mut dynamicBefore = false
       let ownAfter = applicable && style.breakAfter != BreakBetween.Auto
@@ -288,7 +292,7 @@ impl BoxTree {
 
   effect fn construct(self: &mut Self, source: usize, flow: &mut Flow, inline: usize, parentWritingMode: WritingMode) ! OutOfMemoryError ? &mut Allocator {
     if self.sources[source].isText() {
-      if self.node(flow.container).kind == BoxKind.Flex {
+      if self.node(flow.container).kind == BoxKind.Flex || self.node(flow.container).kind == BoxKind.Grid {
         run flow.flexText.append(source)
         match self.sources[source].text() {
           Option<string>.Some { value } => {
@@ -313,7 +317,7 @@ impl BoxTree {
     }
 
     run self.flushFlexText(&mut flow)
-    let flexChild = self.node(flow.container).kind == BoxKind.Flex
+    let flexChild = self.node(flow.container).kind == BoxKind.Flex || self.node(flow.container).kind == BoxKind.Grid
     let style = &self.styles[self.sources[source].styleIndex]
     let positioned = outOfFlow(style)
     let floating = style.float != Float.None && !flexChild && !positioned
@@ -328,11 +332,12 @@ impl BoxTree {
     let mut kind = BoxKind.Block
     if !replaced {
       if display.insideIs(DisplayInside.Flex) { kind = BoxKind.Flex }
+      if display.insideIs(DisplayInside.Grid) { kind = BoxKind.Grid }
       if inlineLevel && display.insideIs(DisplayInside.Flow) && !differentWritingMode { kind = BoxKind.Inline }
     }
     // Writing Modes 4 3.2 compares against the nearest box-generating parent;
     // contents and generated wrappers do not substitute a source parent here.
-    let independent = kind != BoxKind.Inline && (replaced || flexChild || positioned || floating || differentWritingMode || display.insideIs(DisplayInside.FlowRoot) || kind == BoxKind.Flex || style.alignContent != Align.Normal || scrollable(style.overflowX) || scrollable(style.overflowY) || source == 0)
+    let independent = kind != BoxKind.Inline && (replaced || flexChild || positioned || floating || differentWritingMode || display.insideIs(DisplayInside.FlowRoot) || kind == BoxKind.Flex || kind == BoxKind.Grid || style.alignContent != Align.Normal || scrollable(style.overflowX) || scrollable(style.overflowY) || source == 0)
     let node = BoxNode {
       source: source, styleOwner: source, anonymousStyle: NO_NODE, kind: kind,
       parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE,
@@ -362,7 +367,7 @@ impl BoxTree {
     if positioned || floating {
       // A hypothetical inline-level positioned box needs an inline anchor
       // even before real content. It does not give the resulting line height.
-      // Flex static positions remain owned by the flex formatting context.
+      // Flex/grid static positions remain owned by their formatting context.
       if flow.inlineRun != NO_NODE || (floating && inline != NO_NODE)
         || (positioned && !flexChild && style.display.outsideIs(DisplayOutside.Inline)) {
         parent = run self.inlineParent(&mut flow, inline)
@@ -474,12 +479,12 @@ fn anonymous(kind: BoxKind, owner: usize, slot: usize) -> BoxNode {
   }
 }
 
-pub effect fn build<'a>(sources: &'a [Node], styles: &'a [Style], writingMode: WritingMode, direction: Direction) -> BoxTree<'a> ! OutOfMemoryError ? &mut Allocator {
+pub effect fn build<'a>(sources: &'a [Node], styles: &'a [Style], grids: &'a [GridTemplate], gridNames: &'a [String], writingMode: WritingMode, direction: Direction) -> BoxTree<'a> ! OutOfMemoryError ? &mut Allocator {
   let mut result = BoxTree {
     boxes: List<BoxNode>.make(), anonymousStyles: List<Style>.make(),
     anonymousOrigins: List<usize>.make(), anonymousText: List<bool>.make(),
     firstBySource: List<usize>.make(), lastBySource: List<usize>.make(), sources: sources,
-    styles: styles, textStyles: List<usize>.make(),
+    styles: styles, grids: grids, gridNames: gridNames, textStyles: List<usize>.make(),
   }
   run result.boxes.reserveExact(sources.length + 1)
   run result.firstBySource.reserveExact(sources.length)

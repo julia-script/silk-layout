@@ -17,7 +17,7 @@ import inline_prepared { PreparedInline, KeptText }
 
 import flex { FlexScratch }
 pub import layout_cache { REUSE_INDEPENDENT, REUSE_IN_FLOW, CacheKind }
-import layout_cache { LayoutCache, Snapshot, FinalRange, BoxWrites, REUSE_LEVEL }
+import layout_cache { LayoutCache, Snapshot, FinalRange, BoxWrites, Placement, REUSE_LEVEL }
 
 struct ScrollbarSelection { horizontal: bool, vertical: bool }
 impl Copy for ScrollbarSelection {}
@@ -344,10 +344,50 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       self.writes.written.set(id, self.writes.generation)
       self.markAncestors(id)
     }
-    if !self.inPlace || self.writes.stamps.get(id) == self.writes.generation { return }
+    if !self.inPlace { return }
+    if self.writes.stamps.get(id) == self.writes.generation {
+      if self.writes.partial.get(id) == self.writes.generation { run self.savePlaced(id) }
+      return
+    }
     run self.writes.saved.append(self.boxes[id])
     self.writes.stamps.set(id, self.writes.generation)
     self.writes.slots.set(id, self.writes.saved.length() - 1)
+  }
+  // touch for a write of only the box's placement (see Placement): an
+  // in-place compute saves just that.
+  effect fn touchPlacement(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
+    if self.tracking || self.inPlace { run self.touchPlacementTracked(id) }
+  }
+  effect fn touchPlacementTracked(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
+    if self.tracking && id < self.writes.written.length() && self.writes.written.get(id) != self.writes.generation {
+      self.writes.written.set(id, self.writes.generation)
+      self.markAncestors(id)
+    }
+    if !self.inPlace || self.writes.stamps.get(id) == self.writes.generation { return }
+    run self.writes.placed.append(Placement.of(&self.boxes[id]))
+    self.writes.stamps.set(id, self.writes.generation)
+    self.writes.partial.set(id, self.writes.generation)
+    self.writes.slots.set(id, self.writes.placed.length() - 1)
+  }
+  // A box saved by placement is about to be written whole: saves its whole
+  // previous layout.
+  effect fn savePlaced(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
+    let mut previous = self.boxes[id]
+    self.writes.placed.asSlice()[self.writes.slots.get(id)].restore(&mut previous)
+    run self.writes.saved.append(previous)
+    self.writes.partial.set(id, 0)
+    self.writes.slots.set(id, self.writes.saved.length() - 1)
+  }
+  // Puts back a rewritten box's previous layout, or, for `top`, its location.
+  fn restoreSaved(self: &mut Self, id: usize, top: bool) {
+    let slot = self.writes.slots.get(id)
+    if self.writes.partial.get(id) == self.writes.generation {
+      let placed = self.writes.placed.asSlice()[slot]
+      if top { self.boxes[id].location = placed.location } else { placed.restore(&mut self.boxes[id]) }
+      return
+    }
+    let saved = &self.writes.saved.asSlice()[slot]
+    if top { self.boxes[id].location = saved.location } else { self.boxes[id] = saved.* }
   }
   pub effect fn store(self: &mut Self, id: usize, value: &Layout, publish: bool) ! OutOfMemoryError ? &mut Allocator {
     run self.preserveLayout(id)
@@ -580,10 +620,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     if kept && id < self.writes.relaid.length() && self.writes.relaid.get(id) != self.writes.generation {
       let generation = self.writes.generation
       if self.writes.written.get(id) == generation {
-        if self.writes.stamps.get(id) == generation {
-          let saved = &self.writes.saved.asSlice()[self.writes.slots.get(id)]
-          if top { self.boxes[id].location = saved.location } else { self.boxes[id] = saved.* }
-        }
+        if self.writes.stamps.get(id) == generation { self.restoreSaved(id, top) }
         self.cache.keepRange(id)
       }
       if self.writes.below.get(id) != generation { return }
@@ -600,8 +637,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       let previous = &self.previous.boxes.asSlice()[id]
       if top { self.boxes[id].location = previous.location } else { self.boxes[id] = previous.* }
     } else if self.writes.stamps.get(id) == self.writes.generation {
-      let saved = &self.writes.saved.asSlice()[self.writes.slots.get(id)]
-      if top { self.boxes[id].location = saved.location } else { self.boxes[id] = saved.* }
+      self.restoreSaved(id, top)
     }
     if kept {
       self.fragments.keepBox(id, from.start, from.end)
@@ -683,10 +719,11 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
     return Option<Layout>.Some { value: self.boxes[id] }
   }
-  // The box's layout at the end of the previous compute.
+  // The box's layout at the end of the previous compute, but for its
+  // placement (see Placement), which FinalResult.layout replaces.
   fn keptLayout(self: &Self, id: usize) -> &Layout {
     if !self.inPlace { return &self.previous.boxes.asSlice()[id] }
-    if self.writes.stamps.get(id) == self.writes.generation { return &self.writes.saved.asSlice()[self.writes.slots.get(id)] }
+    if self.writes.stamps.get(id) == self.writes.generation && self.writes.partial.get(id) != self.writes.generation { return &self.writes.saved.asSlice()[self.writes.slots.get(id)] }
     return &self.boxes[id]
   }
   // `store` for a box whose layout from this compute is already stored, after
@@ -694,7 +731,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // so they are written in place rather than copying the whole layout again.
   pub effect fn place(self: &mut Self, id: usize, location: Point, usedMargin: ResolvedEdges, hasClearance: bool, publish: bool) ! OutOfMemoryError ? &mut Allocator {
     run self.preserveLayout(id)
-    run self.touch(id)
+    run self.touchPlacement(id)
     if publish {
       let first = self.publication(id)
       if first != NO_NODE {

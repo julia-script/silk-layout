@@ -702,7 +702,12 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     // previous final layout, which differs from the recorded one only in what
     // its parent's placement wrote.
     let untouched = kept && self.inPlace && self.writes.stamps.get(id) != self.writes.generation
-    run self.restoreBoxes(nodes, id, slot, base, kept, true)
+    // A box kept in place that this compute neither wrote nor reached below
+    // has nothing to restore.
+    let generation = self.writes.generation
+    if !kept || id >= self.writes.relaid.length() || self.writes.relaid.asSlice()[id] == generation || self.writes.written.asSlice()[id] == generation || self.writes.below.asSlice()[id] == generation {
+      run self.restoreBoxes(nodes, id, slot, base, kept, true)
+    }
     if untouched {
       let record = self.cache.result(id)
       let location = record.location

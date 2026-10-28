@@ -617,6 +617,15 @@ test effect fn keptSizesSurviveUntilTheirSourcesChange() ! OutOfMemoryError | Te
   output.invalidate()
   run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(output.boxes.get(output.firstBySource.get(third.index)).location.x == 180.0 && output.stats.cacheHits == 0, "invalidate discards every kept result")
+  output.invalidate()
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.boxes.get(output.firstBySource.get(third.index)).location.x == 180.0 && output.stats.cacheHits == 0, "an invalidated unchanged tree lays out its kept boxes afresh")
+  output.invalidate()
+  let mut narrow = Style.make()
+  narrow.width = Dimension.px(40.0)
+  run tree.setStyle(second, move narrow)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.boxes.get(output.firstBySource.get(third.index)).location.x == 120.0 && output.stats.cacheHits == 0, "a change after invalidate rebuilds the boxes")
 }
 
 test effect fn cleanSubtreesAreCopiedNotLaidOut() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {

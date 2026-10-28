@@ -1383,6 +1383,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     run output.cache.compact()
   } else {
     output.cache.clear()
+    output.cache.flexMemos.startFresh()
   }
   // Style facts of the same boxes need refreshing only where styles changed.
   if sameBoxes && facts.covers(nodes.boxes.length()) {

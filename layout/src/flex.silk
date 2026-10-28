@@ -900,7 +900,7 @@ pub struct FlexScratch { items: List<Item>, lines: List<Line> }
 // reuse nothing, and its entries would only be overwritten.
 pub struct FlexMemos {
   heads: List<usize>, entries: List<FlexMemo>,
-  enabled: bool, fresh: bool, lookups: usize, hits: usize, skipped: usize,
+  free: usize, enabled: bool, fresh: bool, lookups: usize, hits: usize, skipped: usize,
 }
 struct FlexMemo {
   input: Input, main: AvailableSpace, axis: Axes,
@@ -909,11 +909,12 @@ struct FlexMemo {
 }
 impl Copy for FlexMemo {}
 // Results kept per item box, and in all; past the latter they start over.
+// Entries of dropped boxes are reused first, so only new boxes grow the list.
 const MEMOS_PER_BOX: usize = 4
 const MEMOS: usize = 16384
 const SAMPLE: usize = 8
 impl FlexMemos {
-  pub fn make() -> FlexMemos { return FlexMemos { heads: List<usize>.make(), entries: List<FlexMemo>.make(), enabled: true, fresh: true, lookups: 0, hits: 0, skipped: 0 } }
+  pub fn make() -> FlexMemos { return FlexMemos { heads: List<usize>.make(), entries: List<FlexMemo>.make(), free: NO_NODE, enabled: true, fresh: false, lookups: 0, hits: 0, skipped: 0 } }
   // Starts a compute that keeps the previous one's cache.
   pub fn rotate(self: &mut Self) {
     self.fresh = false
@@ -930,12 +931,23 @@ impl FlexMemos {
     self.hits = 0
   }
   pub fn clear(self: &mut Self) {
-    self.fresh = true
     self.heads.clear()
     self.entries.clear()
+    self.free = NO_NODE
   }
+  // Starts a compute with nothing kept, which skips the memo.
+  pub fn startFresh(self: &mut Self) { self.fresh = true }
+  // Frees the box's entries for reuse.
   pub fn dropBox(self: &mut Self, id: usize) {
-    if id < self.heads.length() { self.heads.set(id, NO_NODE) }
+    if id >= self.heads.length() { return }
+    let head = self.heads.get(id)
+    if head == NO_NODE { return }
+    self.heads.set(id, NO_NODE)
+    let entries = self.entries.asMutSlice()
+    let mut last = head
+    while entries[last].next != NO_NODE { last = entries[last].next }
+    entries[last].next = self.free
+    self.free = head
   }
   fn find(self: &mut Self, id: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool) -> usize {
     if id >= self.heads.length() { return NO_NODE }
@@ -957,26 +969,53 @@ impl FlexMemos {
     return NO_NODE
   }
   effect fn remember(self: &mut Self, id: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool, item: &Item) ! OutOfMemoryError ? &mut Allocator {
-    if self.entries.length() >= MEMOS { self.clear() }
     if id >= self.heads.length() {
       let missing = id + 1 - self.heads.length()
       run self.heads.appendRepeated(NO_NODE, missing)
     }
-    // Keep the newest few of the box's entries.
+    // Keep the newest few of the box's entries, reusing the slot of the one
+    // dropped, else a freed one.
     let head = self.heads.get(id)
-    let entries = self.entries.asMutSlice()
+    let mut slot = NO_NODE
     let mut kept: usize = 1
     let mut index = head
     while index != NO_NODE {
+      let entries = self.entries.asMutSlice()
+      let next = entries[index].next
       if kept == MEMOS_PER_BOX {
         entries[index].next = NO_NODE
+        slot = next
         break
       }
       kept = kept + 1
-      index = entries[index].next
+      index = next
     }
-    run self.entries.append(FlexMemo { input: input.*, main: main, axis: axis.*, align: parentStyle.alignItems, wrap: parentStyle.flexWrap, intrinsic: intrinsic, mainDefinite: mainDefinite, next: head, item: item.* })
-    self.heads.set(id, self.entries.length() - 1)
+    if slot == NO_NODE && self.free != NO_NODE {
+      slot = self.free
+      self.free = self.entries.asSlice()[slot].next
+    }
+    if slot == NO_NODE {
+      if self.entries.length() >= MEMOS {
+        self.clear()
+        run self.heads.appendRepeated(NO_NODE, id + 1)
+      }
+      let next = self.heads.get(id)
+      run self.entries.append(FlexMemo { input: input.*, main: main, axis: axis.*, align: parentStyle.alignItems, wrap: parentStyle.flexWrap, intrinsic: intrinsic, mainDefinite: mainDefinite, next: next, item: item.* })
+      self.heads.set(id, self.entries.length() - 1)
+      return
+    }
+    // Field by field, so the large ones are copied once.
+    let entries = self.entries.asMutSlice()
+    entries[slot].input = input.*
+    entries[slot].main = main
+    entries[slot].axis = axis.*
+    entries[slot].align = parentStyle.alignItems
+    entries[slot].wrap = parentStyle.flexWrap
+    entries[slot].intrinsic = intrinsic
+    entries[slot].mainDefinite = mainDefinite
+    entries[slot].next = head
+    entries[slot].item = item.*
+    self.heads.set(id, slot)
   }
 }
 fn sameAxes(a: &Axes, b: &Axes) -> bool {

@@ -385,6 +385,9 @@ fn cacheKey(shape: u8, input: &Input, viewportFree: bool) -> Input {
   return key
 }
 // Turns a request into its cache key in place; see cacheKey.
+// Whether normalizeKey gives a box's min- and max-content probes on an
+// intrinsic axis the same key, so one result serves both.
+pub fn constraintFreeProbe(shape: u8) -> bool { return shape & KEY_FIXED == 0 && shape & KEY_EMPTY != 0 }
 pub fn normalizeKey(shape: u8, key: &mut Input, viewportFree: bool) {
   // Only replaced boxes and orthogonal flows read the initial containing
   // block and the scrollport limits; see Incremental.markSubtrees.

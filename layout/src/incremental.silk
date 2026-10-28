@@ -46,7 +46,8 @@ fn clearSubtree(nodes: &BoxTree, cache: &mut LayoutCache, root: usize) {
 // parent's style and has no descendants. When `logged`, `sources` lists the
 // changed sources.
 // The boxes in `alone` are laid out again by themselves first (see the
-// early cutoff in compute), which clears their ancestors only if needed.
+// early cutoff in compute), which clears their ancestors only if needed;
+// changes inside them clear ancestors only up to them.
 pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, since: usize, logged: bool, sources: &[usize], alone: &[usize]) {
   if logged {
     let mut at: usize = 0
@@ -65,7 +66,13 @@ pub fn invalidateChanged(tree: &Tree, nodes: &BoxTree, cache: &mut LayoutCache, 
 fn invalidateSource(nodes: &BoxTree, cache: &mut LayoutCache, source: usize, alone: &[usize]) {
   let mut box = nodes.firstBySource.get(source)
   while box != NO_NODE {
-    invalidateBox(nodes, &mut cache, box, !contains(alone, box))
+    // Ancestors up to the first box laid out alone, which reads the change.
+    clearSubtree(nodes, &mut cache, box)
+    let mut ancestor = box
+    while ancestor != NO_NODE && !contains(alone, ancestor) {
+      ancestor = nodes.node(ancestor).parent
+      if ancestor != NO_NODE { cache.clearBox(ancestor) }
+    }
     box = nodes.node(box).nextContinuation
   }
 }

@@ -445,6 +445,24 @@ pub fn normalizeKey(shape: u16, key: &mut Input, viewportFree: bool) {
 
 // CSS Sizing: known dimensions are border-box constraints, not a rewritten style.
 // Intrinsic probes preserve the original percentage containing block.
+// layoutNode for callers that read the result from output.boxes[id], if at
+// all: it skips copying the Layout out.
+pub effect fn layoutNodeInPlace<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if !input.performLayout {
+    run probeNode(nodes, &mut output, &mut measurer, id, &input)
+    return
+  }
+  let key = cacheKey(output.keyShape(id), &input, output.viewportFree(id))
+  if run output.reuseFinal(nodes, id, &key, REUSE_INDEPENDENT, false) { return }
+  if input.bfcContentOrigin.x != 0.0 || input.bfcContentOrigin.y != 0.0 {
+    let mut request = input.*
+    request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
+    drop run layoutFinal(nodes, &mut output, &mut measurer, id, &request, &key)
+    return
+  }
+  drop run layoutFinal(nodes, &mut output, &mut measurer, id, &input, &key)
+}
+
 pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if !input.performLayout {
     run probeNode(nodes, &mut output, &mut measurer, id, &input)
@@ -1523,7 +1541,7 @@ effect fn cutoffBox<'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>,
     if final.beside {
       let mut bfc = BfcState.make()
       drop run layoutInFlow(nodes, &mut pass, &mut measurer, id, &final.input, &mut bfc)
-    } else { drop run layoutNode(nodes, &mut pass, &mut measurer, id, &final.input) }
+    } else { run layoutNodeInPlace(nodes, &mut pass, &mut measurer, id, &final.input) }
     subtreeOverflow(nodes, &mut pass)
     let recorded = pass.cache.recordedRange(id)
     let length = range.end - range.start

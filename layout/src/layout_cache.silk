@@ -8,6 +8,10 @@ import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind }
 import fragments { FragmentArena }
 
 const ABSENT: usize = usize.MAX
+// Reuse levels of a subtree's kept layout; see Incremental.reusableSubtrees.
+pub const REUSE_NONE: u8 = 0
+pub const REUSE_INDEPENDENT: u8 = 1
+pub const REUSE_IN_FLOW: u8 = 2
 pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
 // `generation` is the last compute that created or hit the entry.
 struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }

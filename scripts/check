@@ -12,5 +12,6 @@ case "$(uname -s)-$(uname -m)" in
 esac
 cli="build/llvm/$target/debug/silk_layout_cli"
 python3 scripts/smoke.py --cli "$cli"
-python3 scripts/bench-updates.py --cli "$cli" --iterations 2
+python3 scripts/bench-updates.py --cli "$cli" --iterations 2 --small
+python3 scripts/fixture-updates.py --cli "$cli"
 node scripts/chrome-diff.mjs --cli "$cli" --mode spec

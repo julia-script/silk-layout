@@ -52,12 +52,12 @@ def toggle(*steps):
     return [{"set": list(step)} if isinstance(step, (list, tuple)) else step for step in steps]
 
 
-def cards():
+def cards(count=12):
     """The demo's pricing-card scene, scaled to twelve cards: nested flex with text."""
     doc = Doc({"width": 760, "height": 4000}, {"display": "flex", "flexWrap": "wrap", "columnGap": 16, "rowGap": 16,
                                               "padding": 20, "lineHeight": 1.5, "fontKey": 1, "boxSizing": "border-box"})
     marks = {}
-    for card in range(12):
+    for card in range(count):
         box = doc.element(0, {"boxSizing": "border-box", "display": "flex", "flexDirection": "column", "flexGrow": 1,
                               "flexShrink": 1, "flexBasis": 200, "padding": 18, "border": 1, "rowGap": 10, "lineHeight": 1.5, "fontKey": 1})
         title = doc.element(box, {"lineHeight": 1.5, "fontKey": 2})
@@ -83,11 +83,11 @@ def cards():
     }
 
 
-def article():
+def article(sections=8):
     """Block flow: headings and long paragraphs, one float."""
     doc = Doc({"width": 680, "height": 4000}, {"padding": 24, "lineHeight": 1.6, "fontKey": 1})
     paragraphs = []
-    for section in range(8):
+    for section in range(sections):
         heading = doc.element(0, {"lineHeight": 1.15, "marginBottom": 12, "fontKey": 3})
         doc.text(heading, f"Section {section}")
         if section == 0:
@@ -109,17 +109,17 @@ def article():
     }
 
 
-def rows():
+def rows(count=200):
     """A long list of flex rows: label, flexible spacer, value."""
     doc = Doc({"width": 600, "height": 4000}, {"padding": 8, "lineHeight": 1.4, "fontKey": 1})
     values = []
-    for row in range(200):
+    for row in range(count):
         line = doc.element(0, {"display": "flex", "alignItems": "center", "columnGap": 8, "padding": 4, "lineHeight": 1.4, "fontKey": 1})
         label = doc.element(line, {"flexGrow": 1, "lineHeight": 1.4, "fontKey": 1})
         doc.text(label, sentence(row, 4))
         value = doc.element(line, {"lineHeight": 1.4, "fontKey": 2})
         values.append(doc.text(value, f"{row * 13}"))
-    target = values[100]
+    target = values[count // 2]
     return doc.document(), {
         "unchanged": toggle([]),
         "text-edit": toggle([{"node": target, "text": "99999"}], [{"node": target, "text": doc.nodes[target]["text"]}]),
@@ -127,7 +127,10 @@ def rows():
     }
 
 
-def all():
+def all(small=False):
+    """`small` scenes keep every scenario but lay out quickly in debug builds."""
+    if small:
+        return {"cards": cards(6), "article": article(4), "rows": rows(20)}
     return {"cards": cards(), "article": article(), "rows": rows()}
 
 

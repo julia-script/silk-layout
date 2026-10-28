@@ -48,11 +48,12 @@ def main():
     parser.add_argument("--iterations", type=int, default=40)
     parser.add_argument("--only", help="substring filter on workload/scenario")
     parser.add_argument("--json", help="write results to this file")
+    parser.add_argument("--small", action="store_true", help="smaller scenes, for checking debug builds")
     args = parser.parse_args()
     cli = str(Path(args.cli).resolve())
     results = {}
     print(f"{'scenario':32} {'median ms':>10} {'full':>6} {'probes':>7} {'hits':>6} {'reused':>7} {'analyze':>8} {'shape':>7}")
-    for workload, (document, scenarios) in workloads.all().items():
+    for workload, (document, scenarios) in workloads.all(args.small).items():
         for scenario, cycle in scenarios.items():
             name = f"{workload}/{scenario}"
             if args.only and args.only not in name:

@@ -67,6 +67,9 @@ pub struct LayoutPass<'a, 'source> {
   // The previous compute's normal-flow result, the one being captured, and
   // which boxes head subtrees that may be copied (see reuseFinal).
   pub previous: Snapshot, pub next: Snapshot, pub reusable: List<u8>,
+  // Boxes whose subtree never reads the initial containing block or the
+  // scrollport limits (see Incremental.viewportFreeSubtrees).
+  pub viewportFrees: List<bool>,
   anchors: List<StaticAnchor>,
   selections: List<ScrollbarSelection>,
   frameSelections: List<List<FrameScrollbarSelection>>,
@@ -78,7 +81,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   pub effect fn make(boxes: &'a mut [Layout], fragments: &'a mut FragmentArena, sources: &'source [Node]) -> LayoutPass<'a, 'source> ! OutOfMemoryError ? &mut Allocator {
     // The paragraph cache may borrow text from these source nodes.
     drop sources
-    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero() }
+    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), viewportFrees: List<bool>.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero() }
   }
   pub effect fn beginFrame(self: &mut Self, frame: usize) ! OutOfMemoryError ? &mut Allocator {
     if self.frame == NO_NODE { run self.resumes.prepare(self.boxes.length) }
@@ -539,6 +542,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
     return Option<Layout>.Some { value: layout }
   }
+  pub fn viewportFree(self: &Self, id: usize) -> bool { return id < self.viewportFrees.length() && self.viewportFrees.get(id) }
   pub fn lookup(self: &mut Self, id: usize, input: Input, kind: CacheKind) -> Option<Layout> {
     return self.cache.lookup(id, input, kind)
   }

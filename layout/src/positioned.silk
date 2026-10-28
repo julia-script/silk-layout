@@ -1639,6 +1639,11 @@ fn fragmentFlowMargin(nodes: &BoxTree, output: &LayoutPass, parentId: usize, chi
   return Rect { x: -max(0.0, margin.left), y: -max(0.0, margin.top), width: child.size.width + max(0.0, margin.left) + max(0.0, margin.right), height: child.size.height + max(0.0, margin.top) + max(0.0, margin.bottom) }
 }
 
+// Propagates the scrollable overflow of a pass holding one subtree alone.
+pub fn subtreeOverflow(nodes: &BoxTree, output: &mut LayoutPass) {
+  drop treeOverflow(nodes, &mut output, Rect.zero(), Rect.zero())
+}
+
 fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normalViewport: Rect) -> Rect {
   let mut result = normalViewport
   let viewportStyle = Style.make()

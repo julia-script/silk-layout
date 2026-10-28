@@ -61,6 +61,11 @@ impl BoxWrites {
 }
 
 pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
+pub struct CachedProbe { pub input: Input, pub layout: Layout }
+impl Copy for CachedProbe {}
+pub const AGES_NONE: u8 = 0
+pub const AGES_RECENT: u8 = 1
+pub const AGES_OLDER: u8 = 2
 // `generation` is the last compute that created or hit the entry.
 struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }
 impl Copy for Entry {}
@@ -69,7 +74,9 @@ impl Copy for Entry {}
 // contiguous fragment range [start, end) it emitted, whose first fragment is
 // the box's own. Ranges are kept per compute; results are written in place,
 // since carrying a copied subtree forward only moves its ranges.
-pub struct FinalResult { pub input: Input, pub layout: Layout }
+// `beside` marks an in-flow box recorded beside its BFC's floats (see
+// LayoutPass.recordFinal), the others independent formatting contexts.
+pub struct FinalResult { pub input: Input, pub layout: Layout, pub beside: bool }
 impl Copy for FinalResult {}
 // `floats` and `floatCount` locate the float exclusions the box was laid out
 // beside, relative to its content origin, in the cache's float list.
@@ -197,11 +204,11 @@ impl LayoutCache {
   pub fn keepRange(self: &mut Self, id: usize) {
     if id < self.rangeStamps.length() && self.rangeStamps.get(id) == self.generation { self.ranges.set(id, self.keptRanges.get(self.rangeSlots.get(id))) }
   }
-  pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize, floats: &[FloatBox]) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize, floats: &[FloatBox], beside: bool) ! OutOfMemoryError ? &mut Allocator {
     if id >= self.results.length() {
       let missing = id + 1 - self.results.length()
       run self.results.reserve(missing)
-      while self.results.length() <= id { run self.results.append(FinalResult { input: input.*, layout: layout.* }) }
+      while self.results.length() <= id { run self.results.append(FinalResult { input: input.*, layout: layout.*, beside: beside }) }
     }
     let first = self.floats.length()
     run self.floats.appendSlice(floats)
@@ -210,6 +217,7 @@ impl LayoutCache {
     let results = self.results.asMutSlice()
     results[id].input = input.*
     results[id].layout = layout.*
+    results[id].beside = beside
   }
   // Moves a kept range, unchanged in content, to where a copy put it.
   pub effect fn carryFinal(self: &mut Self, id: usize, kept: FinalRange, start: usize, end: usize) ! OutOfMemoryError ? &mut Allocator {
@@ -241,6 +249,54 @@ impl LayoutCache {
     self.heads.set(id, ABSENT)
   }
   pub fn sameRequest(a: &Input, b: &Input) -> bool { return sameInput(a, b) }
+  // The compute before this one, once rotateFinals started this one.
+  pub fn previousGeneration(self: &Self) -> usize {
+    if self.generation == 0 { return 0 }
+    return self.generation - 1
+  }
+  // Whether the box has cached results, and whether all of them were made
+  // or used since `generation`: AGES_NONE, AGES_RECENT or AGES_OLDER.
+  pub fn entryAges(self: &Self, id: usize, generation: usize) -> u8 {
+    if id >= self.heads.length() || self.heads.get(id) == ABSENT { return AGES_NONE }
+    let entries = self.entries.asSlice()
+    let mut index = self.heads.get(id)
+    while index != ABSENT {
+      if entries[index].generation < generation { return AGES_OLDER }
+      index = entries[index].next
+    }
+    return AGES_RECENT
+  }
+  // Appends the box's size probes made or used since `generation`, and
+  // returns whether every cached result of the box is a probe or one of its
+  // own intrinsic sizes.
+  pub effect fn probesOf(self: &Self, id: usize, generation: usize, result: &mut List<CachedProbe>) -> bool ! OutOfMemoryError ? &mut Allocator {
+    if id >= self.heads.length() { return true }
+    let mut index = self.heads.get(id)
+    while index != ABSENT {
+      let entry = self.entries.get(index)
+      if entry.kind == CacheKind.FlexAllocation { return false }
+      if entry.kind == CacheKind.IndependentBox && entry.generation >= generation { run result.append(CachedProbe { input: entry.input, layout: entry.layout }) }
+      index = entry.next
+    }
+    return true
+  }
+  // The range a box recorded in this compute, if any.
+  pub fn recordedRange(self: &Self, id: usize) -> FinalRange {
+    if id >= self.rangeStamps.length() || self.rangeStamps.get(id) != self.generation { return FinalRange.none() }
+    return self.ranges.get(id)
+  }
+  // Makes the range a box recorded in this compute, at fragments `shift`
+  // earlier than where they now lie, its range of the previous compute.
+  pub fn adoptRange(self: &mut Self, id: usize, shift: usize) {
+    if id >= self.rangeStamps.length() || self.rangeStamps.get(id) != self.generation { return }
+    let mut range = self.ranges.get(id)
+    if range.valid {
+      range.start = range.start + shift
+      range.end = range.end + shift
+    }
+    self.ranges.set(id, range)
+    self.rangeStamps.set(id, usize.MAX)
+  }
   pub fn lookup(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> Option<Layout> {
     let index = self.find(id, input, kind)
     if index == ABSENT { return Option<Layout>.None }
@@ -310,7 +366,7 @@ impl LayoutCache {
       run heads.append(head)
       run kept.append(range)
       if from != ABSENT && from < self.results.length() { run results.append(self.results.asSlice()[from]) }
-      else { run results.append(FinalResult { input: Input.make(OptionalSize.definite(0.0, 0.0)), layout: Layout.zero() }) }
+      else { run results.append(FinalResult { input: Input.make(OptionalSize.definite(0.0, 0.0)), layout: Layout.zero(), beside: false }) }
       id = id + 1
     }
     self.heads = move heads

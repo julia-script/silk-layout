@@ -225,6 +225,9 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
     if minimum { request.availableHeight = AvailableSpace.minContent() }
   }
   request.bfcContentOrigin = Point { x: 0.0, y: 0.0 }
+  // A childless box without content measurement has no content to size: its
+  // intrinsic width is its padding and border, with no cache entry needed.
+  if horizontal && emptyContentWidth(nodes, id) { return resolveBox(nodes.style(id), &request).inset.horizontal() }
   let key = cacheKey(output.keyShape(id), &request, output.viewportFree(id))
   match output.lookupSize(id, &key, CacheKind.IntrinsicContents) {
     Option<Size>.Some { value: cached } => {
@@ -241,6 +244,14 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   run output.remember(id, &key, CacheKind.IntrinsicContents, &result)
   if horizontal { return result.size.width }
   return result.size.height
+}
+
+fn emptyContentWidth(nodes: &BoxTree, id: usize) -> bool with Intrinsic.inlineAlways() {
+  let node = nodes.node(id)
+  let style = nodes.style(id)
+  return node.firstChild == NO_NODE && node.measurement == Measurement.None && (node.kind == BoxKind.Block || node.kind == BoxKind.Flex)
+    && !isGrid(style) && !style.replaced && style.aspectRatio <= 0.0 && style.writingMode == WritingMode.HorizontalTb
+    && style.overflowX == Overflow.Visible && style.overflowY == Overflow.Visible
 }
 
 pub fn flowMarginRect(nodes: &BoxTree, id: usize, child: usize, layout: &Layout, parent: &Layout) -> Rect {
@@ -557,15 +568,7 @@ pub fn emptyIntrinsicWidth(nodes: &BoxTree, id: usize, input: &Input) -> bool {
 }
 
 fn emptyBoxApplies(nodes: &BoxTree, id: usize, input: &Input) -> bool {
-  if !emptyBoxPlain(nodes, id, &input) { return false }
-  let style = nodes.style(id)
-  // prepareSizing's plain branch takes the general path for shrink-to-fit.
-  let widthDefinite = input.known.widthDefinite || (!input.intrinsicWidth && resolves(style.width, input.parent.widthDefinite))
-  if widthDefinite || input.intrinsicWidth || input.availableWidth.kind != AvailableKind.Definite { return true }
-  let justification = blockJustification(style, &input)
-  let autoInlineMargin = style.margin.left.kind == DimensionKind.Auto || style.margin.right.kind == DimensionKind.Auto
-  let fitInline = justification != Align.Normal && !(justification == Align.Stretch && !autoInlineMargin)
-  return !input.shrinkToFit && !fitInline
+  return emptyBoxPlain(nodes, id, &input)
 }
 
 // layoutAdjustedBox's sizing and result for a box emptyBoxApplies to, before
@@ -576,8 +579,13 @@ fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut Resolv
   let autoInlineMargin = style.margin.left.kind == DimensionKind.Auto || style.margin.right.kind == DimensionKind.Auto
   let stretchInline = justification == Align.Stretch && !autoInlineMargin
   let fitInline = justification != Align.Normal && !stretchInline
-  if !box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && input.availableWidth.kind == AvailableKind.Definite && ((!input.shrinkToFit && !fitInline) || stretchInline) {
+  if !box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && input.availableWidth.kind == AvailableKind.Definite && ((!input.shrinkToFit && !fitInline && !outOfFlow(style)) || stretchInline) {
     box.size.width = max(box.inset.horizontal(), input.availableWidth.value - box.margin.horizontal())
+    box.size.widthDefinite = true
+  } else if !box.size.widthDefinite && !input.intrinsicWidth && input.availableWidth.kind == AvailableKind.Definite && (input.shrinkToFit || fitInline || outOfFlow(style)) {
+    // prepareSizing's fit-content width: an empty box's min- and max-content
+    // widths are both its inset (see emptyContentWidth).
+    box.size.width = box.inset.horizontal()
     box.size.widthDefinite = true
   }
   if box.size.widthDefinite { box.size.width = clamp(box.size.width, box.min.width, box.max.width) }
@@ -763,7 +771,7 @@ struct BoxSizing {
 fn plainSizing(style: &Style, node: &BoxNode, input: &Input, fragmented: bool, display: &Display) -> bool with Intrinsic.inlineAlways() {
   return !fragmented && !style.replaced && node.measurement != Measurement.Natural && style.aspectRatio <= 0.0
     && style.writingMode == WritingMode.HorizontalTb && input.parentWritingMode == WritingMode.HorizontalTb
-    && style.float == Float.None && !outOfFlow(style) && display.outsideIs(DisplayOutside.Block)
+    && style.float == Float.None && display.outsideIs(DisplayOutside.Block)
     && style.overflowX == Overflow.Visible && style.overflowY == Overflow.Visible
     && !keywordSize(style.width.kind) && !keywordSize(style.height.kind) && !keywordSize(style.minWidth.kind)
     && !keywordSize(style.minHeight.kind) && !keywordSize(style.maxWidth.kind) && !keywordSize(style.maxHeight.kind)
@@ -788,11 +796,11 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
     let stretchInline = justification == Align.Stretch && !autoInlineMargin
     let fitInline = justification != Align.Normal && !stretchInline
     let definite = sizing.request.availableWidth.kind == AvailableKind.Definite
-    if !sizing.box.size.widthDefinite && !input.intrinsicWidth && definite && (input.shrinkToFit || fitInline) {
+    if !sizing.box.size.widthDefinite && !input.intrinsicWidth && definite && (input.shrinkToFit || fitInline || outOfFlow(style)) {
       // Shrink-to-fit needs intrinsic probes: take the general path.
     } else {
       sizing.natural = NaturalDimensions.none()
-      if !sizing.box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && definite && ((!input.shrinkToFit && !fitInline) || stretchInline) {
+      if !sizing.box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && definite && ((!input.shrinkToFit && !fitInline && !outOfFlow(style)) || stretchInline) {
         sizing.box.size.width = max(sizing.box.inset.horizontal(), sizing.request.availableWidth.value - sizing.box.margin.horizontal())
         sizing.box.size.widthDefinite = true
       }

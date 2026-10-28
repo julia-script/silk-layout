@@ -565,12 +565,11 @@ fn insetPosition(low: f64, high: f64, hasLow: bool, hasHigh: bool, size: f64, co
 }
 
 
-effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, viewport: OptionalSize, fragmented: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, viewport: OptionalSize, fragmented: bool, viewportStyle: &Style) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let parent = generatedParent(nodes, id)
   let cb = absoluteContainingBlock(nodes, id)
-  let viewportStyle = Style.make()
-  let mut cbStyle = &viewportStyle
+  let mut cbStyle = viewportStyle
   if cb != NO_NODE { cbStyle = nodes.style(cb) }
   let mut cbRect = containingRect(nodes, &output, cb, viewport)
   let attached = fragmented && fixedTree(nodes, id)
@@ -628,7 +627,14 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   }
   let mut input = Input.make(containing)
   if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
-    input = usedChildrenInput(nodes, &output, cb, viewport, containing)
+    if !fragmented && output.absoluteInputOwner == cb { input = output.absoluteInput }
+    else {
+      input = usedChildrenInput(nodes, &output, cb, viewport, containing)
+      if !fragmented {
+        output.absoluteInputOwner = cb
+        output.absoluteInput = input
+      }
+    }
   }
   let mut scrollAncestor = nodes.node(id).parent
   while scrollAncestor != NO_NODE {
@@ -719,8 +725,8 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   if !anchor.valid {
     let mut staticRoot = parent
     if staticRoot == NO_NODE { staticRoot = 0 }
-    let mut parentBox = resolveBox(&viewportStyle, &Input.make(viewport))
-    let mut ps = &viewportStyle
+    let mut parentBox = resolveBox(viewportStyle, &Input.make(viewport))
+    let mut ps = viewportStyle
     let mut innerWidth = viewport.width
     let mut innerHeight = viewport.height
     if parent != NO_NODE {
@@ -834,7 +840,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       rect.x = rect.x - pageRect.x - shift.x + cbRect.x
       rect.y = rect.y - pageRect.y - shift.y + cbRect.y
     }
-    let mut staticStyle = &viewportStyle
+    let mut staticStyle = viewportStyle
     if parent != NO_NODE { staticStyle = nodes.style(parent) }
     let reverseX = startReverse(staticStyle, true)
     let reverseY = startReverse(staticStyle, false)
@@ -1820,7 +1826,51 @@ fn sourceRelative(nodes: &BoxTree, output: &LayoutPass, source: usize, viewport:
   }
   return offset
 }
-fn positionRelative(nodes: &BoxTree, output: &mut LayoutPass, viewport: OptionalSize) {
+// Each source's accumulated relative offset (sourceRelative) outside
+// fragmentation, computed once top-down instead of walking every fragment's
+// ancestors. A fixed box restarts the sum, as sourceRelative stops there.
+effect fn relativeOffsets(nodes: &BoxTree, output: &mut LayoutPass, viewport: OptionalSize) ! OutOfMemoryError ? &mut Allocator {
+  output.relativeOffsets.clear()
+  run output.relativeOffsets.appendRepeated(Point { x: 0.0, y: 0.0 }, nodes.sources.length)
+  let viewportStyle = Style.make()
+  let mut source: usize = 0
+  while source != NO_NODE {
+    let parentSource = nodes.sources[source].parent
+    let mut offset = Point { x: 0.0, y: 0.0 }
+    if parentSource != NO_NODE { offset = output.relativeOffsets.get(parentSource) }
+    let id = nodes.firstBySource.get(source)
+    if id != NO_NODE {
+      let style = nodes.style(id)
+      if style.position == Position.Fixed { offset = Point { x: 0.0, y: 0.0 } }
+      else if style.position == Position.Relative {
+        let parent = generatedParent(nodes, id)
+        let mut containing = viewport
+        let mut containingStyle = &viewportStyle
+        if parent != NO_NODE {
+          let rect = output.boxes[parent].contentRect()
+          containing = OptionalSize {
+            width: rect.width, height: rect.height,
+            widthDefinite: output.boxes[parent].widthDefinite,
+            heightDefinite: output.boxes[parent].heightDefinite,
+          }
+          containingStyle = nodes.style(parent)
+        }
+        let own = relativeOffset(style, containingStyle, containing)
+        offset = Point { x: own.x + offset.x, y: own.y + offset.y }
+      }
+    }
+    let offsets = output.relativeOffsets.asMutSlice()
+    offsets[source] = offset
+    if nodes.sources[source].firstChild != NO_NODE { source = nodes.sources[source].firstChild }
+    else {
+      while source != NO_NODE && nodes.sources[source].nextSibling == NO_NODE { source = nodes.sources[source].parent }
+      if source != NO_NODE { source = nodes.sources[source].nextSibling }
+    }
+  }
+}
+effect fn positionRelative(nodes: &BoxTree, output: &mut LayoutPass, viewport: OptionalSize) ! OutOfMemoryError ? &mut Allocator {
+  let memo = output.frame == NO_NODE
+  if memo { run relativeOffsets(nodes, &mut output, viewport) }
   let mut index: usize = 0
   while index < output.fragments.values.length() {
     let fragment = output.fragments.values.get(index)
@@ -1830,8 +1880,15 @@ fn positionRelative(nodes: &BoxTree, output: &mut LayoutPass, viewport: Optional
       // CSS2 9.2.1.1: relative split inlines also move lifted block descendants.
       // Subtract what the physical parent already supplies, so nested inline
       // fragments and source continuations never apply the translation twice.
-      let own = sourceRelative(nodes, &output, source, viewport, fragment.fragmentainer)
-      let parent = sourceRelative(nodes, &output, parentSource, viewport, fragment.fragmentainer)
+      let mut own = Point { x: 0.0, y: 0.0 }
+      let mut parent = Point { x: 0.0, y: 0.0 }
+      if memo {
+        if source != NO_NODE { own = output.relativeOffsets.get(source) }
+        if parentSource != NO_NODE { parent = output.relativeOffsets.get(parentSource) }
+      } else {
+        own = sourceRelative(nodes, &output, source, viewport, fragment.fragmentainer)
+        parent = sourceRelative(nodes, &output, parentSource, viewport, fragment.fragmentainer)
+      }
       let fragments = output.fragments.values.asMutSlice()
       fragments[index].visualOffset = Point { x: own.x - parent.x, y: own.y - parent.y }
     }
@@ -1870,6 +1927,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   let mut normalViewport = viewportRect
   let viewportStyle = Style.make()
   let viewportLimits = reachableLimits(&viewportStyle, viewportRect, viewportRect, true)
+  output.absoluteInputOwner = NO_NODE
   let mut visual = viewportScroll.x != 0.0 || viewportScroll.y != 0.0
   let mut relative = false
   // Source preorder is not generated arena order after an inline interruption.
@@ -1879,7 +1937,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     let id = output.visits.get(at)
     let style = nodes.style(id)
     if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
-    if outOfFlow(style) { run absolute(nodes, &mut output, &mut measurer, id, viewport, false) }
+    if outOfFlow(style) { run absolute(nodes, &mut output, &mut measurer, id, viewport, false, &viewportStyle) }
     else if output.boxes[id].hasBox() && generatedParent(nodes, id) == NO_NODE && nodes.node(id).kind != BoxKind.Inline {
       let layout = output.boxes[id]
       let box = usedBox(nodes, &output, id, viewport)
@@ -1902,7 +1960,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     at = at + 1
   }
   if relative || visual { output.fragments.offsetting() }
-  if relative { positionRelative(nodes, &mut output, viewport) }
+  if relative { run positionRelative(nodes, &mut output, viewport) }
   let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport)
   run output.selectScrollbars(nodes)
   if output.needsRelayout || !visual { return overflow }
@@ -2007,6 +2065,7 @@ pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(n
   let savedFrame = output.frame
   let viewportRect = Rect { x: 0.0, y: 0.0, width: max(0.0, viewport.width), height: max(0.0, viewport.height) }
   if nodes.sources.length == 0 { return viewportRect }
+  let viewportStyle = Style.make()
   // Finish every non-fixed parallel flow first. Absolute-only pages are real
   // accepted pages and therefore participate in the subsequent fixed pass.
   let mut source: usize = 0
@@ -2015,7 +2074,7 @@ pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(n
     while id != NO_NODE {
       if !fixedTree(nodes, id) {
         if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
-        if outOfFlow(nodes.style(id)) { run absolute(nodes, &mut output, &mut measurer, id, viewport, true) }
+        if outOfFlow(nodes.style(id)) { run absolute(nodes, &mut output, &mut measurer, id, viewport, true, &viewportStyle) }
       }
       id = nodes.node(id).nextContinuation
     }
@@ -2048,7 +2107,7 @@ pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(n
       while id != NO_NODE {
         if fixedTree(nodes, id) {
           if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
-          if outOfFlow(nodes.style(id)) { run absolute(nodes, &mut output, &mut measurer, id, pageViewport, true) }
+          if outOfFlow(nodes.style(id)) { run absolute(nodes, &mut output, &mut measurer, id, pageViewport, true, &viewportStyle) }
         }
         id = nodes.node(id).nextContinuation
       }
@@ -2058,7 +2117,7 @@ pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(n
   }
   output.frame = savedFrame
   output.fragments.offsetting()
-  positionRelative(nodes, &mut output, viewport)
+  run positionRelative(nodes, &mut output, viewport)
   let overflow = treeOverflow(nodes, &mut output, viewportRect, viewportRect)
   run output.selectScrollbars(nodes)
   if output.needsRelayout { return overflow }

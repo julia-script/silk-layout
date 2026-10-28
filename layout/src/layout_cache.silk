@@ -4,7 +4,7 @@ import silk.option { Option }
 import silk.ownership { Copy }
 import silk.usize
 import context { Input }
-import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind, Rect }
+import geometry { Layout, OptionalSize, AvailableSpace, AvailableKind, Rect, Point, ResolvedEdges }
 import fragments { FragmentArena, Shift }
 import bfc { FloatBox }
 import silk.slice { Slice }
@@ -73,14 +73,38 @@ pub const AGES_OLDER: u8 = 2
 struct Entry { input: Input, kind: CacheKind, layout: Layout, next: usize, generation: usize }
 impl Copy for Entry {}
 
-// The last full layout of a reusable box: its request and result, and the
-// contiguous fragment range [start, end) it emitted, whose first fragment is
-// the box's own. Ranges are kept per compute; results are written in place,
-// since carrying a copied subtree forward only moves its ranges.
+// The last full layout of a reusable box: its request, and the contiguous
+// fragment range [start, end) it emitted, whose first fragment is the box's
+// own. Ranges are kept per compute; results are written in place, since
+// carrying a copied subtree forward only moves its ranges.
+// The layout itself stays in the kept boxes. Only the fields that the
+// box's placement and positioning write after it was stored are recorded
+// (see Layout.withFinal).
 // `beside` marks an in-flow box recorded beside its BFC's floats (see
 // LayoutPass.recordFinal), the others independent formatting contexts.
-pub struct FinalResult { pub input: Input, pub layout: Layout, pub beside: bool }
+pub struct FinalResult {
+  pub input: Input,
+  pub location: Point, pub usedMargin: ResolvedEdges, pub scrollableOverflow: Rect,
+  pub hasClearance: bool, pub horizontalScrollbar: bool, pub verticalScrollbar: bool,
+  pub beside: bool,
+}
 impl Copy for FinalResult {}
+impl FinalResult {
+  fn none() -> FinalResult {
+    return FinalResult { input: Input.make(OptionalSize.definite(0.0, 0.0)), location: Point { x: 0.0, y: 0.0 }, usedMargin: ResolvedEdges.zero(), scrollableOverflow: Rect.zero(), hasClearance: false, horizontalScrollbar: false, verticalScrollbar: false, beside: false }
+  }
+  // The recorded layout, from the box's kept final layout.
+  pub fn layout(self: &Self, kept: &Layout) -> Layout {
+    let mut layout = kept.*
+    layout.location = self.location
+    layout.usedMargin = self.usedMargin
+    layout.scrollableOverflow = self.scrollableOverflow
+    layout.hasClearance = self.hasClearance
+    layout.horizontalScrollbar = self.horizontalScrollbar
+    layout.verticalScrollbar = self.verticalScrollbar
+    return layout
+  }
+}
 // `floats` and `floatCount` locate the float exclusions the box was laid out
 // beside, relative to its content origin, in the cache's float list.
 pub struct FinalRange { pub valid: bool, pub start: usize, pub end: usize, pub floats: usize, pub floatCount: usize }
@@ -266,7 +290,7 @@ impl LayoutCache {
     if id >= self.results.length() {
       let missing = id + 1 - self.results.length()
       run self.results.reserve(missing)
-      while self.results.length() <= id { run self.results.append(FinalResult { input: input.*, layout: layout.*, beside: beside }) }
+      while self.results.length() <= id { run self.results.append(FinalResult.none()) }
     }
     let first = self.floats.length()
     run self.floats.appendSlice(floats)
@@ -274,7 +298,12 @@ impl LayoutCache {
     self.keptRanges.set(self.rangeSlots.get(id), FinalRange.none())
     let results = self.results.asMutSlice()
     results[id].input = input.*
-    results[id].layout = layout.*
+    results[id].location = layout.location
+    results[id].usedMargin = layout.usedMargin
+    results[id].scrollableOverflow = layout.scrollableOverflow
+    results[id].hasClearance = layout.hasClearance
+    results[id].horizontalScrollbar = layout.horizontalScrollbar
+    results[id].verticalScrollbar = layout.verticalScrollbar
     results[id].beside = beside
   }
   // Moves a kept range, unchanged in content, to where a copy put it.
@@ -427,7 +456,7 @@ impl LayoutCache {
       run heads.append(head)
       run kept.append(range)
       if from != ABSENT && from < self.results.length() { run results.append(self.results.asSlice()[from]) }
-      else { run results.append(FinalResult { input: Input.make(OptionalSize.definite(0.0, 0.0)), layout: Layout.zero(), beside: false }) }
+      else { run results.append(FinalResult.none()) }
       id = id + 1
     }
     self.heads = move heads

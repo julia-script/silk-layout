@@ -1090,7 +1090,9 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       shapes[restyled.get(at)] = keyShape(&nodes, restyled.get(at))
       at = at + 1
     }
-    if !restoring || restyled.length() != 0 { run positionVisits(&nodes, &mut facts.visits) }
+    // Every style a visit depends on (position, overflow, display) regenerates
+    // boxes when it changes; see Tree.setStyle.
+    if !restoring { run positionVisits(&nodes, &mut facts.visits) }
   } else {
     run Incremental.markSubtrees(&nodes, &mut facts)
     run keyShapes(&nodes, &mut facts.keyShapes)

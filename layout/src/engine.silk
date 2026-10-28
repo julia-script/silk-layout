@@ -353,6 +353,8 @@ const KEY_HEIGHT_LENGTH: u8 = 8
 const KEY_BLOCK: u8 = 16
 const KEY_HORIZONTAL: u8 = 32
 const KEY_PERCENT: u8 = 64
+// Its only percentages are in width, min-width and max-width.
+const KEY_PERCENT_INLINE: u8 = 128
 
 fn keyShape(nodes: &BoxTree, id: usize) -> u8 {
   let node = nodes.node(id)
@@ -364,7 +366,10 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u8 {
   if style.height.kind == DimensionKind.Length { shape = shape | KEY_HEIGHT_LENGTH }
   if node.kind == BoxKind.Block && node.measurement == Measurement.None && !isFlex(style) && style.writingMode == WritingMode.HorizontalTb && style.height.kind != DimensionKind.MinContent && style.height.kind != DimensionKind.MaxContent && style.height.kind != DimensionKind.FitContent { shape = shape | KEY_BLOCK }
   if style.writingMode == WritingMode.HorizontalTb { shape = shape | KEY_HORIZONTAL }
-  if percentLike(style.width) || percentLike(style.height) || percentLike(style.minWidth) || percentLike(style.minHeight) || percentLike(style.maxWidth) || percentLike(style.maxHeight) || percentEdges(&style.padding) || percentEdges(&style.margin) || percentEdges(&style.inset) { shape = shape | KEY_PERCENT }
+  let inlinePercent = percentLike(style.width) || percentLike(style.minWidth) || percentLike(style.maxWidth)
+  let otherPercent = percentLike(style.height) || percentLike(style.minHeight) || percentLike(style.maxHeight) || percentEdges(&style.padding) || percentEdges(&style.margin) || percentEdges(&style.inset)
+  if inlinePercent || otherPercent { shape = shape | KEY_PERCENT }
+  if inlinePercent && !otherPercent { shape = shape | KEY_PERCENT_INLINE }
   return shape
 }
 
@@ -417,8 +422,11 @@ pub fn normalizeKey(shape: u8, key: &mut Input, viewportFree: bool) {
   // children get max-content block space and it has no stretch or
   // fit-content block sizing in a horizontal parent.
   if shape & KEY_BLOCK != 0 && parentHorizontal { key.availableHeight = AvailableSpace.maxContent() }
-  // Orthogonal flows and percentage-sized boxes read the parent size.
-  if (shape & KEY_HORIZONTAL != 0) != parentHorizontal || shape & KEY_PERCENT != 0 { return }
+  // Orthogonal flows and percentage-sized boxes read the parent size, except
+  // that a horizontal intrinsic width probe resolves none of a box's width,
+  // min-width and max-width percentages (resolveBox).
+  if (shape & KEY_HORIZONTAL != 0) != parentHorizontal { return }
+  if shape & KEY_PERCENT != 0 && !(shape & KEY_PERCENT_INLINE != 0 && key.intrinsicWidth && parentHorizontal) { return }
   key.parent = OptionalSize.none()
 }
 

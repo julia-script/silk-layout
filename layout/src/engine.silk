@@ -500,13 +500,26 @@ pub effect fn probeFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
 // Whether layoutBox reduces to sizing a childless block or flex container with
 // plain sizing (no aspect ratio, scrollbars, intrinsic size keywords or
 // orthogonal flow) when leafBlock or emptyFlex is its whole content algorithm.
-fn emptyBoxApplies(nodes: &BoxTree, id: usize, input: &Input) -> bool {
+// emptyBoxApplies' conditions on the box and the parts of the request that
+// a size probe keeps from its parent's request.
+fn emptyBoxPlain(nodes: &BoxTree, id: usize, input: &Input) -> bool with Intrinsic.inlineAlways() {
   let style = nodes.style(id)
   let node = nodes.node(id)
   if (node.kind != BoxKind.Block && node.kind != BoxKind.Flex) || isGrid(style) || node.measurement == Measurement.Content { return false }
   if input.fragmentation.active || input.fragmentation.boundaryProbe != BoundaryProbe.None || boxInputChanges(nodes, id, &input) { return false }
   let display = effectiveDisplay(style, &input)
-  if !plainSizing(style, node, &input, false, &display) { return false }
+  return plainSizing(style, node, &input, false, &display)
+}
+
+// Whether an intrinsic width probe of a childless box, made from `input`,
+// takes emptyBoxApplies' path; its width is then the box's inset.
+pub fn emptyIntrinsicWidth(nodes: &BoxTree, id: usize, input: &Input) -> bool {
+  return nodes.node(id).firstChild == NO_NODE && emptyBoxPlain(nodes, id, &input)
+}
+
+fn emptyBoxApplies(nodes: &BoxTree, id: usize, input: &Input) -> bool {
+  if !emptyBoxPlain(nodes, id, &input) { return false }
+  let style = nodes.style(id)
   // prepareSizing's plain branch takes the general path for shrink-to-fit.
   let widthDefinite = input.known.widthDefinite || (!input.intrinsicWidth && resolves(style.width, input.parent.widthDefinite))
   if widthDefinite || input.intrinsicWidth || input.availableWidth.kind != AvailableKind.Definite { return true }

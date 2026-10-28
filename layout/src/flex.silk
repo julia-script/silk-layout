@@ -9,7 +9,7 @@ import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrie
 import tree { NO_NODE, Measurement }
 import box_tree { BoxTree }
 import context { Input, ResolvedBox, resolveBox, childrenInput, resolve, resolves, outOfFlow, isFlex, scrollable, overflowForAxis, UNBOUNDED }
-import engine { layoutNode, probeNode, probeFresh, normalizeKey, constraintFreeProbe, sizeEmptyBox }
+import engine { layoutNode, probeNode, probeFresh, normalizeKey, constraintFreeProbe, sizeEmptyBox, emptyIntrinsicWidth }
 import layout_pass { LayoutPass, CacheKind }
 import layout_cache { LayoutCache }
 import text { TextMeasure, TextError }
@@ -332,12 +332,21 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   let fixedContribution = intrinsic && lengthBase && item.grow == 0.0 && base <= preferredSize
   let deferMinimum = autoMinimum && ((!intrinsic && (lengthBase || contentBase)) || fixedContribution) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
   if (autoMinimum && !deferMinimum) || (intrinsic && !deferMinimum) || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
-    let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, horizontal, blockAxisConstraint(style, horizontal, AvailableSpace.minContent()), crossDefinite, crossSize)
-    minContent = axisSize(measured.size, horizontal)
-    minimumCross = axisSize(measured.size, !horizontal)
-    ratio = measured.preferredRatio
-    borderRatio = measured.ratioBorderBox
-    minProbe = measured
+    // A childless box's content box is empty: its intrinsic width is its
+    // inset, and it has no preferred ratio.
+    if horizontal && constraintFreeProbe(output.keyShape(id)) && emptyIntrinsicWidth(nodes, id, &childInput) {
+      minContent = item.inset
+      ratio = 0.0
+      borderRatio = false
+      minProbe = Probe { size: Size { width: item.inset, height: crossSize }, preferredRatio: 0.0, ratioBorderBox: false }
+    } else {
+      let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, horizontal, blockAxisConstraint(style, horizontal, AvailableSpace.minContent()), crossDefinite, crossSize)
+      minContent = axisSize(measured.size, horizontal)
+      minimumCross = axisSize(measured.size, !horizontal)
+      ratio = measured.preferredRatio
+      borderRatio = measured.ratioBorderBox
+      minProbe = measured
+    }
     minProbed = true
   }
   let mut maxContent = minContent

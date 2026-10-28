@@ -174,7 +174,7 @@ fn contribution(value: f64, preferred: f64, item: &Item) -> f64 {
   if item.shrink == 0.0 { result = max(result, item.base) }
   return clamp(result, item.minimum, item.maximum) + item.marginStart + item.marginEnd
 }
-effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace) -> Probe ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f64) -> Probe ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut input = childInput.*
   input.performLayout = false
   input.baselines = false
@@ -182,6 +182,7 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sourc
     input.known.widthDefinite = false } else { input.intrinsicHeight = true
     input.known.heightDefinite = false }
   setAvailable(&mut input, horizontal, constraint)
+  if crossKnown { setKnown(&mut input, !horizontal, cross) }
   run probeNode(nodes, &mut output, &mut measurer, id, &input)
   let layout = &output.boxes[id]
   return Probe { size: layout.size, preferredRatio: layout.preferredRatio, ratioBorderBox: layout.ratioBorderBox }
@@ -242,8 +243,6 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   }
   item.knownCross = crossSize
   item.knownCrossDefinite = crossDefinite
-  let mut measureInput = childInput.*
-  if crossDefinite { setKnown(&mut measureInput, !axis.horizontal, crossSize) }
   let mut minimumDimension = style.minHeight
   let mut maximumDimension = style.maxHeight
   let overflow = overflowForAxis(style, axis.horizontal)
@@ -261,7 +260,7 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let base = resolve(basis, parentMain, parentDefinite, 0.0) + add
   let deferMinimum = autoMinimum && !intrinsic && preferredDefinite && basisDefinite && basis.kind == DimensionKind.Length && base >= max(item.inset, preferredSize) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
   if (autoMinimum && !deferMinimum) || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
-    let measured = run probe(nodes, &mut output, &mut measurer, id, &measureInput, axis.horizontal, AvailableSpace.minContent())
+    let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, AvailableSpace.minContent(), crossDefinite, crossSize)
     minContent = axisSize(measured.size, axis.horizontal)
     minimumCross = axisSize(measured.size, !axis.horizontal)
     ratio = measured.preferredRatio
@@ -270,7 +269,7 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let mut maxContent = minContent
   let mut contentCross = crossSize
   if !basisDefinite || intrinsic || minimumDimension.kind == DimensionKind.MaxContent || maximumDimension.kind == DimensionKind.MaxContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
-    let measured = run probe(nodes, &mut output, &mut measurer, id, &measureInput, axis.horizontal, AvailableSpace.maxContent())
+    let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, AvailableSpace.maxContent(), crossDefinite, crossSize)
     maxContent = axisSize(measured.size, axis.horizontal)
     contentCross = axisSize(measured.size, !axis.horizontal)
     ratio = measured.preferredRatio
@@ -387,9 +386,7 @@ effect fn deferredMinimums<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   while index < line.end {
     if items[index].minimumPending {
       let mut item = items[index]
-      let mut measureInput = childInput.*
-      if item.knownCrossDefinite { setKnown(&mut measureInput, !axis.horizontal, item.knownCross) }
-      let measured = run probe(nodes, &mut output, &mut measurer, item.id, &measureInput, axis.horizontal, AvailableSpace.minContent())
+      let measured = run probe(nodes, &mut output, &mut measurer, item.id, &childInput, axis.horizontal, AvailableSpace.minContent(), item.knownCrossDefinite, item.knownCross)
       let minimum = min(axisSize(measured.size, axis.horizontal), item.pendingPreferred)
       item.minimum = max(item.inset, min(minimum, item.maximum))
       item.minimumPending = false
@@ -876,7 +873,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
       // not §9.9.3's main-axis maximum of content and preferred sizes.
       let mut contributionSize = optionalSize(childBox.size, !axis.horizontal)
       if !definite(childBox.size, !axis.horizontal) {
-        let measured = run probe(nodes, &mut output, &mut measurer, child, &childInput, !axis.horizontal, crossConstraint)
+        let measured = run probe(nodes, &mut output, &mut measurer, child, &childInput, !axis.horizontal, crossConstraint, false, 0.0)
         contributionSize = axisSize(measured.size, !axis.horizontal)
       }
       contributionSize = clamp(contributionSize, axisSize(childBox.min, !axis.horizontal), axisSize(childBox.max, !axis.horizontal))

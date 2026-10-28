@@ -226,44 +226,46 @@ effect fn prepare<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
       return
     }
   }
-  run prepareFresh(nodes, &mut output, &mut measurer, &mut item, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite)
+  // Specialized per main axis so the axis selects fold away.
+  if axis.horizontal { run prepareFresh(nodes, &mut output, &mut measurer, &mut item, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite, true) }
+  else { run prepareFresh(nodes, &mut output, &mut measurer, &mut item, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite, false) }
   if memoable { run output.cache.flexMemos.remember(id, &childInput, &axis, &parentStyle, mainConstraint, intrinsic, containerMainDefinite, &item) }
 }
-effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, item: &mut Item, childInput: &Input, axis: &Axes, parentStyle: &Style, mainConstraint: AvailableSpace, intrinsic: bool, containerMainDefinite: bool, static horizontal: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let id = item.id
   let style = nodes.style(id)
   let box = resolveBox(style, &childInput)
   // Flex weights use allotted inner bases; used content layout deducts gutters.
-  item.inset = edgeTotal(box.inset, axis.horizontal)
-  let crossInset = edgeTotal(box.inset, !axis.horizontal)
-  item.minimum = axisSize(box.min, axis.horizontal)
-  item.maximum = axisSize(box.max, axis.horizontal)
-  item.crossMin = axisSize(box.min, !axis.horizontal)
-  item.crossMax = axisSize(box.max, !axis.horizontal)
+  item.inset = edgeTotal(box.inset, horizontal)
+  let crossInset = edgeTotal(box.inset, !horizontal)
+  item.minimum = axisSize(box.min, horizontal)
+  item.maximum = axisSize(box.max, horizontal)
+  item.crossMin = axisSize(box.min, !horizontal)
+  item.crossMax = axisSize(box.max, !horizontal)
   item.grow = max(0.0, style.flexGrow)
   item.shrink = max(0.0, style.flexShrink)
-  item.marginStart = edgeStart(box.margin, axis.horizontal, axis.mainReverse)
-  item.marginEnd = edgeEnd(box.margin, axis.horizontal, axis.mainReverse)
-  item.crossStart = edgeStart(box.margin, !axis.horizontal, axis.crossReverse)
-  item.crossEnd = edgeEnd(box.margin, !axis.horizontal, axis.crossReverse)
-  item.autoStart = autoMargin(style, axis.horizontal, axis.mainReverse)
-  item.autoEnd = autoMargin(style, axis.horizontal, !axis.mainReverse)
-  item.autoCrossStart = autoMargin(style, !axis.horizontal, axis.crossReverse)
-  item.autoCrossEnd = autoMargin(style, !axis.horizontal, !axis.crossReverse)
+  item.marginStart = edgeStart(box.margin, horizontal, axis.mainReverse)
+  item.marginEnd = edgeEnd(box.margin, horizontal, axis.mainReverse)
+  item.crossStart = edgeStart(box.margin, !horizontal, axis.crossReverse)
+  item.crossEnd = edgeEnd(box.margin, !horizontal, axis.crossReverse)
+  item.autoStart = autoMargin(style, horizontal, axis.mainReverse)
+  item.autoEnd = autoMargin(style, horizontal, !axis.mainReverse)
+  item.autoCrossStart = autoMargin(style, !horizontal, axis.crossReverse)
+  item.autoCrossEnd = autoMargin(style, !horizontal, !axis.crossReverse)
   item.align = alignment(style, parentStyle)
-  item.crossAuto = axisDimension(style, !axis.horizontal).kind == DimensionKind.Auto
+  item.crossAuto = axisDimension(style, !horizontal).kind == DimensionKind.Auto
   item.collapsed = style.visibility == Visibility.Collapse
   item.baselineEligible = !item.autoCrossStart && !item.autoCrossEnd
-  item.baselineSizesLine = (style.writingMode == WritingMode.HorizontalTb) == axis.horizontal
+  item.baselineSizesLine = (style.writingMode == WritingMode.HorizontalTb) == horizontal
   // Grouping uses the axis-compatible mode used to synthesize baselines.
   // Cross-size collection (§9.4) has a narrower eligibility rule than
   // participation in baseline alignment (§8.3).
-  let baselineWritingMode = baselineMode(style, childInput.parentWritingMode, !axis.horizontal)
+  let baselineWritingMode = baselineMode(style, childInput.parentWritingMode, !horizontal)
   let baselineReverse = baselineWritingMode == WritingMode.VerticalRl || baselineWritingMode == WritingMode.SidewaysRl
   item.baselineEnd = (baselineReverse != axis.crossReverse) != (item.align == Align.LastBaseline)
-  let parentMain = optionalSize(childInput.parent, axis.horizontal)
-  let parentDefinite = definite(childInput.parent, axis.horizontal)
-  let preferred = axisDimension(style, axis.horizontal)
+  let parentMain = optionalSize(childInput.parent, horizontal)
+  let parentDefinite = definite(childInput.parent, horizontal)
+  let preferred = axisDimension(style, horizontal)
   let preferredDefinite = resolves(preferred, parentDefinite)
   let mut add = item.inset
   if style.boxSizing == BoxSizing.BorderBox { add = 0.0 }
@@ -274,21 +276,21 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   // A resolved cyclic percentage is usable without making its flex base
   // definite under §9.8. Keep that distinction for descendant percentages.
   item.mainDefinite = containerMainDefinite || resolves(basis, containerMainDefinite)
-  let mut crossDefinite = definite(box.size, !axis.horizontal)
-  let mut crossSize = optionalSize(box.size, !axis.horizontal)
+  let mut crossDefinite = definite(box.size, !horizontal)
+  let mut crossSize = optionalSize(box.size, !horizontal)
   // §9.2 step 3B transfers the used cross size. Only main-axis constraints
   // are ignored for the flex base; cross-axis min/max still apply.
   if crossDefinite { crossSize = clamp(crossSize, item.crossMin, item.crossMax) }
-  if !crossDefinite && item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd && parentStyle.flexWrap == FlexWrap.NoWrap && definite(childInput.parent, !axis.horizontal) {
-    crossSize = clamp(optionalSize(childInput.parent, !axis.horizontal) - item.crossStart - item.crossEnd, item.crossMin, item.crossMax)
+  if !crossDefinite && item.crossAuto && item.align == Align.Stretch && !item.autoCrossStart && !item.autoCrossEnd && parentStyle.flexWrap == FlexWrap.NoWrap && definite(childInput.parent, !horizontal) {
+    crossSize = clamp(optionalSize(childInput.parent, !horizontal) - item.crossStart - item.crossEnd, item.crossMin, item.crossMax)
     crossDefinite = true
   }
   item.knownCross = crossSize
   item.knownCrossDefinite = crossDefinite
   let mut minimumDimension = style.minHeight
   let mut maximumDimension = style.maxHeight
-  let overflow = overflowForAxis(style, axis.horizontal)
-  if axis.horizontal { minimumDimension = style.minWidth
+  let overflow = overflowForAxis(style, horizontal)
+  if horizontal { minimumDimension = style.minWidth
     maximumDimension = style.maxWidth }
   let autoMinimum = minimumDimension.kind == DimensionKind.Auto && !scrollable(overflow)
   let mut ratio = style.aspectRatio
@@ -308,9 +310,9 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   let contentBase = !basisDefinite && basis.kind == DimensionKind.Auto && mainConstraint.kind != AvailableKind.MinContent
   let deferMinimum = autoMinimum && !intrinsic && (lengthBase || contentBase) && ratio == 0.0 && !style.replaced && nodes.node(id).measurement != Measurement.Natural && maximumDimension.kind != DimensionKind.MinContent && maximumDimension.kind != DimensionKind.MaxContent && maximumDimension.kind != DimensionKind.FitContent
   if (autoMinimum && !deferMinimum) || intrinsic || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
-    let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, blockAxisConstraint(style, axis.horizontal, AvailableSpace.minContent()), crossDefinite, crossSize)
-    minContent = axisSize(measured.size, axis.horizontal)
-    minimumCross = axisSize(measured.size, !axis.horizontal)
+    let measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, horizontal, blockAxisConstraint(style, horizontal, AvailableSpace.minContent()), crossDefinite, crossSize)
+    minContent = axisSize(measured.size, horizontal)
+    minimumCross = axisSize(measured.size, !horizontal)
     ratio = measured.preferredRatio
     borderRatio = measured.ratioBorderBox
     minProbe = measured
@@ -321,9 +323,9 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   if !basisDefinite || intrinsic || minimumDimension.kind == DimensionKind.MaxContent || maximumDimension.kind == DimensionKind.MaxContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
     // An empty box's max-content probe has its min-content probe's key.
     let mut measured = minProbe
-    if !minProbed || !constraintFreeProbe(output.keyShape(id)) { measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, axis.horizontal, AvailableSpace.maxContent(), crossDefinite, crossSize) }
-    maxContent = axisSize(measured.size, axis.horizontal)
-    contentCross = axisSize(measured.size, !axis.horizontal)
+    if !minProbed || !constraintFreeProbe(output.keyShape(id)) { measured = run probe(nodes, &mut output, &mut measurer, id, &childInput, horizontal, AvailableSpace.maxContent(), crossDefinite, crossSize) }
+    maxContent = axisSize(measured.size, horizontal)
+    contentCross = axisSize(measured.size, !horizontal)
     ratio = measured.preferredRatio
     borderRatio = measured.ratioBorderBox
   }
@@ -344,13 +346,13 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
     let mut contentSuggestion = minContent
     if ratio > 0.0 {
       contentSuggestion = clamp(contentSuggestion,
-        transfer(item.crossMin, ratio, axis.horizontal, item.inset, crossInset, borderRatio),
-        transfer(item.crossMax, ratio, axis.horizontal, item.inset, crossInset, borderRatio))
+        transfer(item.crossMin, ratio, horizontal, item.inset, crossInset, borderRatio),
+        transfer(item.crossMax, ratio, horizontal, item.inset, crossInset, borderRatio))
     }
     let mut minimum = contentSuggestion
     // The transferred suggestion uses the preferred cross size, not stretching.
-    if ratio > 0.0 && definite(box.size, !axis.horizontal) {
-      let transferred = transfer(clamp(optionalSize(box.size, !axis.horizontal), item.crossMin, item.crossMax), ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+    if ratio > 0.0 && definite(box.size, !horizontal) {
+      let transferred = transfer(clamp(optionalSize(box.size, !horizontal), item.crossMin, item.crossMax), ratio, horizontal, item.inset, crossInset, borderRatio)
       if style.replaced { minimum = min(minimum, transferred) } else { minimum = max(minimum, transferred) }
     }
     if preferredDefinite { minimum = min(minimum, preferredSize) }
@@ -361,12 +363,12 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   else if basis.kind == DimensionKind.MinContent { item.base = minContent }
   else if basis.kind == DimensionKind.FitContent && mainConstraint.kind == AvailableKind.Definite { item.base = clamp(mainConstraint.value - item.marginStart - item.marginEnd, minContent, maxContent) }
   else if ratio > 0.0 && crossDefinite && basis.kind != DimensionKind.MaxContent {
-    item.base = transfer(crossSize, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+    item.base = transfer(crossSize, ratio, horizontal, item.inset, crossInset, borderRatio)
   } else if mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent { item.base = minContent }
-  if !basisDefinite && basis.kind != DimensionKind.MinContent && basis.kind != DimensionKind.MaxContent && !crossDefinite && item.crossAuto && ratio > 0.0 && (style.writingMode == WritingMode.HorizontalTb) != axis.horizontal && mainConstraint.kind != AvailableKind.MinContent {
+  if !basisDefinite && basis.kind != DimensionKind.MinContent && basis.kind != DimensionKind.MaxContent && !crossDefinite && item.crossAuto && ratio > 0.0 && (style.writingMode == WritingMode.HorizontalTb) != horizontal && mainConstraint.kind != AvailableKind.MinContent {
     // An auto inline cross size is fit-content when needed to obtain the
     // block-axis flex base through the preferred ratio (§9.2, step 3E).
-    item.base = transfer(contentCross, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+    item.base = transfer(contentCross, ratio, horizontal, item.inset, crossInset, borderRatio)
   }
   item.hypothetical = clamp(item.base, item.minimum, item.maximum)
   item.target = item.hypothetical
@@ -380,11 +382,11 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   let automaticPreferred = preferred.kind == DimensionKind.Auto || (!preferredDefinite && (preferred.kind == DimensionKind.Percent || preferred.kind == DimensionKind.Calc))
   if ratio > 0.0 && automaticPreferred {
     if crossDefinite {
-      minimumContributionSize = transfer(crossSize, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+      minimumContributionSize = transfer(crossSize, ratio, horizontal, item.inset, crossInset, borderRatio)
       maximumContributionSize = minimumContributionSize
-    } else if item.crossAuto && (style.writingMode == WritingMode.HorizontalTb) != axis.horizontal {
-      minimumContributionSize = transfer(minimumCross, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
-      maximumContributionSize = transfer(contentCross, ratio, axis.horizontal, item.inset, crossInset, borderRatio)
+    } else if item.crossAuto && (style.writingMode == WritingMode.HorizontalTb) != horizontal {
+      minimumContributionSize = transfer(minimumCross, ratio, horizontal, item.inset, crossInset, borderRatio)
+      maximumContributionSize = transfer(contentCross, ratio, horizontal, item.inset, crossInset, borderRatio)
     }
   }
   item.minContribution = contribution(minimumContributionSize, preferredContribution, &item.*)

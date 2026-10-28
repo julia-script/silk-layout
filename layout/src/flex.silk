@@ -970,6 +970,9 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     result.size.height = clamp(result.size.height, box.min.height, box.max.height)
     if box.size.heightDefinite { result.size.height = box.size.height }
   }
+  // A size probe that does not read baselines needs only the container size;
+  // item placement and baselines would be discarded.
+  if !input.performLayout && !input.baselines { return result }
   lineIndex = 0
   while lineIndex < lines.length() {
     let line = lines.get(lineIndex)

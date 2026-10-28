@@ -741,22 +741,21 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   // Most requests already carry what adjustBoxInput would set: lay those
   // out from the caller's input instead of a copy.
   if !incoming.fragmentation.active && !boxInputChanges(nodes, id, &incoming) {
-    return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &incoming, &mut bfc)
+    return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &incoming, &mut bfc, false)
   }
   let mut input = incoming.*
   adjustBoxInput(nodes, id, &mut input)
   let monolithic = incoming.performLayout && incoming.fragmentation.active && nodes.node(id).fragmentMonolithic
   if !input.performLayout || monolithic { input.fragmentation.active = false }
-  return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &input, &mut bfc)
+  return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &input, &mut bfc, incoming.performLayout && incoming.fragmentation.active)
 }
 
 // layoutBox with `input` the request after adjustBoxInput.
-effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, input: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, input: &Input, bfc: &mut BfcState, fragmented: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator with Intrinsic.inlineAlways() {
   if incoming.performLayout { output.stats.fullLayouts = output.stats.fullLayouts + 1 }
   else { output.stats.sizeProbes = output.stats.sizeProbes + 1 }
   let style = nodes.style(id)
   let node = nodes.node(id)
-  let fragmented = incoming.performLayout && incoming.fragmentation.active
   let monolithic = fragmented && node.fragmentMonolithic
   let mut wasStarted = false
   let mut wasNormalComplete = false

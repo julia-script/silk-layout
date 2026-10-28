@@ -7,9 +7,10 @@ yoga's column direction and zero flex-shrink) do not change the layout being mea
 Supported properties: display (block | flex | grid), boxSizing (always border-box),
 flexDirection, flexWrap, flexGrow, flexShrink, flexBasis, width, height, minWidth,
 minHeight, maxWidth, maxHeight, padding, margin, border, rowGap, columnGap,
-alignItems, justifyContent, plus numeric grid placement, fixed/percent/fr/minmax,
-intrinsic and fit-content tracks, cycling implicit tracks, row/column sparse/dense
-auto-placement, and item/self alignment. Grid workloads compare only with taffy.
+alignItems, justifyContent, plus numeric/named grid placement, named areas,
+count/auto repeats, fixed/percent/fr/minmax, intrinsic and fit-content tracks,
+cycling implicit tracks, all four auto-flows, and item/self alignment.
+Grid workloads compare only with taffy; nonzero order is not supported.
 Leaf "measure" fixtures {minWidth, maxWidth, height, wrap?} clamp available width
 to [minWidth, maxWidth]; wrap=true multiplies height by the synthetic line count.
 Dimensions are numbers (px), "auto", or {"percent": fraction}.
@@ -241,6 +242,62 @@ def grid_auto_placement(count=10_000):
     return document(nodes, width, 800)
 
 
+def grid_areas_shell(cards=500):
+    """Named-area application shell with a flex navigation rail and block/flex cards."""
+    nodes = [{"parent": None, "style": {
+        "display": "grid", "boxSizing": "border-box", "width": 1200, "padding": 12,
+        "gridTemplateAreas": [
+            ["header", "header"],
+            ["nav", "main"],
+            ["footer", "footer"],
+        ],
+        "gridTemplateColumns": [200, {"minmax": [0, {"fr": 1}]}],
+        "gridTemplateRows": [64, "auto", 32],
+        "gridAutoFlow": "row", "columnGap": 12, "rowGap": 12,
+        "justifyItems": "stretch", "alignItems": "stretch",
+    }}]
+
+    def add(parent, style, measure=None):
+        node = {"parent": parent, "style": style}
+        if measure is not None:
+            node["measure"] = measure
+        nodes.append(node)
+        return len(nodes) - 1
+
+    def area(name):
+        return {"gridColumnStart": name, "gridColumnEnd": name,
+                "gridRowStart": name, "gridRowEnd": name}
+
+    header = add(0, flex(**area("header"), columnGap=12, alignItems="center"))
+    add(header, block(width=120, height=32, flexShrink=0))
+    add(header, block(flexGrow=1, minWidth=0),
+        {"minWidth": 40, "maxWidth": 420, "height": 20, "wrap": True})
+    add(header, block(width=64, height=24, flexShrink=0))
+    nav = add(0, flex(**area("nav"), flexDirection="column", rowGap=4,
+                      alignItems="stretch", justifyContent="flex-start", alignSelf="start"))
+    for i in range(24):
+        add(nav, block(padding=4, flexShrink=0),
+            {"minWidth": 24, "maxWidth": 120 + i % 9 * 12, "height": 16, "wrap": True})
+    main = add(0, block(**area("main"), minWidth=0))
+    row = None
+    for card in range(cards):
+        if card % 4 == 0:
+            row = add(main, flex(columnGap=8, marginBottom=8, alignItems="stretch"))
+        body = add(row, block(flexGrow=1, flexBasis=0, minWidth=0, padding=8, border=1))
+        title = add(body, flex(columnGap=6, alignItems="center", marginBottom=6))
+        add(title, block(width=24, height=24, flexShrink=0))
+        add(title, block(flexGrow=1, minWidth=0),
+            {"minWidth": 24, "maxWidth": 100 + card % 41, "height": 16, "wrap": True})
+        add(body, block(minWidth=0, marginBottom=6),
+            {"minWidth": 32, "maxWidth": 360 + card % 181, "height": 12, "wrap": True})
+        actions = add(body, flex(columnGap=4, justifyContent="flex-end"))
+        for _ in range(2):
+            add(actions, block(width=48, height=24, flexShrink=0))
+    footer = add(0, flex(**area("footer"), justifyContent="flex-end", alignItems="center"))
+    add(footer, block(width=180, height=16))
+    return document(nodes, 1200, 800)
+
+
 WORKLOADS = {
     "deep-random-1k": lambda: random_tree(1_000, 10, 1),
     "deep-random-10k": lambda: random_tree(10_000, 10, 2),
@@ -256,6 +313,7 @@ WORKLOADS = {
     "grid-intrinsic": grid_intrinsic,
     "grid-nested": grid_nested,
     "grid-auto-placement": grid_auto_placement,
+    "grid-areas-shell": grid_areas_shell,
 }
 
 

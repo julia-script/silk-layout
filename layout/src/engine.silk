@@ -1060,7 +1060,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   let nodes = run boxesFor(tree, &mut output, since, restoring)
   let sameBoxes = restoring || (kept && Incremental.sameBoxes(output.boxNodes.asSlice(), nodes.boxes.asSlice()))
   // The previous output becomes the snapshot reused subtrees are copied from,
-  // except box layouts of the same boxes, which stay in place.
+  // except that of the same boxes, which stays in place.
   output.snapshot.takeOutput(&mut output.fragments, &mut output.boxes, sameBoxes)
   let mut facts = Intrinsic.replace(output.facts, BoxFacts.make())
   let mut writes = Intrinsic.replace(output.writes, BoxWrites.make())
@@ -1129,6 +1129,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   while true {
     let viewportLayout = run layoutNode(&nodes, &mut boxes, &mut measurer, 0, &input)
     drop viewportLayout
+    run boxes.fragments.endFlow()
     let overflow = run positionTree(&nodes, &mut boxes, &mut measurer, viewport, tree.viewportScrollOffset)
     boxes.stats.passes = boxes.stats.passes + 1
     if !boxes.needsRelayout {

@@ -318,6 +318,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       if first != NO_NODE {
         let kind = self.fragments.values.asSlice()[first].kind
         if kind == FragmentKind.Box {
+          run self.fragments.edit(first)
           let fragments = self.fragments.values.asMutSlice()
           fragments[first].location = value.location
           fragments[first].size = value.size
@@ -335,9 +336,10 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
         } else if kind == FragmentKind.Line {
           let delta = Point { x: value.location.x - self.boxes[id].location.x, y: value.location.y - self.boxes[id].location.y }
           if delta.x != 0.0 || delta.y != 0.0 {
-            let fragments = self.fragments.values.asMutSlice()
             let mut current = first
             while current != NO_NODE {
+              run self.fragments.edit(current)
+              let fragments = self.fragments.values.asMutSlice()
               if fragments[current].kind == FragmentKind.Line {
                 fragments[current].location.x = fragments[current].location.x + delta.x
                 fragments[current].location.y = fragments[current].location.y + delta.y
@@ -495,6 +497,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   }
   pub fn restart(self: &mut Self) {
     self.fragments.rollback(0)
+    self.fragments.restartFlow()
     self.fragmentParent = NO_NODE
     if self.frame != NO_NODE { self.resumes.reset() }
     self.frameRoots.clear()
@@ -528,17 +531,19 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     else { run self.cache.recordFinal(id, input, layout, start, end, &[]) }
   }
   // Restores the box records of a copied subtree's descendants and carries
-  // their kept ranges forward, moved to where the copy put their fragments.
-  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize) ! OutOfMemoryError ? &mut Allocator {
+  // their kept ranges forward, moved to where the copy put their fragments,
+  // or `kept` where they were (see FragmentArena.keepRange).
+  effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize, kept: bool) ! OutOfMemoryError ? &mut Allocator {
     if !self.inPlace { self.boxes[id] = self.previous.boxes.asSlice()[id] }
     else if self.writes.stamps.get(id) == self.writes.generation { self.boxes[id] = self.writes.saved.asSlice()[self.writes.slots.get(id)] }
+    if kept { self.fragments.keepBox(id, from.start, from.end) }
     let mut child = nodes.node(id).firstChild
     while child != NO_NODE {
-      let kept = self.cache.keptRange(child)
-      if kept.valid && kept.start > from.start && kept.end <= from.end {
-        run self.cache.carryFinal(child, kept, kept.start - from.start + base, kept.end - from.start + base)
+      let range = self.cache.keptRange(child)
+      if range.valid && range.start > from.start && range.end <= from.end {
+        run self.cache.carryFinal(child, range, range.start - from.start + base, range.end - from.start + base)
       }
-      run self.restoreBoxes(nodes, child, from, base)
+      run self.restoreBoxes(nodes, child, from, base, kept)
       child = nodes.node(child).nextSibling
     }
   }
@@ -552,11 +557,22 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return Option<Layout>.None }
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }
     if !beside && slot.floatCount != 0 { return Option<Layout>.None }
-    if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || (!self.inPlace && self.previous.boxes.length() != self.boxes.length) { return Option<Layout>.None }
     let base = self.fragments.checkpoint()
-    // Positioning appends after normal flow; no copied link may reach it.
-    if !run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent) { return Option<Layout>.None }
-    run self.restoreBoxes(nodes, id, slot, base)
+    let mut kept = false
+    if self.fragments.viewsPrevious() {
+      // The previous output is this arena's own, kept where it was when the
+      // range is still at the write position.
+      if !self.fragments.previousWhole() || slot.end > self.fragments.previousLength() || id >= self.fragments.boxCount() || self.fragments.previousFirst(id) != slot.start { return Option<Layout>.None }
+      if self.fragments.canKeep(slot.start, slot.end) {
+        run self.fragments.keepRange(slot.start, slot.end, self.fragmentParent)
+        kept = true
+      } else if !run self.fragments.copyPrevious(slot.start, slot.end, self.fragmentParent) { return Option<Layout>.None }
+    } else {
+      if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || (!self.inPlace && self.previous.boxes.length() != self.boxes.length) { return Option<Layout>.None }
+      // Positioning appends after normal flow; no copied link may reach it.
+      if !run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent) { return Option<Layout>.None }
+    }
+    run self.restoreBoxes(nodes, id, slot, base, kept)
     let layout = self.cache.result(id).layout
     run self.store(id, &layout, true)
     run self.cache.carryFinal(id, slot, base, self.fragments.checkpoint())

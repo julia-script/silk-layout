@@ -74,6 +74,8 @@ pub struct LayoutPass<'a, 'source> {
   // scrollport limits (see Incremental.markSubtrees).
   pub viewportFrees: List<bool>,
   pub visits: List<usize>,
+  // Each box's parent; see BoxWrites.below.
+  pub parents: List<usize>,
   pub keyShapes: List<u8>,
   // Set when `boxes` holds the previous compute's layouts of the same boxes,
   // which reused subtrees keep: the first write of a box saves its previous
@@ -90,7 +92,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   pub effect fn make(boxes: &'a mut [Layout], fragments: &'a mut FragmentArena, sources: &'source [Node]) -> LayoutPass<'a, 'source> ! OutOfMemoryError ? &mut Allocator {
     // The paragraph cache may borrow text from these source nodes.
     drop sources
-    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), visits: List<usize>.make(), keyShapes: List<u8>.make(), inPlace: false, writes: BoxWrites.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero() }
+    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), visits: List<usize>.make(), parents: List<usize>.make(), keyShapes: List<u8>.make(), inPlace: false, writes: BoxWrites.make(), anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero() }
   }
   pub effect fn beginFrame(self: &mut Self, frame: usize) ! OutOfMemoryError ? &mut Allocator {
     if self.frame == NO_NODE { run self.resumes.prepare(self.boxes.length) }
@@ -303,8 +305,32 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   }
   // Intrinsic probes update scalar sizing state only. Fragment geometry belongs
   // to accepted full-layout passes, not to cached or speculative measurements.
-  // Saves a box's previous layout before its first write in an in-place compute.
+  // Marks a box's ancestors as having a descendant written or laid out again.
+  fn markAncestors(self: &mut Self, id: usize) {
+    if id >= self.parents.length() || id >= self.writes.below.length() { return }
+    let mut box = self.parents.get(id)
+    while box != NO_NODE && self.writes.below.get(box) != self.writes.generation {
+      self.writes.below.set(box, self.writes.generation)
+      box = self.parents.get(box)
+    }
+  }
+  // A box and its subtree are laid out again, emitting fragments: it loses
+  // its kept range until it records one.
+  pub effect fn relayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
+    run self.cache.beginLayout(id)
+    if id < self.writes.relaid.length() && self.writes.relaid.get(id) != self.writes.generation {
+      self.writes.relaid.set(id, self.writes.generation)
+      self.markAncestors(id)
+    }
+    run self.touch(id)
+  }
+  // A box's layout is written: in an in-place compute its previous layout is
+  // saved before its first write.
   pub effect fn touch(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
+    if id < self.writes.written.length() && self.writes.written.get(id) != self.writes.generation {
+      self.writes.written.set(id, self.writes.generation)
+      self.markAncestors(id)
+    }
     if !self.inPlace || self.writes.stamps.get(id) == self.writes.generation { return }
     run self.writes.saved.append(self.boxes[id])
     self.writes.stamps.set(id, self.writes.generation)
@@ -531,17 +557,40 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     else { run self.cache.recordFinal(id, input, layout, start, end, &[]) }
   }
   // Restores the box records of a copied subtree's descendants and carries
-  // their kept ranges forward, moved to where the copy put their fragments,
-  // or `kept` where they were (see FragmentArena.keepRange).
+  // their kept ranges forward, moved to where the copy put their fragments.
+  // A subtree `kept` where it was (see FragmentArena.keepRange) needs only
+  // what this compute rewrote before keeping it restored: the boxes it
+  // wrote, and the whole subtrees it laid out again.
   effect fn restoreBoxes(self: &mut Self, nodes: &BoxTree, id: usize, from: FinalRange, base: usize, kept: bool) ! OutOfMemoryError ? &mut Allocator {
+    if kept && id < self.writes.relaid.length() && self.writes.relaid.get(id) != self.writes.generation {
+      let generation = self.writes.generation
+      if self.writes.written.get(id) == generation {
+        if self.writes.stamps.get(id) == generation { self.boxes[id] = self.writes.saved.asSlice()[self.writes.slots.get(id)] }
+        self.cache.keepRange(id)
+      }
+      if self.writes.below.get(id) != generation { return }
+      let mut child = nodes.node(id).firstChild
+      while child != NO_NODE {
+        if self.writes.below.get(child) == generation || self.writes.written.get(child) == generation || self.writes.relaid.get(child) == generation {
+          run self.restoreBoxes(nodes, child, from, base, kept)
+        }
+        child = nodes.node(child).nextSibling
+      }
+      return
+    }
     if !self.inPlace { self.boxes[id] = self.previous.boxes.asSlice()[id] }
     else if self.writes.stamps.get(id) == self.writes.generation { self.boxes[id] = self.writes.saved.asSlice()[self.writes.slots.get(id)] }
-    if kept { self.fragments.keepBox(id, from.start, from.end) }
+    if kept {
+      self.fragments.keepBox(id, from.start, from.end)
+      self.cache.keepRange(id)
+    }
     let mut child = nodes.node(id).firstChild
     while child != NO_NODE {
-      let range = self.cache.keptRange(child)
-      if range.valid && range.start > from.start && range.end <= from.end {
-        run self.cache.carryFinal(child, range, range.start - from.start + base, range.end - from.start + base)
+      if !kept {
+        let range = self.cache.keptRange(child)
+        if range.valid && range.start > from.start && range.end <= from.end {
+          run self.cache.carryFinal(child, range, range.start - from.start + base, range.end - from.start + base)
+        } else { run self.cache.beginLayout(child) }
       }
       run self.restoreBoxes(nodes, child, from, base, kept)
       child = nodes.node(child).nextSibling

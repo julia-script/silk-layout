@@ -6,7 +6,7 @@ import style { Style, Dimension, Edges, DimensionKind, DisplayOutside, DisplayIn
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
 import context { Input, ResolvedBox, resolveBox, withGutter, scrollbarGutter, edges, isFlex, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
 import block { layoutBlock }
-import flex { layoutFlex }
+import flex { layoutFlex, FlexScratch }
 import positioned { positionTree, positionVisits, reachableLimits, addOverflow, subtreeOverflow }
 import bfc { BfcState }
 import silk.option { Option }
@@ -1305,6 +1305,7 @@ effect fn cutoffBox<'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>,
   let mut same = true
   let mut pass = run LayoutPass.make(scratchBoxes.asMutSlice(), &mut scratchFragments, nodes.sources)
   pass.cache = Intrinsic.replace(output.cache, LayoutCache.make())
+  pass.flexScratch = Intrinsic.replace(output.flexScratch, List<FlexScratch>.make())
   pass.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
   pass.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
   pass.keyShapes = Intrinsic.replace(facts.keyShapes, List<u8>.make())
@@ -1332,6 +1333,7 @@ effect fn cutoffBox<'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>,
   }
   if same { run pass.keepTexts() }
   output.cache = Intrinsic.replace(pass.cache, LayoutCache.make())
+  output.flexScratch = Intrinsic.replace(pass.flexScratch, List<FlexScratch>.make())
   facts.reusable = Intrinsic.replace(pass.reusable, List<u8>.make())
   facts.viewportFree = Intrinsic.replace(pass.viewportFrees, List<bool>.make())
   facts.keyShapes = Intrinsic.replace(pass.keyShapes, List<u8>.make())
@@ -1441,6 +1443,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   }
   let cache = Intrinsic.replace(output.cache, LayoutCache.make())
   let snapshot = Intrinsic.replace(output.snapshot, Snapshot.make())
+  let flexScratch = Intrinsic.replace(output.flexScratch, List<FlexScratch>.make())
   // A compute that fails part way leaves nothing to reuse.
   output.keep(since, false)
   run output.prepareBoxes(nodes.boxes.length(), sameBoxes)
@@ -1449,6 +1452,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   let mut boxes = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)
   boxes.cache = move cache
   boxes.previous = move snapshot
+  boxes.flexScratch = move flexScratch
   boxes.inPlace = sameBoxes
   boxes.writes = move writes
   boxes.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
@@ -1480,7 +1484,9 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       facts.visits = Intrinsic.replace(boxes.visits, List<usize>.make())
       facts.parents = Intrinsic.replace(boxes.parents, List<usize>.make())
       let usedWrites = Intrinsic.replace(boxes.writes, BoxWrites.make())
+      let keptScratch = Intrinsic.replace(boxes.flexScratch, List<FlexScratch>.make())
       drop boxes
+      output.flexScratch = move keptScratch
       output.cache = move kept
       output.snapshot = move captured
       output.facts = move facts

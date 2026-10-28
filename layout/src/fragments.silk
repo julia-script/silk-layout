@@ -365,6 +365,8 @@ impl FragmentArena {
   }
   // Prepares fragment `index` for an edit by the caller.
   pub effect fn edit(self: &mut Self, index: usize) ! OutOfMemoryError ? &mut Allocator {
+    // A fresh arena, writing over no previous output, saves and notes nothing.
+    if !self.inPlace && !self.viewing { return }
     run self.saveFragment(index)
     if self.inPlace && index + 1 > self.written { self.written = index + 1 }
     // Positioning edits after the flow, which saves nothing.
@@ -425,6 +427,32 @@ impl FragmentArena {
     return index
   }
   // put of Fragment.make(box, source, kind), written in its slot.
+  // appendBox in a fresh arena during normal flow: nothing to save, claim
+  // or adopt.
+  effect fn appendFresh(self: &mut Self, box: usize, source: usize, kind: FragmentKind, parent: usize, fragmentainer: usize, first: bool, last: bool) -> FragmentId ! OutOfMemoryError ? &mut Allocator {
+    let index = self.count
+    let mut previousSibling = NO_NODE
+    let mut previousForBox = NO_NODE
+    if parent != NO_NODE { previousSibling = self.values.asSlice()[parent].lastChild }
+    if box != NO_NODE { previousForBox = self.lastByBox.get(box) }
+    if index < self.values.length() {
+      let values = self.values.asMutSlice()
+      values[index] = Fragment.make(box, source, kind)
+      self.textMarks.set(index, self.textCount)
+    } else {
+      run self.values.append(Fragment.make(box, source, kind))
+      run self.textMarks.append(self.textCount)
+    }
+    self.count = index + 1
+    let values = self.values.asMutSlice()
+    values[index].fragmentainer = fragmentainer
+    values[index].parent = parent
+    values[index].first = first
+    values[index].last = last
+    values[index].previousSibling = previousSibling
+    values[index].previousForBox = previousForBox
+    return self.linkAppended(index, parent, box, previousSibling, previousForBox)
+  }
   effect fn putMade(self: &mut Self, box: usize, source: usize, kind: FragmentKind) -> usize ! OutOfMemoryError ? &mut Allocator {
     let index = self.count
     run self.saveFragment(index)
@@ -478,6 +506,7 @@ impl FragmentArena {
   }
   // append for a new box fragment, built in its slot instead of moved there.
   pub effect fn appendBox(self: &mut Self, box: usize, source: usize, kind: FragmentKind, parent: usize, fragmentainer: usize, first: bool, last: bool) -> FragmentId ! OutOfMemoryError ? &mut Allocator {
+    if !self.inPlace && !self.viewing && !self.afterFlow { return run self.appendFresh(box, source, kind, parent, fragmentainer, first, last) }
     let next = self.count
     if box != NO_NODE { run self.claimBox(box, next) }
     if parent != NO_NODE { run self.edit(parent) }

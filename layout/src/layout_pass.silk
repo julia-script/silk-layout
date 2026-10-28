@@ -658,25 +658,26 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // Blink LayoutNG / Servo style result reuse: a clean box laid out with the
   // same request as in the previous compute gets a copy of that compute's
   // fragments and box records instead of a layout. `level` says which kind
-  // of subtree the caller can take (see Incremental.markSubtrees).
-  pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
+  // of subtree the caller can take (see Incremental.markSubtrees). Returns
+  // whether it did; the reused layout is then in boxes[id].
+  pub effect fn reuseFinal(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> bool ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
     // Without tracking, the compute follows a cache clear: nothing is kept.
-    if !self.tracking || self.frame != NO_NODE { return Option<Layout>.None }
+    if !self.tracking || self.frame != NO_NODE { return false }
     return run self.reuseKept(nodes, id, input, level, beside)
   }
-  effect fn reuseKept(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> Option<Layout> ! OutOfMemoryError ? &mut Allocator {
-    if id >= self.reusable.length() || (self.reusable.get(id) & REUSE_LEVEL) < level { return Option<Layout>.None }
+  effect fn reuseKept(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> bool ! OutOfMemoryError ? &mut Allocator {
+    if id >= self.reusable.length() || (self.reusable.get(id) & REUSE_LEVEL) < level { return false }
     let mut slot = self.cache.keptRange(id)
-    if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return Option<Layout>.None }
-    if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }
-    if !self.inPlace && id >= self.previous.boxes.length() { return Option<Layout>.None }
-    if !beside && slot.floatCount != 0 { return Option<Layout>.None }
+    if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return false }
+    if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return false }
+    if !self.inPlace && id >= self.previous.boxes.length() { return false }
+    if !beside && slot.floatCount != 0 { return false }
     let base = self.fragments.checkpoint()
     let mut kept = false
     if self.fragments.viewsPrevious() {
       // The previous output is this arena's own, kept where it was when the
       // range is still at the write position.
-      if !self.fragments.previousWhole() || slot.end > self.fragments.previousLength() || id >= self.fragments.boxCount() || self.fragments.previousFirst(id) != slot.start { return Option<Layout>.None }
+      if !self.fragments.previousWhole() || slot.end > self.fragments.previousLength() || id >= self.fragments.boxCount() || self.fragments.previousFirst(id) != slot.start { return false }
       // Else moved there first, with the rest of the previous output.
       if slot.start != base && !self.fragments.canKeep(slot.start, slot.end) {
         let shift = run self.fragments.shiftPrevious(slot.start)
@@ -688,11 +689,11 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       if self.fragments.canKeep(slot.start, slot.end) {
         run self.fragments.keepRange(slot.start, slot.end, self.fragmentParent)
         kept = true
-      } else if !run self.fragments.copyPrevious(slot.start, slot.end, self.fragmentParent) { return Option<Layout>.None }
+      } else if !run self.fragments.copyPrevious(slot.start, slot.end, self.fragmentParent) { return false }
     } else {
-      if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || (!self.inPlace && self.previous.boxes.length() != self.boxes.length) { return Option<Layout>.None }
+      if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || (!self.inPlace && self.previous.boxes.length() != self.boxes.length) { return false }
       // Positioning appends after normal flow; no copied link may reach it.
-      if !run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent) { return Option<Layout>.None }
+      if !run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent) { return false }
     }
     // A box kept in place and not written yet this compute still holds its
     // previous final layout, which differs from the recorded one only in what
@@ -717,7 +718,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     }
     run self.cache.carryFinal(id, slot, base, self.fragments.checkpoint())
     self.stats.reusedLayouts = self.stats.reusedLayouts + 1
-    return Option<Layout>.Some { value: self.boxes[id] }
+    return true
   }
   // The box's layout at the end of the previous compute, but for its
   // placement (see Placement), which FinalResult.layout replaces.

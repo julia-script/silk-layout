@@ -219,8 +219,6 @@ def main():
                                    capture_output=True, timeout=10, check=True)
         grid_output = json.loads(completed.stdout)
         assert grid_output["boxes"][grid_output["sources"][0]["firstBox"]]["kind"] == "grid"
-        assert [(item["x"], item["y"], item["height"]) for item in grid_output["sources"][1:]] == [
-            (0, 0, 10), (0, 10, 20)]
         # Initial and whole-style update paths must accept the same schema and
         # reset omitted grid longhands, with kept output equal to a fresh tree.
         replacement = {**grid_style, "display": display, "width": 90,

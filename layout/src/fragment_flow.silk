@@ -107,7 +107,7 @@ pub effect fn computeFragmented<'frames, 'source, M: Measure + TextMeasure>(tree
   // Fragmented results are not kept between computes.
   output.invalidate()
   TextMeasure.beginTextLayout(&mut measurer)
-  let mut nodes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), frames.writingMode, frames.direction)
+  let mut nodes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), frames.writingMode, frames.direction)
   nodes.prepareFragmentation(frames.writingMode)
   run output.prepare(nodes.boxes.length())
   let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, nodes.sources)

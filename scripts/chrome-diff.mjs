@@ -327,7 +327,7 @@ function runNative(input) {
   output.boxes.forEach((box, index) => {
     used(box, `boxes[${index}]`);
     baselineSets(box, `boxes[${index}]`);
-    if (!['block', 'flex', 'inline', 'inline-formatting', 'text'].includes(box.kind) || !indexValue(box.source, input.nodes.length)) throw new Error(`Invalid native boxes[${index}] metadata`);
+    if (!['block', 'flex', 'grid', 'inline', 'inline-formatting', 'text'].includes(box.kind) || !indexValue(box.source, input.nodes.length)) throw new Error(`Invalid native boxes[${index}] metadata`);
     for (const key of ['parent', 'firstChild', 'lastChild', 'nextSibling', 'previousContinuation', 'nextContinuation']) {
       if (!indexValue(box[key], output.boxes.length)) throw new Error(`Invalid native boxes[${index}].${key}`);
     }
@@ -375,7 +375,7 @@ function runNative(input) {
     source.rects.forEach((rect, i) => rectangle(rect, `${path}.rects[${i}]`));
     const box = output.boxes[source.firstBox];
     if (box && box.source !== index) throw new Error(`Invalid native ${path}.firstBox source`);
-    const ordinary = box && ['block', 'flex'].includes(box.kind) && box.nextContinuation === null
+    const ordinary = box && ['block', 'flex', 'grid'].includes(box.kind) && box.nextContinuation === null
       && source.rects.length === 1 && output.fragments[box.firstFragment]?.kind === 'box';
     if (source.firstBox === null || ordinary) used(source, path, sourceFields);
     else if (sourceFields.filter(field => !rectangleFields.includes(field)).some(field => Object.hasOwn(source, field))) throw new Error(`Native ${path} fabricates single-box metrics`);
@@ -537,6 +537,9 @@ async function observeDOM(input, fontAssets, columns) {
   const sides = ['top', 'right', 'bottom', 'left'];
   const defaults = { display: 'block', boxSizing: 'content-box', direction: 'ltr', unicodeBidi: 'normal', writingMode: 'horizontal-tb', textOrientation: 'mixed',
     flexDirection: 'row', flexWrap: 'nowrap', flexGrow: 0, flexShrink: 1, flexBasis: 'auto', order: 0,
+    gridTemplateRows: 'none', gridTemplateColumns: 'none', gridTemplateAreas: 'none',
+    gridAutoRows: 'auto', gridAutoColumns: 'auto', gridAutoFlow: 'row',
+    gridRowStart: 'auto', gridRowEnd: 'auto', gridColumnStart: 'auto', gridColumnEnd: 'auto',
     justifyContent: 'normal', justifySelf: 'auto', justifyItems: 'normal', alignItems: 'normal', alignSelf: 'auto', alignContent: 'normal',
     overflowX: 'visible', overflowY: 'visible', scrollbarWidth: 'auto', scrollbarGutter: 'auto',
     position: 'static', float: 'none', clear: 'none', visibility: 'visible',
@@ -551,6 +554,48 @@ async function observeDOM(input, fontAssets, columns) {
     }
     throw new Error(`Invalid dimension ${JSON.stringify(value)}`);
   };
+  const gridTrack = value => {
+    if (value && typeof value === 'object') {
+      if (Object.hasOwn(value, 'fr')) return `${value.fr}fr`;
+      if (Object.hasOwn(value, 'minmax')) return `minmax(${gridTrack(value.minmax[0])}, ${gridTrack(value.minmax[1])})`;
+      if (Object.hasOwn(value, 'fitContent')) return `fit-content(${dimension(value.fitContent)})`;
+    }
+    return dimension(value);
+  };
+  const gridTracks = values => {
+    if (!Array.isArray(values)) return gridTrack(values);
+    const parts = [];
+    let names = [];
+    const flushNames = () => {
+      if (names.length) parts.push(`[${names.map(name => CSS.escape(name)).join(' ')}]`);
+      names = [];
+    };
+    for (const value of values) {
+      if (value && typeof value === 'object' && Object.hasOwn(value, 'names')) {
+        names.push(...value.names);
+        continue;
+      }
+      flushNames();
+      if (value && typeof value === 'object' && Object.hasOwn(value, 'repeat')) {
+        parts.push(`repeat(${value.repeat.count}, ${gridTracks(value.repeat.tracks)})`);
+      } else parts.push(gridTrack(value));
+    }
+    flushNames();
+    return parts.join(' ');
+  };
+  const gridLine = value => {
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') return value === 'auto' ? value : CSS.escape(value);
+    const name = value.name === undefined ? '' : ` ${CSS.escape(value.name)}`;
+    return Object.hasOwn(value, 'span') ? `span ${value.span}${name}` : `${value.line}${name}`;
+  };
+  const gridValue = (name, value) => {
+    if (/^grid(?:Template|Auto)(Rows|Columns)$/.test(name)) return gridTracks(value);
+    if (name === 'gridTemplateAreas') return value.length ? value.map(row => JSON.stringify(row.join(' '))).join(' ') : 'none';
+    if (/^grid(Row|Column)(Start|End)$/.test(name)) return gridLine(value);
+    return value;
+  };
+  const gridProperties = Object.keys(defaults).filter(name => name.startsWith('grid'));
   const textIndentValue = value => {
     const options = value && typeof value === 'object' && Object.hasOwn(value, 'value') ? value : { value };
     return `${dimension(options.value)}${options.hanging ? ' hanging' : ''}${options.eachLine ? ' each-line' : ''}`;
@@ -564,7 +609,7 @@ async function observeDOM(input, fontAssets, columns) {
   document.documentElement.style.cssText = 'margin:0;padding:0;border:0;width:100%;height:100%;overflow:hidden;';
   document.body.replaceChildren();
   document.body.style.cssText = 'display:flow-root;margin:0;padding:0;border:0;width:100%;height:100%;overflow:hidden;font-size:0;line-height:0;';
-  const fontEvidence = [], textEvidence = [], textJustifyEvidence = [], textIndentEvidence = [], marginBreakEvidence = [];
+  const fontEvidence = [], textEvidence = [], textJustifyEvidence = [], textIndentEvidence = [], marginBreakEvidence = [], gridEvidence = [];
   const zeroFont = { fontSize: 0, ascent: 0, descent: 0, lineGap: 0, xHeight: 0,
     capHeight: 0, subscriptOffset: 0, superscriptOffset: 0 };
   const fontMetrics = key => key === 0 ? zeroFont : input.fonts[key - 1];
@@ -726,6 +771,12 @@ async function observeDOM(input, fontAssets, columns) {
     const entries = Object.entries(node.style).sort(([a], [b]) => Number(edges.has(b)) - Number(edges.has(a)));
     for (const [name, value] of entries) {
       if (name.endsWith('Safety') || name === 'replaced' || name === 'aspectRatioAuto' || name === 'fontKey') continue;
+      if (gridProperties.includes(name)) {
+        // Keep support and computed-value evidence even when Chrome rejects a
+        // declaration. The native adapter validates the structured input.
+        element.style.setProperty(cssName(name), gridValue(name, value));
+        continue;
+      }
       if (name === 'textJustify') {
         // Retain the requested spelling, including the mandated legacy alias.
         // Unsupported declarations are reported with computed-style evidence.
@@ -827,7 +878,7 @@ async function observeDOM(input, fontAssets, columns) {
   // CSSOM scrollWidth/scrollHeight are integer dimensions, not fractional
   // overflow rectangles or their signed origins. Do not turn them into
   // expected native overflow fields; those have normative spec assertions.
-  return { schemaVersion: 3, documentMode: document.compatMode, resources, scrollOffsets, scrollbarEvidence, fontEvidence, textEvidence, textJustifyEvidence, textIndentEvidence, marginBreakEvidence, unsupported, sources: elements.map((element, i) => {
+  return { schemaVersion: 3, documentMode: document.compatMode, resources, scrollOffsets, scrollbarEvidence, fontEvidence, textEvidence, textJustifyEvidence, textIndentEvidence, marginBreakEvidence, gridEvidence, unsupported, sources: elements.map((element, i) => {
     const node = input.nodes[i];
     const parent = node.parent === null ? viewportOrigin : origins[node.parent];
     if (element.nodeType === Node.TEXT_NODE) {
@@ -856,6 +907,21 @@ async function observeDOM(input, fontAssets, columns) {
         y: clientRects.length ? rect.y - parent.y : 0, width: rect.width, height: rect.height, rects };
     }
     const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+    if (style.display.includes('grid') || gridProperties.some(name => Object.hasOwn(node.style, name))) {
+      for (const name of gridProperties) {
+        const property = cssName(name);
+        const requested = Object.hasOwn(node.style, name) ? gridValue(name, node.style[name]) : defaults[name];
+        const evidence = { node: i, property, requested, specified: element.style.getPropertyValue(property),
+          computed: style.getPropertyValue(property), cssSupported: CSS.supports(property, requested) };
+        gridEvidence.push(evidence);
+        // Track lists expose used pixel sizes through getComputedStyle; those
+        // cannot be compared textually with authored fr/minmax/repeat values.
+        if (!evidence.cssSupported || !evidence.specified || !evidence.computed) {
+          unsupported.push({ node: i, feature: property,
+            reason: 'Chrome does not support or did not retain the requested grid declaration.', evidence });
+        }
+      }
+    }
     const requestedJustify = node.style.textJustify ?? 'auto';
     const expectedJustify = requestedJustify === 'distribute' ? 'inter-character' : requestedJustify;
     const justifyEvidence = { node: i, requested: requestedJustify, expected: expectedJustify,
@@ -1115,6 +1181,7 @@ async function runFixture(fixture, source, isFuzz = false) {
       if (expected.textJustifyEvidence?.length) result.textJustifyEvidence = expected.textJustifyEvidence;
       if (expected.textIndentEvidence?.length) result.textIndentEvidence = expected.textIndentEvidence;
       if (expected.marginBreakEvidence?.length) result.marginBreakEvidence = expected.marginBreakEvidence;
+      if (expected.gridEvidence?.length) result.gridEvidence = expected.gridEvidence;
       if (fixture.input.fragmentation || fixture.input.nodes.some(node => Object.hasOwn(node, 'text'))) result.browserSources = expected.sources;
       result.scrollOffsets = expected.scrollOffsets;
       if (expected.resources?.length) result.resources = expected.resources;

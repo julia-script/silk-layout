@@ -1,0 +1,19 @@
+{
+  "name": "grid-item-blockification",
+  "kind": "spec",
+  "features": ["grid", "blockification", "grid-items"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#grid-items", "https://drafts.csswg.org/css-grid-2/#grid-item-display"],
+  "input": {
+    "viewport": {"width": 800, "height": 600},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 100}},
+      {"parent": 0, "style": {"display": "inline", "float": "left", "height": 20}},
+      {"parent": 0, "style": {"display": "inline", "height": 30}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 100, "height": 50},
+    {"x": 0, "y": 0, "width": 100, "height": 20},
+    {"x": 0, "y": 20, "width": 100, "height": 30}
+  ]}
+}

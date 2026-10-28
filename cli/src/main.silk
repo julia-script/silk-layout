@@ -25,6 +25,8 @@ import silk.usize
 import protocol as P
 import protocol { ProtocolError }
 import styles as Styles
+import grid_styles as GridStyles
+import layout.lib { GridError }
 import measurement as FixtureMeasurement
 import measurement { Fixture, Fixtures }
 import fragment_input as FragmentInput
@@ -159,6 +161,7 @@ effect fn writeSourceUsed(box: &Layout, mode: WritingMode, orientation: TextOrie
 fn boxKind(kind: BoxKind) -> string<'static> {
   if kind == BoxKind.Block { return "block" }
   if kind == BoxKind.Flex { return "flex" }
+  if kind == BoxKind.Grid { return "grid" }
   if kind == BoxKind.Inline { return "inline" }
   if kind == BoxKind.Text { return "text" }
   return "inline-formatting"
@@ -230,7 +233,7 @@ effect fn writeOutput(tree: &Tree, output: &LayoutTree)
       let style = &tree.styles.asSlice()[sourceNode.styleIndex]
       run writeSourceUsed(&empty, style.writingMode, style.textOrientation)
     } else if nodes[first].nextContinuation == usize.MAX && count == 1
-      && (nodes[first].kind == BoxKind.Block || nodes[first].kind == BoxKind.Flex) {
+      && (nodes[first].kind == BoxKind.Block || nodes[first].kind == BoxKind.Flex || nodes[first].kind == BoxKind.Grid) {
       let node = &nodes[first]
       let style = &tree.styles.asSlice()[tree.nodes.asSlice()[node.styleOwner].styleIndex]
       let mut mode = style.writingMode
@@ -439,7 +442,7 @@ fn resetCounters(fixtures: &mut Fixtures) {
 // `set` entry replaces a node's whole style, a text node's text, or an
 // element's scroll offset.
 effect fn applyStep(step: &Value, tree: &mut Tree, current: OptionalSize, fonts: usize) -> OptionalSize
-  ! ProtocolError | OutOfMemoryError | InvalidNode ? &mut Allocator {
+  ! ProtocolError | GridError | OutOfMemoryError | InvalidNode ? &mut Allocator {
   let mut viewport = current
   run P.fields(step, &["viewport", "set"])
   if P.has(step, "viewport") {
@@ -462,6 +465,7 @@ effect fn applyStep(step: &Value, tree: &mut Tree, current: OptionalSize, fonts:
       let style = run Styles.parse(run P.required(change, "style"))
       if style.fontKey >= fonts { fail P.invalid("fontKey does not identify a supplied font") }
       run tree.setStyle(id, move style)
+      run GridStyles.apply(run P.required(change, "style"), &mut tree, id)
     }
     if P.has(change, "text") {
       let text = run String.copy(run P.text(run P.required(change, "text")))
@@ -476,7 +480,7 @@ effect fn applyStep(step: &Value, tree: &mut Tree, current: OptionalSize, fonts:
 }
 
 effect fn execute(document: &Value)
-  ! ProtocolError | OutOfMemoryError | InvalidNode | JsonError | WriterError | TextError | FragmentationError
+  ! ProtocolError | GridError | OutOfMemoryError | InvalidNode | JsonError | WriterError | TextError | FragmentationError
   ? &mut Allocator | &mut Writer {
   run P.fields(document, &["viewport", "viewportScrollOffset", "scrollbars", "fonts", "nodes", "fragmentation", "benchmark", "updates"])
   let viewportValue = run P.required(document, "viewport")
@@ -542,6 +546,7 @@ effect fn execute(document: &Value)
         drop id
       }
     }
+    if !isText { run GridStyles.apply(run P.required(node, "style"), &mut tree, NodeId { index: index }) }
     if tree.styles.asSlice()[tree.nodes.asSlice()[index].styleIndex].fontKey >= fixtures.fonts.length() {
       fail P.invalid("fontKey does not identify a supplied font")
     }
@@ -658,7 +663,7 @@ impl Writer for BufferedStdout {
 }
 
 effect fn application() -> i32
-  ! StreamReadError | OutOfMemoryError | JsonError | WriterError | ProtocolError | InvalidNode | TextError | FragmentationError {
+  ! StreamReadError | OutOfMemoryError | JsonError | WriterError | ProtocolError | GridError | InvalidNode | TextError | FragmentationError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut input = OsStandardInput.make()
   let mut output = BufferedStdout.make()
@@ -690,7 +695,7 @@ effect fn fragmentationFailed(error: FragmentationError) -> i32 {
   return 1
 }
 
-effect fn failed(error: StreamReadError | OutOfMemoryError | JsonError | WriterError | ProtocolError | InvalidNode | TextError) -> i32 {
+effect fn failed(error: StreamReadError | OutOfMemoryError | JsonError | WriterError | ProtocolError | GridError | InvalidNode | TextError) -> i32 {
   drop error
   drop P.invalid("request failed: malformed JSON, invalid protocol, unsupported text, allocation, or I/O failure")
   return 1

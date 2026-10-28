@@ -1,0 +1,143 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.testing { Testing, AssertionError }
+import style { Style, Display, DisplayOutside, DisplayInside, Dimension, BoxSizing, Edges }
+import tree { Tree, InvalidNode }
+import grid_style {
+  GridTemplate,
+  GridLine,
+  GridLineKind,
+  GridTrack,
+  GridBreadth,
+  GridBreadthKind,
+  GridError,
+  validGridName
+}
+
+// Grid 2 §7.2.2 and §8.3: custom identifiers exclude auto/span and CSS-wide keywords.
+test effect fn gridNamesValidateAndInternOnce()
+  ! OutOfMemoryError | GridError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let first = run tree.internGridName("edge") |> Effect.provideMut<Allocator>(&mut allocator)
+  let second = run tree.internGridName("edge") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    first == second && first != 0,
+    "repeated names share one nonzero tree-local id",
+  )
+  run Testing.expect(
+    validGridName("--edge") && validGridName("edge-2"),
+    "decoded custom identifiers are accepted",
+  )
+  run Testing.expect(
+    validGridName("none"),
+    "none is a custom line name, not a grid placement keyword",
+  )
+  let area = run tree.internGridAreaName("auto") |> Effect.provideMut<Allocator>(&mut allocator)
+  let numberedArea = run tree.internGridAreaName("1a")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    area != numberedArea,
+    "area cell names allow keywords and initial digits under Grid §7.3",
+  )
+  run Testing.expect(
+    !validGridName("span") && !validGridName("INHERIT") && !validGridName("2edge"),
+    "reserved and malformed identifiers are rejected",
+  )
+}
+
+// Grid 2 §7 and §8: templates are container inputs; placement is a parent input.
+test effect fn gridReplacementKeepsSlotAndClassifiesPlacement()
+  ! OutOfMemoryError | GridError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let before = tree.outerChangedAt(0)
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setGrid(root, move template) |> Effect.provideMut<Allocator>(&mut allocator)
+  let handle = tree.styles.asSlice()[0].grid
+  run Testing.expect(
+    handle != 0 && tree.outerChangedAt(0) == before,
+    "container tracks dirty only the container",
+  )
+  let mut count: usize = 0
+  while count < 20 {
+    let mut replacement = GridTemplate.make()
+    replacement.placement.rowStart = GridLine { kind: GridLineKind.Line, number: 2, name: 0 }
+    run tree.setGrid(root, move replacement) |> Effect.provideMut<Allocator>(&mut allocator)
+    count = count + 1
+  }
+  run Testing.expect(
+    tree.grids.length() == 2 && tree.styles.asSlice()[0].grid == handle,
+    "replacements reuse the owned template slot",
+  )
+  run Testing.expect(tree.outerChangedAt(0) > before, "placement changes reach the parent")
+  run tree.setStyle(root, Style.make())
+  run Testing.expect(
+    tree.styles.asSlice()[0].grid == handle,
+    "ordinary restyle preserves tree-owned grid data",
+  )
+  run tree.setGrid(root, GridTemplate.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    tree.grids.length() == 2 && tree.grids.asSlice()[handle].columns.tracks.length() == 0,
+    "reset releases lists without allocating another slot",
+  )
+}
+
+// Grid 2 §7.2: flexible track minima and negative track sizes are invalid.
+test effect fn gridTrackValidationRejectsFlexibleMinimum()
+  ! AssertionError<'static> {
+  let track = GridTrack.minmax(GridBreadth.flex(1.0), GridBreadth.fixed(20.0))
+  run Testing.expect(!track.valid(), "minmax rejects a flexible minimum")
+  run Testing.expect(
+    !GridTrack.breadth(GridBreadth.fixed(-1.0)).valid(),
+    "negative track lengths are invalid",
+  )
+  run Testing.expect(
+    GridTrack.minmax(GridBreadth.fixed(0.0), GridBreadth.flex(1.0)).valid(),
+    "flexible maxima are valid",
+  )
+
+  // Values 4 §10.12: calc() range checking happens after resolving its terms.
+  let calc = GridBreadth { kind: GridBreadthKind.Calc, length: -10.0, percent: 0.5 }
+  run Testing.expect(
+    GridTrack.breadth(calc).valid(),
+    "a negative calc coefficient is not a negative resolved track size",
+  )
+}
+
+// Grid 2 §6.1/§12.5: flattened items still contribute their border and padding
+// to their grid parent, even when a border-box size stays unchanged.
+test effect fn gridItemInsetsThroughContentsRemainOuterChanges()
+  ! OutOfMemoryError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut rootStyle = Style.make()
+  rootStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  let mut tree = run Tree.make(move rootStyle) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut contentsStyle = Style.make()
+  contentsStyle.display = Display.Contents
+  let root = tree.root()
+  let contents = run tree.append(root, move contentsStyle)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut itemStyle = Style.make()
+  itemStyle.width = Dimension.px(100.0)
+  itemStyle.height = Dimension.px(100.0)
+  itemStyle.boxSizing = BoxSizing.BorderBox
+  itemStyle.flexShrink = 0.0
+  let item = run tree.append(contents, move itemStyle)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let before = tree.outerChangedAt(item.index)
+  let mut changed = Style.make()
+  changed.width = Dimension.px(100.0)
+  changed.height = Dimension.px(100.0)
+  changed.boxSizing = BoxSizing.BorderBox
+  changed.flexShrink = 0.0
+  changed.padding = Edges.all(Dimension.px(10.0))
+  run tree.setStyle(item, move changed)
+  run Testing.expect(
+    tree.outerChangedAt(item.index) > before,
+    "grid parent reads item insets through display contents",
+  )
+}

@@ -66,6 +66,11 @@
       "resolved": "https://drafts.csswg.org/css-gaps-1/",
       "sha256": "614d12c783d247486a65e1a12b632444c9b052a60370430c4c4b6187df790ccc"
     },
+    "css-grid-2": {
+      "url": "https://drafts.csswg.org/css-grid-2/",
+      "resolved": "https://drafts.csswg.org/css-grid-2/",
+      "sha256": "f5ce236d797b15a39e884376402c395f39cee2a8a452f1f03613e1a28711b7bd"
+    },
     "css-images-3": {
       "url": "https://drafts.csswg.org/css-images-3/",
       "resolved": "https://drafts.csswg.org/css-images-3/",

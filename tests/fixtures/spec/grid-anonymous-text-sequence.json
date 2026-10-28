@@ -1,0 +1,91 @@
+{
+  "name": "grid-anonymous-text-sequence",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "source-text",
+    "text-measurement",
+    "inline-fragments"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-items"
+  ],
+  "derivation": "Adjacent text nodes form one anonymous grid item, not two rows. Four half-em glyphs at 10px font size occupy 20px on a 10px line; the following 10px item starts the second implicit row at y=10.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 150
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 0,
+        "text": "ab"
+      },
+      {
+        "parent": 0,
+        "text": "cd"
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 15,
+          "height": 10
+        }
+      }
+    ],
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 10,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 15,
+        "height": 10
+      }
+    ]
+  }
+}

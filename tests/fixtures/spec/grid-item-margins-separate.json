@@ -1,0 +1,69 @@
+{
+  "name": "grid-item-margins-separate",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "margin-collapse"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-items",
+    "https://drafts.csswg.org/css-grid-2/#item-margins",
+    "https://drafts.csswg.org/css-grid-2/#grid-containers"
+  ],
+  "derivation": "Grid item margins do not collapse with each other or the container. Row one consumes 7+10+11=28px; row two begins its border box at 28+13=41px and consumes 13+20+17=50px. Container height is 78px.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 150
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 10,
+          "marginTop": 7,
+          "marginBottom": 11
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "height": 20,
+          "marginTop": 13,
+          "marginBottom": 17
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 78
+      },
+      {
+        "x": 0,
+        "y": 7,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 41,
+        "width": 30,
+        "height": 20
+      }
+    ]
+  }
+}

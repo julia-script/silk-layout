@@ -1,0 +1,496 @@
+import silk.ownership { Copy }
+import silk.list { List }
+import silk.string { String }
+import silk.format { Debug, Formatter }
+import silk.writer { Writer, WriterError }
+
+pub const MAX_GRID_TRACKS: usize = 10000
+
+pub struct GridError {}
+
+impl Copy for GridError {}
+
+impl Debug for GridError {
+  effect fn debug(self: &Self, formatter: &mut Formatter)
+    ! WriterError
+    ? &mut Writer {
+    drop self
+    drop formatter
+    run Writer.writeString("invalid grid value")
+  }
+}
+
+fn equalKeyword(value: string, keyword: string) -> bool {
+  let bytes = String.utf8Bytes(value)
+  let expected = String.utf8Bytes(keyword)
+  if bytes.length != expected.length {
+    return false
+  }
+  let mut index: usize = 0
+  while index < bytes.length {
+    let mut byte = bytes[index]
+    if byte >= 65 && byte <= 90 {
+      byte = byte + 32
+    }
+    if byte != expected[index] {
+      return false
+    }
+    index = index + 1
+  }
+  return true
+}
+
+fn nameStart(byte: u8) -> bool {
+  return byte >= 128 || byte == 95 || byte >= 65 && byte <= 90 || byte >= 97 && byte <= 122
+}
+
+// Names are decoded identifiers, not CSS source tokens (no escape parser).
+pub fn validGridName(value: string) -> bool {
+  if equalKeyword(value, "auto") || equalKeyword(value, "span") || equalKeyword(value, "default")
+    || equalKeyword(value, "inherit")
+    || equalKeyword(value, "initial")
+    || equalKeyword(value, "unset")
+    || equalKeyword(value, "revert")
+    || equalKeyword(value, "revert-layer") {
+    return false
+  }
+  let bytes = String.utf8Bytes(value)
+  if bytes.length == 0 {
+    return false
+  }
+  if !nameStart(bytes[0]) {
+    if bytes[0] != 45 || bytes.length < 2 {
+      return false
+    }
+    if !nameStart(bytes[1]) && bytes[1] != 45 {
+      return false
+    }
+  }
+  let mut index: usize = 1
+  while index < bytes.length {
+    let byte = bytes[index]
+    if !nameStart(byte) && byte != 45 && !(byte >= 48 && byte <= 57) {
+      return false
+    }
+    index = index + 1
+  }
+  return true
+}
+
+// Grid §7.3 uses name-code-point sequences for area cells, not custom-ident.
+pub fn validGridAreaName(value: string) -> bool {
+  let bytes = String.utf8Bytes(value)
+  if bytes.length == 0 {
+    return false
+  }
+  let mut index: usize = 0
+  while index < bytes.length {
+    let byte = bytes[index]
+    if !nameStart(byte) && byte != 45 && !(byte >= 48 && byte <= 57) {
+      return false
+    }
+    index = index + 1
+  }
+  return true
+}
+
+pub enum GridLineKind {
+  Auto,
+  Line,
+  Span
+}
+
+pub struct GridLine {
+  pub kind: GridLineKind,
+  pub number: i32,
+  pub name: usize
+}
+
+impl Copy for GridLine {}
+
+impl GridLine {
+  pub fn auto() -> GridLine {
+    return GridLine { kind: GridLineKind.Auto, number: 0, name: 0 }
+  }
+
+  pub fn valid(self: &Self, names: usize) -> bool {
+    if self.name >= names || self.number < -10000 || self.number > 10000 {
+      return false
+    }
+    if self.kind == GridLineKind.Auto {
+      return self.number == 0 && self.name == 0
+    }
+    if self.kind == GridLineKind.Span {
+      return self.number > 0
+    }
+    return self.number != 0
+  }
+
+  pub fn same(self: &Self, other: &Self) -> bool {
+    return self.kind == other.kind && self.number == other.number && self.name == other.name
+  }
+}
+
+pub struct GridPlacement {
+  pub rowStart: GridLine,
+  pub rowEnd: GridLine,
+  pub columnStart: GridLine,
+  pub columnEnd: GridLine
+}
+
+impl Copy for GridPlacement {}
+
+impl GridPlacement {
+  pub fn make() -> GridPlacement {
+    return GridPlacement {
+      rowStart: GridLine.auto(),
+      rowEnd: GridLine.auto(),
+      columnStart: GridLine.auto(),
+      columnEnd: GridLine.auto(),
+    }
+  }
+
+  pub fn same(self: &Self, other: &Self) -> bool {
+    return self.rowStart.same(&other.rowStart) && self.rowEnd.same(&other.rowEnd)
+      && self.columnStart.same(&other.columnStart)
+      && self.columnEnd.same(&other.columnEnd)
+  }
+
+  pub fn valid(self: &Self, names: usize) -> bool {
+    return self.rowStart.valid(names) && self.rowEnd.valid(names) && self.columnStart.valid(names)
+      && self.columnEnd.valid(names)
+  }
+}
+
+pub enum GridBreadthKind {
+  Length,
+  Percent,
+  Calc,
+  Flex,
+  Auto,
+  MinContent,
+  MaxContent
+}
+
+pub struct GridBreadth {
+  pub kind: GridBreadthKind,
+  pub length: f64,
+  pub percent: f64
+}
+
+impl Copy for GridBreadth {}
+
+impl GridBreadth {
+  pub fn fixed(value: f64) -> GridBreadth {
+    return GridBreadth { kind: GridBreadthKind.Length, length: value, percent: 0.0 }
+  }
+
+  pub fn flex(value: f64) -> GridBreadth {
+    return GridBreadth { kind: GridBreadthKind.Flex, length: value, percent: 0.0 }
+  }
+
+  pub fn auto() -> GridBreadth {
+    return GridBreadth { kind: GridBreadthKind.Auto, length: 0.0, percent: 0.0 }
+  }
+
+  pub fn isFixed(self: &Self) -> bool {
+    return self.kind == GridBreadthKind.Length || self.kind == GridBreadthKind.Percent
+      || self.kind == GridBreadthKind.Calc
+  }
+
+  pub fn valid(self: &Self) -> bool {
+    if self.length - self.length != 0.0 || self.percent - self.percent != 0.0 {
+      return false
+    }
+    if self.kind == GridBreadthKind.Length {
+      return self.length >= 0.0 && self.percent == 0.0
+    }
+    if self.kind == GridBreadthKind.Percent {
+      return self.length == 0.0 && self.percent >= 0.0
+    }
+    if self.kind == GridBreadthKind.Calc {
+      return true
+    }
+    if self.kind == GridBreadthKind.Flex {
+      return self.length >= 0.0 && self.percent == 0.0
+    }
+    return self.length == 0.0 && self.percent == 0.0
+  }
+}
+
+pub enum GridTrackKind {
+  Breadth,
+  Minmax,
+  FitContent
+}
+
+pub struct GridTrack {
+  pub kind: GridTrackKind,
+  pub min: GridBreadth,
+  pub max: GridBreadth
+}
+
+impl Copy for GridTrack {}
+
+impl GridTrack {
+  pub fn breadth(value: GridBreadth) -> GridTrack {
+    return GridTrack { kind: GridTrackKind.Breadth, min: value, max: value }
+  }
+
+  pub fn minmax(min: GridBreadth, max: GridBreadth) -> GridTrack {
+    return GridTrack { kind: GridTrackKind.Minmax, min: min, max: max }
+  }
+
+  pub fn fitContent(limit: GridBreadth) -> GridTrack {
+    return GridTrack { kind: GridTrackKind.FitContent, min: GridBreadth.auto(), max: limit }
+  }
+
+  pub fn valid(self: &Self) -> bool {
+    if !self.min.valid() || !self.max.valid() {
+      return false
+    }
+    if self.kind == GridTrackKind.Minmax {
+      return self.min.kind != GridBreadthKind.Flex
+    }
+    if self.kind == GridTrackKind.FitContent {
+      return self.min.kind == GridBreadthKind.Auto && self.max.isFixed()
+    }
+    return self.min.kind == self.max.kind && self.min.length == self.max.length
+      && self.min.percent == self.max.percent
+  }
+
+  pub fn fixedRepeat(self: &Self) -> bool {
+    if self.kind == GridTrackKind.FitContent {
+      return false
+    }
+    return self.min.isFixed() || self.kind == GridTrackKind.Minmax && self.max.isFixed()
+  }
+}
+
+// repeat is zero outside a repeat, otherwise its one-based repeat index. This
+// distinguishes outer boundary names from names repeated with the pattern.
+pub struct GridNamedLine {
+  pub line: usize,
+  pub name: usize,
+  pub repeat: usize
+}
+
+impl Copy for GridNamedLine {}
+
+pub enum GridRepeatKind {
+  Count,
+  AutoFill,
+  AutoFit
+}
+
+// A repeat references one unexpanded pattern in GridAxis.tracks. Named lines
+// use those same unexpanded line offsets; adjacent groups share an offset.
+pub struct GridRepeat {
+  pub start: usize,
+  pub length: usize,
+  pub count: usize,
+  pub kind: GridRepeatKind
+}
+
+impl Copy for GridRepeat {}
+
+pub struct GridAxis {
+  pub tracks: List<GridTrack>,
+  pub lines: List<GridNamedLine>,
+  pub repeats: List<GridRepeat>
+}
+
+impl GridAxis {
+  pub fn make() -> GridAxis {
+    return GridAxis {
+      tracks: List<GridTrack>.make(),
+      lines: List<GridNamedLine>.make(),
+      repeats: List<GridRepeat>.make(),
+    }
+  }
+
+  pub fn valid(self: &Self, names: usize) -> bool {
+    let tracks = self.tracks.asSlice()
+    if tracks.length > MAX_GRID_TRACKS {
+      return false
+    }
+    if tracks.length == 0 && (self.lines.length() != 0 || self.repeats.length() != 0) {
+      return false
+    }
+    let mut index: usize = 0
+    while index < tracks.length {
+      if !tracks[index].valid() {
+        return false
+      }
+      index = index + 1
+    }
+    let lines = self.lines.asSlice()
+    index = 0
+    while index < lines.length {
+      if lines[index].line > tracks.length || lines[index].name == 0 || lines[index].name >= names {
+        return false
+      }
+      if lines[index].repeat > self.repeats.length() {
+        return false
+      }
+      if lines[index].repeat != 0 {
+        let repeat = self.repeats.asSlice()[lines[index].repeat - 1]
+        if lines[index].line < repeat.start || lines[index].line - repeat.start > repeat.length {
+          return false
+        }
+      }
+      index = index + 1
+    }
+    let repeats = self.repeats.asSlice()
+    let mut expanded = tracks.length
+    let mut end: usize = 0
+    let mut automatic = false
+    index = 0
+    while index < repeats.length {
+      let repeat = repeats[index]
+      if repeat.start < end || repeat.start > tracks.length || repeat.length == 0
+        || repeat.length > tracks.length - repeat.start
+        || repeat.count == 0
+        || repeat.count > MAX_GRID_TRACKS {
+        return false
+      }
+      if repeat.kind != GridRepeatKind.Count {
+        if automatic || repeat.count != 1 {
+          return false
+        }
+        automatic = true
+      }
+      let extra = repeat.length * (repeat.count - 1)
+      if extra > MAX_GRID_TRACKS - expanded {
+        return false
+      }
+      expanded = expanded + extra
+      end = repeat.start + repeat.length
+      index = index + 1
+    }
+    if automatic {
+      index = 0
+      while index < tracks.length {
+        if !tracks[index].fixedRepeat() {
+          return false
+        }
+        index = index + 1
+      }
+    }
+    return true
+  }
+}
+
+pub struct GridArea {
+  pub name: usize,
+  pub rowStart: usize,
+  pub rowEnd: usize,
+  pub columnStart: usize,
+  pub columnEnd: usize
+}
+
+impl Copy for GridArea {}
+
+pub enum GridAutoFlow {
+  Row,
+  Column
+}
+
+pub struct GridTemplate {
+  pub rows: GridAxis,
+  pub columns: GridAxis,
+  pub autoRows: List<GridTrack>,
+  pub autoColumns: List<GridTrack>,
+  pub areas: List<GridArea>,
+  pub areaRows: usize,
+  pub areaColumns: usize,
+  pub flow: GridAutoFlow,
+  pub dense: bool,
+  pub placement: GridPlacement,
+}
+
+impl GridTemplate {
+  pub fn make() -> GridTemplate {
+    return GridTemplate {
+      rows: GridAxis.make(),
+      columns: GridAxis.make(),
+      autoRows: List<GridTrack>.make(),
+      autoColumns: List<GridTrack>.make(),
+      areas: List<GridArea>.make(),
+      areaRows: 0,
+      areaColumns: 0,
+      flow: GridAutoFlow.Row,
+      dense: false,
+      placement: GridPlacement.make(),
+    }
+  }
+
+  pub fn isInitial(self: &Self) -> bool {
+    return self.rows.tracks.length() == 0 && self.columns.tracks.length() == 0
+      && self.rows.lines.length() == 0
+      && self.columns.lines.length() == 0
+      && self.rows.repeats.length() == 0
+      && self.columns.repeats.length() == 0
+      && self.autoRows.length() == 0
+      && self.autoColumns.length() == 0
+      && self.areas.length() == 0
+      && self.areaRows == 0
+      && self.areaColumns == 0
+      && self.flow == GridAutoFlow.Row
+      && !self.dense
+      && self.placement.same(&GridPlacement.make())
+  }
+
+  pub fn valid(self: &Self, names: usize) -> bool {
+    if !self.rows.valid(names) || !self.columns.valid(names) || !self.placement.valid(names) {
+      return false
+    }
+    if self.areaRows > MAX_GRID_TRACKS || self.areaColumns > MAX_GRID_TRACKS
+      || (self.areaRows == 0) != (self.areaColumns == 0) {
+      return false
+    }
+    let rows = self.autoRows.asSlice()
+    let columns = self.autoColumns.asSlice()
+    if rows.length > MAX_GRID_TRACKS || columns.length > MAX_GRID_TRACKS {
+      return false
+    }
+    let mut index: usize = 0
+    while index < rows.length {
+      if !rows[index].valid() {
+        return false
+      }
+      index = index + 1
+    }
+    index = 0
+    while index < columns.length {
+      if !columns[index].valid() {
+        return false
+      }
+      index = index + 1
+    }
+    let areas = self.areas.asSlice()
+    index = 0
+    while index < areas.length {
+      let area = areas[index]
+      if area.name == 0 || area.name >= names || area.rowStart >= area.rowEnd
+        || area.columnStart >= area.columnEnd
+        || area.rowEnd > self.areaRows
+        || area.columnEnd > self.areaColumns {
+        return false
+      }
+      let mut prior: usize = 0
+      while prior < index {
+        let other = areas[prior]
+        if other.name == area.name
+          || area.rowStart < other.rowEnd && other.rowStart < area.rowEnd
+            && area.columnStart < other.columnEnd
+            && other.columnStart < area.columnEnd {
+          return false
+        }
+        prior = prior + 1
+      }
+      index = index + 1
+    }
+    return true
+  }
+}

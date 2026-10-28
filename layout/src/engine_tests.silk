@@ -876,3 +876,26 @@ test effect fn repeatedResizesLayOutAfresh() ! OutOfMemoryError | TextError | Fr
   let expectedEdit = run again.sourceBounds(last)
   run Testing.expect(output.stats.fullLayouts > 1 && edited.x == expectedEdit.x && edited.y == expectedEdit.y && edited.width == expectedEdit.width, "an edit laid out afresh matches a fresh compute")
 }
+
+// Grid containers must not inherit the block-only cache normalization that
+// erases available block size. Inspect both construction and restyling paths.
+test effect fn gridExcludesBlockProbeHeightNormalization() ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let child = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop child
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 0.0, maximum: 0.0, height: 0.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  // KEY_BLOCK is the cache's block-height-normalization bit.
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(root.index)) & 16 != 0, "ordinary block enables block probe normalization")
+  let mut grid = Style.make()
+  grid.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  run tree.setStyle(root, move grid)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(root.index)) & 16 == 0, "restyled grid excludes block probe normalization")
+  let mut fresh = LayoutTree.make()
+  run compute(&tree, &mut fresh, &mut content, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(fresh.facts.keyShapes.get(fresh.firstBySource.get(root.index)) & 16 == 0, "fresh grid excludes block probe normalization")
+}

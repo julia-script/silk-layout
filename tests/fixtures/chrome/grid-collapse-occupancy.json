@@ -1,0 +1,42 @@
+{
+  "name": "grid-collapse-occupancy",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "visibility-collapse"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-items",
+    "https://www.w3.org/TR/2011/REC-CSS2-20110607/visufx.html#visibility"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 150
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "visibility": "collapse",
+          "width": 20,
+          "height": 13
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "height": 9
+        }
+      }
+    ]
+  }
+}

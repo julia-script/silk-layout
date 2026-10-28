@@ -20,7 +20,7 @@ impl Edges {
 // CSS Display 3 §2: participation in the parent and layout of descendants
 // are independent. Box-suppression values have neither outside nor inside.
 pub enum DisplayOutside { Block, Inline }
-pub enum DisplayInside { Flow, FlowRoot, Flex }
+pub enum DisplayInside { Flow, FlowRoot, Flex, Grid }
 pub union Display {
   Box { pub outside: DisplayOutside, pub inside: DisplayInside },
   None,
@@ -101,6 +101,9 @@ pub enum BreakBetween { Auto, Avoid, Always, All, AvoidPage, Page, Left, Right, 
 pub enum BreakInside { Auto, Avoid, AvoidPage, AvoidColumn, AvoidRegion }
 pub struct Style {
   pub display: Display,
+  // Tree-managed handle, never a transferable template value. setStyle preserves
+  // it; use Tree.setGrid to replace/reset owned grid data.
+  pub grid: usize,
   pub width: Dimension, pub height: Dimension,
   pub minWidth: Dimension, pub minHeight: Dimension,
   pub maxWidth: Dimension, pub maxHeight: Dimension,
@@ -148,6 +151,7 @@ impl Style {
   pub fn make() -> Style {
     return Style {
       display: Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flow },
+      grid: 0,
       width: Dimension.auto(), height: Dimension.auto(),
       minWidth: Dimension.auto(), minHeight: Dimension.auto(),
       maxWidth: Dimension.keyword(DimensionKind.None), maxHeight: Dimension.keyword(DimensionKind.None),

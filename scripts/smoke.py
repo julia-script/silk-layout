@@ -25,6 +25,47 @@ def main():
         json.dumps({"viewport": request["viewport"], "nodes": [{"parent": None, "style": {}, "scrollOffset": {"x": 0, "y": 0, "z": 0}}]}).encode(),
         json.dumps({**request, "viewportScrollOffset": {"x": "1e999", "y": 0}}).replace('"1e999"', '1e999').encode(),
     ]
+    # Grid 2 §7.2–7.7 and §8.3: structured longhands only; reject invalid
+    # track grammar, nonrectangular named areas, and zero placement indices.
+    grid_invalid = [
+        ("gridTemplateColumns", "subgrid"), ("gridTemplateRows", "10px 1fr"),
+        ("gridTemplateColumns", []), ("gridTemplateColumns", [-1]),
+        ("gridTemplateColumns", [{"fr": -1}]),
+        ("gridTemplateColumns", [{"minmax": [{"fr": 1}, 20]}]),
+        ("gridTemplateColumns", [{"minmax": [10]}]),
+        ("gridTemplateColumns", [{"fitContent": "auto"}]),
+        ("gridTemplateColumns", [{"names": ["auto"]}, 10]),
+        ("gridTemplateColumns", [{"names": ["bad name"]}, 10]),
+        ("gridTemplateColumns", [{"repeat": {"count": 0, "tracks": [10]}}]),
+        ("gridTemplateColumns", [{"repeat": {"count": 10001, "tracks": [10]}}]),
+        ("gridTemplateColumns", [{"repeat": {"count": 2, "tracks": [
+            {"repeat": {"count": 2, "tracks": [10]}}]}}]),
+        ("gridTemplateColumns", [{"repeat": {"count": "auto-fill", "tracks": [{"fr": 1}]}}]),
+        ("gridTemplateColumns", [{"repeat": {"count": "auto-fit", "tracks": [10]}},
+                                 {"repeat": {"count": "auto-fill", "tracks": [20]}}]),
+        ("gridAutoRows", []), ("gridAutoColumns", [{"names": ["a"]}]),
+        ("gridAutoRows", {"repeat": {"count": 2, "tracks": [10]}}),
+        ("gridTemplateAreas", [["a", "a"], ["a", "."]]),
+        ("gridTemplateAreas", [["a"], ["a", "b"]]),
+        ("gridTemplateAreas", [["bad name"]]),
+        ("gridAutoFlow", "dense"), ("gridAutoFlow", "row column"),
+        ("gridRowStart", 0), ("gridColumnEnd", 0.5),
+        ("gridRowEnd", {"span": 0}), ("gridRowStart", {"line": 0}),
+        ("gridRowStart", {"span": 2, "line": 1}),
+        ("gridColumnStart", "span"), ("gridColumnEnd", "bad name"),
+        ("gridRow", [1, 2]), ("grid", {}),
+    ]
+    for field, invalid in grid_invalid:
+        style = {"display": "grid", field: invalid}
+        malformed.append(json.dumps({**request, "nodes": [
+            {"parent": None, "style": style}]}).encode())
+        malformed.append(json.dumps({**request, "updates": {
+            "iterations": 1, "cycle": [{"set": [{"node": 0, "style": style}]}]}}).encode())
+    for value in [[{"fr": "1e999"}], [{"percent": "1e999"}],
+                  [{"length": 0, "percent": "1e999"}]]:
+        malformed.append(json.dumps({**request, "nodes": [
+            {"parent": None, "style": {"gridTemplateColumns": value}}]
+        }).replace('"1e999"', "1e999").encode())
     metrics = {"horizontal": 12, "vertical": 15, "overlay": False,
         "horizontalOnTop": False, "verticalOnLeft": False}
     host = {"auto": metrics, "thin": metrics}
@@ -152,6 +193,51 @@ def main():
     assert output["boxes"][source["firstBox"]]["source"] == 0
     assert output["fragments"] and source["rects"]
     assert "hasFirstBaseline" in source and "hasLastBaseline" in source and "hasBaseline" not in source
+    # Phase 1 stores all template forms but intentionally uses source-order
+    # single-column layout (Grid 2 §6.1 item generation, not track sizing).
+    grid_style = {
+        "display": "grid",
+        "gridTemplateColumns": [{"names": ["edge"]},
+            {"repeat": {"count": 2, "tracks": [
+                {"minmax": [10, {"fr": 1}]}, {"names": ["inner"]}]}},
+            {"fitContent": {"percent": 0.5}}, {"length": -10, "percent": 0.5},
+            {"length": 20, "percent": -0.1}],
+        "gridTemplateRows": [{"repeat": {"count": "auto-fit", "tracks": [10]}}],
+        "gridTemplateAreas": [["auto", "auto"], ["1a", "right"]],
+        "gridAutoRows": ["auto", "min-content", "max-content"],
+        "gridAutoColumns": {"fr": 0}, "gridAutoFlow": "column dense",
+        "gridRowStart": {"line": -1, "name": "none"},
+        "gridRowEnd": {"span": 2, "name": "inner"},
+        "gridColumnStart": "head", "gridColumnEnd": "auto",
+    }
+    for display in ["grid", "block grid", "inline-grid", "inline grid"]:
+        grid_request = {**request, "nodes": [
+            {"parent": None, "style": {**grid_style, "display": display, "width": 80}},
+            {"parent": 0, "style": {"height": 10}},
+            {"parent": 0, "style": {"height": 20}}]}
+        completed = subprocess.run([executable], input=json.dumps(grid_request).encode(),
+                                   capture_output=True, timeout=10, check=True)
+        grid_output = json.loads(completed.stdout)
+        assert grid_output["boxes"][grid_output["sources"][0]["firstBox"]]["kind"] == "grid"
+        assert [(item["x"], item["y"], item["height"]) for item in grid_output["sources"][1:]] == [
+            (0, 0, 10), (0, 10, 20)]
+        # Initial and whole-style update paths must accept the same schema and
+        # reset omitted grid longhands, with kept output equal to a fresh tree.
+        replacement = {**grid_style, "display": display, "width": 90,
+                       "gridTemplateRows": "none", "gridTemplateAreas": [],
+                       "gridAutoRows": {"length": 3, "percent": 0.25},
+                       "gridAutoFlow": "row dense", "gridRowStart": 10001}
+        updated_request = {**grid_request, "updates": {"iterations": 3, "cycle": [
+            {"set": [{"node": 0, "style": replacement}]},
+            {"set": [{"node": 0, "style": {"display": display, "width": 90}}]},
+            {"set": [{"node": 0, "style": replacement}]}]}}
+        updated = subprocess.run([executable], input=json.dumps(updated_request).encode(),
+                                 capture_output=True, timeout=10, check=True)
+        fresh_request = {**grid_request, "nodes": [
+            {"parent": None, "style": replacement}, *grid_request["nodes"][1:]]}
+        fresh = subprocess.run([executable], input=json.dumps(fresh_request).encode(),
+                               capture_output=True, timeout=10, check=True)
+        assert json.loads(updated.stdout) == json.loads(fresh.stdout)
     # Exhaustion is a typed driver error, never an implicit repeating fallback.
     fragmented_request = {**request, "fragmentation": fragmentation,
                           "nodes": [{"parent": None, "style": {"height": 120}}]}

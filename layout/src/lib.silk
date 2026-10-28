@@ -1,6 +1,7 @@
 pub import style { Style, Dimension, DimensionKind, Edges, Display, DisplayOutside, DisplayInside, BoxSizing, Direction, UnicodeBidi, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, Overflow, ScrollbarWidth, ScrollbarGutter, Position, Float, Clear, Visibility, LineHeight, VerticalAlignKind, VerticalAlign, BaselineSource, TextAlign, TextWrap, BoxDecorationBreak }
 pub import style { WhiteSpaceCollapse, TabSize, TextJustify, TextIndent }
 pub import style { BreakBetween, BreakInside, MarginBreak }
+pub import grid_style { MAX_GRID_TRACKS, GridError, GridLineKind, GridLine, GridPlacement, GridBreadthKind, GridBreadth, GridTrackKind, GridTrack, GridNamedLine, GridRepeatKind, GridRepeat, GridAxis, GridArea, GridAutoFlow, GridTemplate, validGridName }
 pub import geometry { Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, LineSpace, MeasureRequest, Measured, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, BaselineSet, FontMetrics, Measure, Layout }
 pub import text { TextError, TextTokenKind, TextToken, TextContext, TextCursor, TextRange, TextBreakKind, TextBreak, TextLevel, TextParagraph, TextAnalysis, TextShapeRequest, TextRun, TextMeasure }
 pub import tree { Tree, NodeId, InvalidNode, BoxId, InvalidBox, LayoutTree, LayoutStats, SourceRects, Measurement, SourceContent }

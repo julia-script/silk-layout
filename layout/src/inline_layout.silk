@@ -83,7 +83,7 @@ fn alignmentShift(style: &Style, lineHeight: f64, parent: &FontBox, mode: Writin
 fn atomicBaseline(style: &Style, layout: &Layout, axes: &Axes, margin: ResolvedEdges, parent: &Style) -> f64 {
   let size = axes.size(layout.size)
   let childAxes = Axes.make(style.writingMode)
-  let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && style.display.insideIs(DisplayInside.Flex))
+  let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && (style.display.insideIs(DisplayInside.Flex) || style.display.insideIs(DisplayInside.Grid)))
   let available = (first && layout.hasFirstBaseline) || (!first && layout.hasLastBaseline)
   if childAxes.vertical == axes.vertical && available {
     let mut baseline = 0.0
@@ -241,7 +241,7 @@ effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   let mut baselineFromMargin = false
   if item.kind == ItemKind.Atomic {
     baseline = atomicBaseline(style, &layout, &axes, resolved.margin, parentStyle)
-    let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && style.display.insideIs(DisplayInside.Flex))
+    let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && (style.display.insideIs(DisplayInside.Flex) || style.display.insideIs(DisplayInside.Grid)))
     baselineFromMargin = Axes.make(style.writingMode).vertical != axes.vertical || !((first && layout.hasFirstBaseline) || (!first && layout.hasLastBaseline))
   }
   item.leaf = atomics.length()

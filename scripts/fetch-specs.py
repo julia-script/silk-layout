@@ -26,7 +26,7 @@ URLS = {
     **{f"css22-{chapter}": f"https://www.w3.org/TR/CSS22/{chapter}.html"
        for chapter in ["conform", "box", "visuren", "visudet", "visufx", "page", "text", "tables"]},
     **{name: f"https://drafts.csswg.org/{name}/" for name in [
-        "css-flexbox-1", "css-display-3", "css-display-4", "css-box-3",
+        "css-flexbox-1", "css-grid-2", "css-display-3", "css-display-4", "css-box-3",
         "css-sizing-3", "css-sizing-4", "css-align-3", "css-writing-modes-4",
         "css-overflow-3", "css-overflow-4", "css-position-3", "css-break-3", "css-break-4",
         "css-values-3", "css-values-4", "css-logical-1", "css-inline-3",
@@ -52,14 +52,23 @@ def fetch(item):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update", action="store_true", help="explicitly refresh the standards baseline")
+    parser.add_argument("--only", action="append", choices=sorted(URLS),
+                        help="fetch only this reference; repeat for more (with --update, preserve other lock records)")
     args = parser.parse_args()
     pinned = json.loads(LOCK.read_text()) if LOCK.exists() else None
     if pinned is None and not args.update:
         parser.error("no lockfile; use --update to establish the reference baseline")
+    if args.update and args.only and pinned is None:
+        parser.error("a selective update requires an existing lockfile")
     CACHE.mkdir(parents=True, exist_ok=True)
     urls = URLS if args.update else {key: value["url"] for key, value in pinned["specs"].items()}
+    if args.only:
+        missing = set(args.only) - urls.keys()
+        if missing:
+            parser.error(f"references not pinned: {', '.join(sorted(missing))}; use --update")
+        urls = {name: urls[name] for name in args.only}
     pending = {}
-    records = {}
+    records = dict(pinned["specs"]) if args.update and args.only else {}
     for name, url in urls.items():
         cached = CACHE / f"{name}.html"
         if not args.update and cached.exists() and hashlib.sha256(cached.read_bytes()).hexdigest() == pinned["specs"][name]["sha256"]:
@@ -75,7 +84,8 @@ def main():
             print(f"{name}: {len(body)} bytes {record['sha256']}")
     if args.update:
         LOCK.write_text(json.dumps({"format": 1, "specs": dict(sorted(records.items()))}, indent=2) + "\n")
-    print(f"Verified {len(records)} specifications in {CACHE}")
+    action = "Updated" if args.update else "Verified"
+    print(f"{action} {len(urls)} specifications in {CACHE}; {len(records)} lock records retained")
 
 
 if __name__ == "__main__":

@@ -553,17 +553,9 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return Option<Layout>.None }
     if !beside && slot.floatCount != 0 { return Option<Layout>.None }
     if slot.end > self.previous.fragments.values.length() || id >= self.previous.fragments.boxCount() || self.previous.fragments.first(id) != slot.start || (!self.inPlace && self.previous.boxes.length() != self.boxes.length) { return Option<Layout>.None }
-    let previous = self.previous.fragments.values.asSlice()
-    let mut index = slot.start
-    while index < slot.end {
-      let parent = previous[index].parent
-      if index > slot.start && (parent < slot.start || parent >= index) { return Option<Layout>.None }
-      // Positioning appends after normal flow; no copied link may reach it.
-      if previous[index].lastChild != NO_NODE && previous[index].lastChild >= slot.end { return Option<Layout>.None }
-      index = index + 1
-    }
     let base = self.fragments.checkpoint()
-    run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent)
+    // Positioning appends after normal flow; no copied link may reach it.
+    if !run self.fragments.appendRange(&self.previous.fragments, slot.start, slot.end, self.fragmentParent) { return Option<Layout>.None }
     run self.restoreBoxes(nodes, id, slot, base)
     let layout = self.cache.result(id).layout
     run self.store(id, &layout, true)

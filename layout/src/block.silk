@@ -287,6 +287,9 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   let mut leadingBoundary = BreakBoundary.none()
   let mut candidate = Option<Candidate>.None
   let mut current = Child { id: NO_NODE, margin: ResolvedEdges.zero(), inset: ResolvedEdges.zero(), input: childBase, width: 0.0, parallel: false }
+  // Every path that reads childLayout lays the child out first, so one zeroed
+  // value serves all children instead of zeroing 480 bytes per child.
+  let mut childLayout = Layout.zero()
   while index < children.length() || ((lazy || streaming) && childId != NO_NODE) {
     if streaming {
       current = prepareChild(nodes, childId, &childBase, axes, &box, availableInline, false)
@@ -394,7 +397,6 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
         continue
       }
     }
-    let mut childLayout = Layout.zero()
     let mut x = inlineOffset(childStyle, &item.input, &axes, style.usedDirection(), item.margin, item.width, contentWidth)
     let mut y = cursor
     let mut inlineStart = 0.0
@@ -513,17 +515,18 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       y = max(y, clearMinimum)
       let mut placed = false
       while !placed {
-        let mut childInput = item.input
+        // The item is this pass's own copy, so the attempt's placement is written into it
+        // directly; a shrink-to-fit relayout below restores the container's origin.
         if fragmented {
-          childInput.fragmentation.offset = input.fragmentation.offset + box.inset.top + y
-          childInput.fragmentation.limit = input.fragmentation.limit - box.inset.bottom
+          item.input.fragmentation.offset = input.fragmentation.offset + box.inset.top + y
+          item.input.fragmentation.limit = input.fragmentation.limit - box.inset.bottom
         }
-        childInput.bfcContentOrigin = Point { x: origin.x + x + item.inset.left, y: origin.y + y + item.inset.top }
+        item.input.bfcContentOrigin = Point { x: origin.x + x + item.inset.left, y: origin.y + y + item.inset.top }
         bfc.sourceFloor = max(bfc.sourceFloor, origin.y + y - item.margin.top)
         if independent {
-          childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &childInput)
+          childLayout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &item.input)
         } else {
-          childLayout = run layoutInFlow(nodes, &mut output, &mut measurer, item.id, &childInput, &mut bfc)
+          childLayout = run layoutInFlow(nodes, &mut output, &mut measurer, item.id, &item.input, &mut bfc)
         }
         childLayout.size = axes.size(childLayout.size)
         if fragmented {
@@ -579,6 +582,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
         while !fits {
           if autoWidth || (fragmented && layoutY != y) {
             let mut bfcInput = item.input
+            bfcInput.bfcContentOrigin = childBase.bfcContentOrigin
             if autoWidth {
               let available = band.right - band.left
               if axes.vertical {

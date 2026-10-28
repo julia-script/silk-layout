@@ -7,7 +7,7 @@ import silk.option { Option }
 import text { TextMeasure, TextError, TextContext, TextTokenKind, TextCursor, TextBreak, TextBreakKind, TextLevel, TextAnalysis, TextShapeRequest, TextRun }
 import silk.effect { Effect }
 import silk.testing { Testing, AssertionError }
-import style { Style, Dimension, DimensionKind, Edges, Float, Display, DisplayOutside, DisplayInside, Position, BoxSizing, TextAlign, TextWrap, Direction, WhiteSpaceCollapse, TabSize, BoxDecorationBreak }
+import style { Style, Dimension, DimensionKind, Edges, Float, Display, DisplayOutside, DisplayInside, Position, BoxSizing, TextAlign, TextWrap, Direction, WhiteSpaceCollapse, TabSize, BoxDecorationBreak, FlexDirection }
 import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize, AvailableKind, max, min, abs }
 import tree { Tree, LayoutTree, InvalidNode, NO_NODE }
 import engine { compute }
@@ -722,4 +722,23 @@ test effect fn insertedNodesKeepTheirSiblingsLayouts() ! OutOfMemoryError | Text
     run Testing.expect(a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height, "an insertion lays out like a fresh tree")
     index = index + 1
   }
+}
+
+test effect fn columnItemsShareTheirBlockAxisProbes() ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  style.flexDirection = FlexDirection.Column
+  style.width = Dimension.px(300.0)
+  let mut tree = run Tree.make(move style) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let item = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  run tree.setMeasurement(item, 0)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 20.0, maximum: 60.0, height: 18.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(800.0, 600.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  // Sizing §5.1: the item's min-content and max-content heights are equal, so
+  // the automatic minimum reuses the flex base probe.
+  run Testing.expect(output.stats.sizeProbes == 1 && output.stats.cacheHits == 1, "a column item's min-content height reuses its max-content probe")
+  run Testing.expect(output.boxes.get(output.firstBySource.get(item.index)).size.height == 18.0, "the item keeps its content height")
 }

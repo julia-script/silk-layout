@@ -200,6 +200,9 @@ pub struct LayoutCache {
   // whether it compacted floats, and how many ranges this compute stamped
   // and has not adopted (see adoptRange).
   rotatedTouched: usize, rotatedFloats: bool, stamped: usize,
+  // Whether this compute records no ranges or results (see skipFinals), and
+  // whether the ranges were reset since one last did.
+  skipping: bool, rangesReset: bool,
   // Float lists of ranges, appended to; `floatsCompacted` is the length
   // after the last compaction.
   floats: List<FloatBox>, floatsCompacted: usize,
@@ -210,7 +213,7 @@ pub struct LayoutCache {
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, skipping: false, rangesReset: false, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
@@ -302,10 +305,25 @@ impl LayoutCache {
       self.stamped = self.stamped + added
     }
   }
+  // Makes this compute record no ranges or results, which only a later
+  // compute could reuse, when `skip`; the previous ones' are dropped, so no
+  // later compute reads a range this one overwrote. Call it before
+  // reserveBoxes.
+  pub fn skipFinals(self: &mut Self, skip: bool) {
+    self.skipping = skip
+    if !skip {
+      self.rangesReset = false
+      return
+    }
+    if self.rangesReset { return }
+    self.ranges.clear()
+    self.rangesReset = true
+  }
+  pub fn recording(self: &Self) -> bool with Intrinsic.inlineAlways() { return !self.skipping }
   // A box is being laid out again: it has no range of this compute until it
   // records one.
   pub effect fn beginLayout(self: &mut Self, id: usize) ! OutOfMemoryError ? &mut Allocator {
-    if id >= self.ranges.length() { return }
+    if self.skipping || id >= self.ranges.length() { return }
     let ranges = &self.ranges.asSlice()[id]
     if ranges.stamp == self.generation && !ranges.range.valid { return }
     run self.writeRange(id, FinalRange.none())
@@ -331,6 +349,7 @@ impl LayoutCache {
     }
   }
   pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, end: usize, floats: &[FloatBox], beside: bool) ! OutOfMemoryError ? &mut Allocator {
+    if self.skipping { return }
     if floats.length != 0 || id >= self.results.length() || id >= self.ranges.length() {
       run self.recordFinalGrowing(id, input, layout, start, end, floats, beside)
       return

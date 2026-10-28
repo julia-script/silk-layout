@@ -604,6 +604,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // [start, current end), if its own fragment opens the range.
   // `beside` says the box was laid out beside the floats in floatContext.
   pub effect fn recordFinal(self: &mut Self, id: usize, input: &Input, layout: &Layout, start: usize, beside: bool) ! OutOfMemoryError ? &mut Allocator {
+    if !self.cache.recording() { return }
     let end = self.fragments.checkpoint()
     if start >= end || self.fragments.first(id) != start { return }
     let fragment = &self.fragments.values.asSlice()[start]

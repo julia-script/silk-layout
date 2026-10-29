@@ -32,15 +32,15 @@ The integrated regression gates pass the following focused corpus. These counts 
 
 | Coverage | Passing cases |
 |---|---:|
-| Native layout tests | 271 |
+| Native layout tests | 277 |
 | Malformed adapter requests | 241 |
 | Adapter bidi cases | 9 |
-| Normative specification fixtures | 646 |
-| Fixed Chrome-agreement fixtures | 281 |
+| Normative specification fixtures | 664 |
+| Fixed Chrome-agreement fixtures | 283 |
 | Retained-versus-fresh update scenarios | 10,273 |
 | Random update cycles, 200 seeds in each of five modes | 1,000 |
 
-Grid accounts for 195 specification fixtures and 170 fixed Chrome agreements. The separate 200-case Grid and 200-case legacy Chrome fuzz streams retain the explicitly documented differences below; their nonzero diagnostic result is not counted as passing conformance.
+Grid accounts for 213 specification fixtures and 172 fixed Chrome agreements. The separate 200-case Grid and 200-case legacy Chrome fuzz streams retain the explicitly documented differences below; their nonzero diagnostic result is not counted as passing conformance.
 
 Geometry uses the engine's `f32` representation. General overflow unions discard rectangles with either extent below 1/64px; the Grid track-extent path still permits a zero-sized opposite axis. This precision policy can omit real narrow overflow and is not exact real-arithmetic propagation. Browser geometry comparisons retain their 0.05px tolerance; the `f32` migration changes last-bit values in earlier diagnostic measurements without changing their specification choices.
 
@@ -78,7 +78,11 @@ Auto lines use the scrollable padding boundary on scrollable axes. [Position 4 �
 
 Twenty-two original native cases cover resolver/projection boundaries, retained lifecycle, sibling areas, placement/template edits, remapping, mode transitions and fixed grids on differently sized pages. Thirty-one hand-derived specification scenes exercise the positioned CLI path; 28 agree with Chrome 155 and three retain the normative differences recorded below. Position 3 source revision `8c141afe47996f98bcfacf26c6771f183540d70e` predates the existing lock; its grid static-position refinement is not a standards-baseline update.
 
-Grid containers are **monolithic in fragmented layout**: internal row breaks and grid-specific break propagation from [Grid §13](https://drafts.csswg.org/css-grid-2/#pagination) are not implemented. This is a known coverage gap, not a specification-permitted substitute for the grid fragmentation algorithm.
+Grid fragmentation implements row-boundary breaks and item `break-before`/`break-after` propagation under [Grid §13](https://drafts.csswg.org/css-grid-2/#pagination). First/last occupied-edge controls propagate to the container; an internal forced break in one item does not force its parallel siblings. Spanning items resume independently of row reservations. Gutters disappear across breaks, while distributed alignment space retains fractional progress. Baseline export considers only items published in the current fragment. Grid no longer has a blanket monolithic policy; the ordinary replaced, orthogonal, scroll/clipping and other Break 3 monolithic rules still apply.
+
+Grid §13 deliberately leaves the exact fragmented layout undefined. The implementation uses continuous track sizing followed by row reservation and independent item fragmentation, with growth for intrinsic-minimum rows and indefinite flexible rows as suggested by the non-normative [§13.1 sample algorithm](https://drafts.csswg.org/css-grid-2/#fragmentation-alg). Row-spanning items do not trigger that row-growth decision. Accepted automatic-repeat counts remain fixed across a fragmented compute so varying page inline sizes do not move already-placed items to different rows; track sizes still adapt to each actual frame. This repeat-count choice is an engine policy, not a uniquely mandated Grid algorithm.
+
+Fragmented positioned grids retain each accepted fragment's inline track geometry and the continuous row-line positions after breaks. Absolute area percentages and static alignment use the current page's columns, including when later pages have different inline sizes. Positioning-only continuations obtain fresh allocation from a checkpointed Grid probe, retaining its pooled geometry while discarding speculative layouts and publications. Joined containing areas use the first frame-start and final frame-end decoration edges; this also applies when the grid and fragmentainers have opposite parallel block directions.
 
 Grid probes and final layout share item placement across retained computes, keyed by box identity and both resolved automatic repetition counts. A changed count rebuilds expanded names, placement and auto-fit occupancy. `LayoutCache.gridMemos` owns the existing pooled item/track buffers and sparse-row occupancy bitmaps; `clearBox` invalidates a changed container and `remap` clears identities without discarding capacity. Only occupied rows receive bitmap words, and fully definite grids do not build occupancy. Expanded-template storage is lazy; ordinary numeric grids borrow authored tracks without copying them. Placement and sizing scratch share an owned lease, so retaining placement adds no list copies or second scratch allocation. Track sizes are recomputed for each request. Fragmented computes still invalidate retained results, but preserve their scratch capacity.
 

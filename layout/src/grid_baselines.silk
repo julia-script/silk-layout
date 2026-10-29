@@ -683,6 +683,14 @@ pub fn gridBefore(
     || row == otherRow && (column < otherColumn || column == otherColumn && order < otherOrder)
 }
 
+fn visibleInFragment(output: &LayoutPass, id: usize, static fragmented: bool) -> bool {
+  if !fragmented {
+    return true
+  }
+  let state = output.resumes.get(id)
+  return state.fragmentainer == output.frame && state.fragment != NO_NODE && !state.skipped
+}
+
 // Grid 2 §11.6. Stored item tables are already initial-scroll-position tables
 // (engine's baseline normalization); location is unscrolled border-box position.
 // Only sharing-group exports generate a new table from the container's font.
@@ -694,15 +702,24 @@ pub fn containerBaselines<M: Measure>(
   parent: &Style,
   scratch: &GridBaselines,
   result: &mut Layout,
+  static fragmented: bool,
 ) {
-  if items.length == 0 {
+  let mut first: usize = 0
+  while first < items.length && !visibleInFragment(output, items[first].id, fragmented) {
+    first = first + 1
+  }
+  if first == items.length {
     return
   }
   let horizontal = parent.writingMode != WritingMode.HorizontalTb
-  let mut firstTrack = items[0].row.start
-  let mut lastTrack = items[0].row.end - 1
-  let mut index: usize = 1
+  let mut firstTrack = items[first].row.start
+  let mut lastTrack = items[first].row.end - 1
+  let mut index = first + 1
   while index < items.length {
+    if !visibleInFragment(output, items[index].id, fragmented) {
+      index = index + 1
+      continue
+    }
     if items[index].row.start < firstTrack {
       firstTrack = items[index].row.start
     }
@@ -726,6 +743,10 @@ pub fn containerBaselines<M: Measure>(
     index = 0
     while index < items.length {
       let item = &items[index]
+      if !visibleInFragment(output, item.id, fragmented) {
+        index = index + 1
+        continue
+      }
       let layout = &output.boxes[item.id]
       let compatible = (nodes.style(item.id).writingMode != WritingMode.HorizontalTb) == horizontal
       let hasBaseline = layout.hasFirstBaseline || layout.hasLastBaseline

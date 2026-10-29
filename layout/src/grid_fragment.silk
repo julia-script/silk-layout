@@ -1,0 +1,919 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.option { Option }
+import silk.core.ownership { Copy }
+import silk.num.i32
+import axes { Axes }
+import box_tree { BoxTree }
+import context { Input, ResolvedBox, UNBOUNDED }
+import geometry { Layout, Size, Point, Rect, OptionalSize, AvailableSpace, Measure, max, min }
+import style { Style, Direction, DimensionKind, MarginBreak, BoxDecorationBreak }
+import text { TextMeasure, TextError }
+import tree { NO_NODE }
+import fragmentation {
+  FragmentationError,
+  FragmentInput,
+  BoundaryProbe,
+  FlowCursor,
+  ResumeCheckpoint
+}
+import breaks { BreakBoundary, ForcedBreaks, BreakRelaxation, FractionalProgress }
+import fragment_box as FragmentBox
+import layout_pass { LayoutPass }
+import engine { probeNode, layoutNode, layoutNodeInPlace }
+import grid { requestItem }
+import grid_placement { GridItem }
+import grid_tracks { TrackState, spanSize }
+import grid_style { GridBreadthKind }
+import grid_alignment { alignItem }
+import grid_baselines as Baselines
+import grid_baselines { GridBaselines }
+import grid_fragment_scratch { FragmentItem, GridFragmentScratch }
+
+pub struct FragmentGrid<'a> {
+  pub items: &'a [GridItem],
+  pub columns: &'a [TrackState],
+  pub rows: &'a [TrackState],
+  pub axis: Axes,
+  pub inlineSize: f32,
+  pub inlineExtent: f32,
+  pub columnGap: f32,
+  pub rowGap: f32,
+  pub blockDefinite: bool,
+  pub columnRepeat: usize,
+  pub rowRepeat: usize,
+}
+
+fn itemBoundary(
+  nodes: &BoxTree,
+  output: &LayoutPass,
+  item: &GridItem,
+  before: bool,
+  recto: bool,
+) -> BreakBoundary {
+  let state = output.resumes.get(item.id)
+  let mut boundary = FragmentBox.boundary(nodes, item.id, before, output.frames.kind, recto)
+  if before {
+    boundary.merge(state.before)
+  } else {
+    boundary.merge(state.after)
+  }
+  return boundary
+}
+
+// Only an item's leading/trailing occupied row owns its boundary controls.
+// Crossing a spanning item does not replay that item's break-before/after.
+pub fn outerBoundary(
+  nodes: &BoxTree,
+  output: &LayoutPass,
+  items: &[GridItem],
+  rowCount: usize,
+  before: bool,
+  recto: bool,
+) -> BreakBoundary {
+  let mut boundary = BreakBoundary.none()
+  let mut index: usize = 0
+  while index < items.length {
+    let item = &items[index]
+    if before && item.row.start == 0 || !before && i32.toUsize(item.row.end) == rowCount {
+      boundary.merge(itemBoundary(nodes, output, item, before, recto))
+    }
+    index = index + 1
+  }
+  return boundary
+}
+
+fn rowBoundary(
+  nodes: &BoxTree,
+  output: &LayoutPass,
+  grid: &FragmentGrid,
+  scratch: &GridFragmentScratch,
+  row: usize,
+  before: bool,
+  recto: bool,
+) -> BreakBoundary {
+  let mut boundary = BreakBoundary.none()
+  let mut index = scratch.rows.asSlice()[row].firstStart
+  if !before {
+    index = scratch.rows.asSlice()[row].firstEnd
+  }
+  while index != NO_NODE {
+    boundary.merge(itemBoundary(nodes, output, &grid.items[index], before, recto))
+    if before {
+      index = scratch.items.asSlice()[index].nextStart
+    } else {
+      index = scratch.items.asSlice()[index].nextEnd
+    }
+  }
+  return boundary
+}
+
+// Retain only allocation-owned scalars. The rest of Input comes from the same
+// childrenInput base; no per-item Input or complete Layout vector is necessary.
+fn allocatedInput(
+  base: &Input,
+  grid: &FragmentGrid,
+  item: &GridItem,
+  allocation: &FragmentItem,
+) -> Input {
+  let width = spanSize(grid.columns, i32.toUsize(item.column.start), i32.toUsize(item.column.end))
+  let height = spanSize(grid.rows, i32.toUsize(item.row.start), i32.toUsize(item.row.end))
+  let mut request = base.*
+  request.blockify = true
+  request.blockRoot = true
+  request.shrinkToFit = true
+  request.parent = grid.axis.optional(OptionalSize.definite(width, height))
+  request.availableWidth = AvailableSpace.definite(request.parent.width)
+  request.availableHeight = AvailableSpace.definite(request.parent.height)
+  request.known = allocation.known
+  request.minimum = allocation.minimum
+  request.performLayout = true
+  return request
+}
+
+effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  id: usize,
+  input: &Input,
+  box: &ResolvedBox,
+  base: &Input,
+  grid: &FragmentGrid,
+  baselines: &mut GridBaselines,
+  scratch: &mut GridFragmentScratch,
+)
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
+  run scratch.prepare(grid.items, grid.rows.length)
+  let style = nodes.style(id)
+  let logical = grid.axis.box(box.*)
+  let sharing = baselines.any()
+  if sharing {
+    Baselines.resetFinal(&mut baselines)
+  }
+  let mut index: usize = 0
+  while index < grid.items.length {
+    let item = &grid.items[index]
+    let column = i32.toUsize(item.column.start)
+    let row = i32.toUsize(item.row.start)
+    let area = OptionalSize.definite(
+      spanSize(grid.columns, column, i32.toUsize(item.column.end)),
+      spanSize(grid.rows, row, i32.toUsize(item.row.end)),
+    )
+    let mut request = run requestItem(
+      nodes,
+      &mut output,
+      &mut measurer,
+      item,
+      base,
+      style,
+      &grid.axis,
+      grid.columns,
+      grid.rows,
+      grid.columnGap,
+      grid.rowGap,
+      area,
+    )
+    request.performLayout = false
+    request.baselines = input.baselines || Baselines.active(&baselines, index, true)
+      || Baselines.active(&baselines, index, false)
+    request.fragmentation = FragmentInput.continuous()
+    run probeNode(nodes, &mut output, &mut measurer, item.id, &request)
+    let allocation = &mut scratch.items.asMutSlice()[index]
+    allocation.known = request.known
+    allocation.minimum = request.minimum
+    allocation.size = grid.axis.size(output.boxes[item.id].size)
+    allocation.margin = output.boxes[item.id].usedMargin
+    if sharing {
+      let mut inlineInset = logical.inset.left
+      if style.usedDirection() == Direction.Rtl {
+        inlineInset = logical.inset.right
+      }
+      Baselines.captureFinal(
+        &mut baselines,
+        index,
+        nodes.style(item.id),
+        style,
+        &output.boxes[item.id],
+        Point {
+          x: inlineInset + grid.columns[column].position,
+          y: logical.inset.top + grid.rows[row].position,
+        },
+        Size { width: area.width, height: area.height },
+      )
+    }
+    index = index + 1
+  }
+  index = 0
+  while index < grid.items.length {
+    let item = &grid.items[index]
+    let column = i32.toUsize(item.column.start)
+    let row = i32.toUsize(item.row.start)
+    let allocation = &mut scratch.items.asMutSlice()[index]
+    let aligned = alignItem(
+      nodes.style(item.id),
+      style,
+      &grid.axis,
+      Size {
+        width: spanSize(grid.columns, column, i32.toUsize(item.column.end)),
+        height: spanSize(grid.rows, row, i32.toUsize(item.row.end)),
+      },
+      allocation.size,
+      allocation.margin,
+    )
+    allocation.margin = aligned.margin
+    let margin = grid.axis.edges(aligned.margin)
+    let mut inlineShift = aligned.inlineShift
+    let mut blockShift = aligned.blockShift
+    if sharing {
+      inlineShift = Baselines.shift(&baselines, index, true, inlineShift)
+      blockShift = Baselines.shift(&baselines, index, false, blockShift)
+    }
+    let mut inlineOffset = grid.columns[column].position + margin.left + inlineShift
+    if style.usedDirection() == Direction.Rtl {
+      inlineOffset = grid.inlineSize - grid.columns[column].position - margin.right
+        - allocation.size.width
+        - inlineShift
+    }
+    allocation.offset = Point {
+      x: inlineOffset,
+      y: grid.rows[row].position + margin.top + blockShift,
+    }
+    index = index + 1
+  }
+}
+
+effect fn discoverBefore<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  base: &Input,
+  grid: &FragmentGrid,
+  scratch: &GridFragmentScratch,
+  row: usize,
+)
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
+  let mut index = scratch.rows.asSlice()[row].firstStart
+  while index != NO_NODE {
+    let item = &grid.items[index]
+    if nodes.node(item.id).dynamicBefore && !output.resumes.get(item.id).beforeHandled {
+      let checkpoint = output.checkpoint()
+      let mut request = allocatedInput(base, grid, item, &scratch.items.asSlice()[index])
+      request.fragmentation.active = true
+      request.fragmentation.boundaryProbe = BoundaryProbe.Before
+      request.fragmentation.offset = 0.0
+      request.fragmentation.limit = UNBOUNDED
+      request.fragmentation.canBreakBefore = false
+      request.fragmentation.forcedStart = false
+      request.fragmentation.relaxation = BreakRelaxation.Avoidance
+      run layoutNodeInPlace(nodes, &mut output, &mut measurer, item.id, &request)
+      let before = output.resumes.get(item.id).before
+      output.restoreCheckpoint(checkpoint)
+      output.closeCheckpoint(checkpoint)
+      let mut state = output.resumes.get(item.id)
+      state.before.merge(before)
+      run output.resumes.set(item.id, state)
+    }
+    index = scratch.items.asSlice()[index].nextStart
+  }
+}
+
+effect fn handleBefore(
+  output: &mut LayoutPass,
+  grid: &FragmentGrid,
+  scratch: &GridFragmentScratch,
+  row: usize,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  let mut index = scratch.rows.asSlice()[row].firstStart
+  while index != NO_NODE {
+    let mut state = output.resumes.get(grid.items[index].id)
+    state.beforeHandled = true
+    run output.resumes.set(grid.items[index].id, state)
+    index = scratch.items.asSlice()[index].nextStart
+  }
+}
+
+struct ItemFit {
+  extent: f32,
+  fitted: bool,
+  ready: bool,
+  blocked: bool,
+  normalComplete: bool,
+  published: bool,
+}
+impl Copy for ItemFit {}
+
+effect fn fitItem<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  input: &Input,
+  base: &Input,
+  grid: &FragmentGrid,
+  scratch: &GridFragmentScratch,
+  index: usize,
+  rowStart: f32,
+  opening: f32,
+  ending: f32,
+  inlineInset: f32,
+  capacity: f32,
+  avoidedInside: bool,
+  overflowOnly: bool,
+  forcedStart: bool,
+  baselines: bool,
+) -> ItemFit
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
+  let item = &grid.items[index]
+  let allocation = &scratch.items.asSlice()[index]
+  let style = nodes.style(item.id)
+  let mut old = output.resumes.get(item.id)
+  let mut fit = ItemFit {
+    extent: 0.0,
+    fitted: false,
+    ready: !old.contentComplete && old.notBeforeFrame <= output.frame,
+    blocked: false,
+    normalComplete: old.normalComplete,
+    published: false,
+  }
+  if old.contentComplete {
+    return fit
+  }
+  let row = i32.toUsize(item.row.start)
+  let margin = grid.axis.edges(allocation.margin)
+  let explicitMargins = style.marginBreak != MarginBreak.Auto
+    && FragmentBox.applies(style, output.frames.writingMode)
+  let mut marginInput = input.fragmentation
+  marginInput.marginStart = input.fragmentation.marginStart && opening == 0.0 && rowStart == 0.0
+  marginInput.marginEnd = input.fragmentation.marginEnd && ending == 0.0
+    && i32.toUsize(item.row.end) == grid.rows.length
+  marginInput.forcedStart = forcedStart || old.requested.kinds.any()
+  let mut authoredStart = margin.top
+  let mut startDimension = style.margin.top
+  if grid.axis.vertical {
+    startDimension = style.margin.left
+    if grid.axis.reverseBlock {
+      startDimension = style.margin.right
+    }
+  }
+  if startDimension.kind == DimensionKind.Auto {
+    authoredStart = 0.0
+  }
+  let mut aligned = allocation.offset.y - grid.rows[row].position
+  if explicitMargins {
+    aligned = aligned - authoredStart
+  }
+  let mut blockMargin: f32 = 0.0
+  if !old.started && !overflowOnly && fit.ready {
+    if aligned < 0.0 {
+      blockMargin = aligned
+      drop old.alignmentLeading.consume(0.0, 0.0)
+    } else {
+      blockMargin = old.alignmentLeading.consume(aligned, max(0.0, capacity - rowStart))
+    }
+    if explicitMargins && old.alignmentLeading.remaining == 0.0 {
+      blockMargin = blockMargin
+        + FragmentBox.startMargin(style, authoredStart, old, marginInput, output.frames.writingMode)
+    }
+    run output.resumes.set(item.id, old)
+    fit.extent = max(0.0, blockMargin)
+    fit.fitted = blockMargin > 0.0
+  }
+  if !old.started && !overflowOnly
+    && (old.alignmentLeading.remaining > 0.0
+      || capacity > 0.0 && rowStart + blockMargin >= capacity && allocation.size.height > 0.0) {
+    fit.normalComplete = false
+    return fit
+  }
+  if old.started && explicitMargins {
+    blockMargin = FragmentBox.startMargin(
+      style,
+      authoredStart,
+      old,
+      marginInput,
+      output.frames.writingMode,
+    )
+  }
+  let mut request = allocatedInput(base, grid, item, allocation)
+  request.baselines = baselines
+  request.fragmentation = marginInput
+  request.fragmentation.active = true
+  request.fragmentation.offset = input.fragmentation.offset + opening + rowStart + blockMargin
+  request.fragmentation.limit = input.fragmentation.limit - ending
+  request.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || rowStart > 0.0
+  request.fragmentation.avoidInside = avoidedInside
+  let mut preferred = style.height
+  if grid.axis.vertical {
+    preferred = style.width
+  }
+  request.fragmentation.allocatedAutoExtent = preferred.kind == DimensionKind.Auto
+  let checkpoint = output.checkpoint()
+  let mut layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
+  let child = output.resumes.get(item.id)
+  if child.blocked {
+    output.restoreCheckpoint(checkpoint)
+    let mut deferred = output.resumes.get(item.id)
+    deferred.before.merge(child.before)
+    run output.resumes.set(item.id, deferred)
+    fit.blocked = true
+    fit.normalComplete = false
+  } else if !child.skipped {
+    fit.published = true
+    let extent = grid.axis.size(layout.size).height
+    fit.fitted = fit.fitted || extent > 0.0 || child.normalComplete
+    fit.normalComplete = child.normalComplete
+    if !overflowOnly && !old.normalComplete {
+      let mut trailing: f32 = 0.0
+      if child.normalComplete {
+        trailing = margin.bottom
+      }
+      if explicitMargins && style.marginBreak == MarginBreak.Discard
+        && (marginInput.marginEnd || rowStart + blockMargin + extent + trailing >= capacity) {
+        trailing = 0.0
+      }
+      if explicitMargins && !child.normalComplete && style.marginBreak == MarginBreak.Keep
+        && style.boxDecorationBreak == BoxDecorationBreak.Clone {
+        trailing = margin.bottom
+      }
+      fit.extent = max(fit.extent, blockMargin + extent + trailing)
+    }
+    layout.usedMargin = allocation.margin
+    let mut positive = grid.axis
+    positive.reverseBlock = false
+    layout.location = positive.physicalPoint(
+      Point { x: inlineInset + allocation.offset.x, y: opening + rowStart + blockMargin },
+      layout.size,
+      grid.axis.size(Size { width: grid.inlineExtent, height: 0.0 }),
+    )
+    run output.store(item.id, &layout, true)
+  }
+  output.closeCheckpoint(checkpoint)
+  return fit
+}
+
+// Grid §13: rows and item content are parallel progress domains. A spanning
+// item is entered once per frame, not once for every row that intersects it.
+pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  id: usize,
+  input: &Input,
+  box: &ResolvedBox,
+  base: &Input,
+  grid: &FragmentGrid,
+  baselines: &mut GridBaselines,
+  result: &mut Layout,
+  allocationCheckpoint: ResumeCheckpoint,
+)
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
+  let mut scratch = match move output.cache.gridMemos.fragmentScratch.pop() {
+    Option<GridFragmentScratch>.Some { value } => move value
+    Option<GridFragmentScratch>.None => GridFragmentScratch.make()
+  }
+  run prepareAllocations(
+    nodes,
+    &mut output,
+    &mut measurer,
+    id,
+    input,
+    box,
+    base,
+    grid,
+    &mut baselines,
+    &mut scratch,
+  )
+  output.resumes.restore(allocationCheckpoint, &mut output.boxes)
+  output.resumes.close(allocationCheckpoint)
+  let style = nodes.style(id)
+  let logical = grid.axis.box(box.*)
+  let opening = logical.inset.top
+  let ending = logical.inset.bottom
+  let capacity = max(0.0, input.fragmentation.limit - input.fragmentation.offset - opening - ending)
+  let avoidedInside = input.fragmentation.avoidInside
+    || input.fragmentation.avoidsInside(style.breakInside)
+  let mut initial = output.resumes.get(id)
+  if grid.rows.length > 0 && !initial.started && !initial.beforeHandled {
+    run discoverBefore(nodes, &mut output, &mut measurer, base, grid, &scratch, 0)
+  }
+  initial.before.merge(
+    outerBoundary(
+      nodes,
+      &output,
+      grid.items,
+      grid.rows.length,
+      true,
+      input.fragmentation.rectoOnRight,
+    ),
+  )
+  initial.after.merge(
+    outerBoundary(
+      nodes,
+      &output,
+      grid.items,
+      grid.rows.length,
+      false,
+      input.fragmentation.rectoOnRight,
+    ),
+  )
+  if input.fragmentation.boundaryProbe == BoundaryProbe.Before {
+    initial.normalContentComplete = true
+    initial.descendantsComplete = true
+    run output.resumes.set(id, initial)
+    result.* = Layout.zero()
+    run output.cache.gridMemos.fragmentScratch.append(move scratch)
+    return
+  }
+  let propagated = initial.before.forced.active(input.fragmentation.activeKinds())
+  if !initial.started && !initial.beforeHandled && input.fragmentation.canBreakBefore
+    && propagated.kinds.any() {
+    initial.blocked = true
+    initial.requested = propagated
+    run output.resumes.set(id, initial)
+    result.* = Layout.zero()
+    run output.cache.gridMemos.fragmentScratch.append(move scratch)
+    return
+  }
+  run output.resumes.set(id, initial)
+  let mut nextRow: usize = 0
+  let mut progress = FractionalProgress.make()
+  let mut gap = FractionalProgress.make()
+  let mut consumed: f32 = 0.0
+  let mut handled = false
+  match &initial.cursor {
+    FlowCursor.Grid {
+      row,
+      progress: savedProgress,
+      gap: savedGap,
+      columnRepeat,
+      rowRepeat,
+      consumed: savedConsumed,
+      boundaryHandled
+    } => {
+      drop columnRepeat
+      drop rowRepeat
+      nextRow = row
+      progress = savedProgress
+      gap = savedGap
+      consumed = savedConsumed
+      handled = boundaryHandled
+    }
+    _ => {}
+  }
+  let mut cursor: f32 = 0.0
+  let mut requested = ForcedBreaks.none()
+  let mut blocked = false
+  let mut published = false
+  let mut ready = false
+  let mut waiting = false
+  let mut before = initial.before
+  let needBaselines = input.baselines || baselines.any()
+  let forcedStart = input.fragmentation.forcedStart || initial.requested.kinds.any()
+  let mut index: usize = 0
+  while index < grid.items.length {
+    if i32.toUsize(grid.items[index].row.start) < nextRow
+      && !output.resumes.get(grid.items[index].id).contentComplete {
+      let fit = run fitItem(
+        nodes,
+        &mut output,
+        &mut measurer,
+        input,
+        base,
+        grid,
+        &scratch,
+        index,
+        0.0,
+        opening,
+        ending,
+        logical.inset.left,
+        capacity,
+        avoidedInside,
+        true,
+        forcedStart,
+        needBaselines,
+      )
+      published = published || fit.published
+      ready = ready || fit.ready
+      blocked = blocked || fit.blocked
+    }
+    index = index + 1
+  }
+  let mut fallback = output.checkpoint()
+  let mut fallbackCursor: f32 = 0.0
+  let mut fallbackRow = nextRow
+  let mut fallbackProgress = progress
+  let mut fallbackGap = gap
+  let mut fallbackHandled = handled
+  while nextRow < grid.rows.length && !blocked {
+    let row = nextRow
+    run discoverBefore(nodes, &mut output, &mut measurer, base, grid, &scratch, row)
+    let mut boundary = rowBoundary(
+      nodes,
+      &output,
+      grid,
+      &scratch,
+      row,
+      true,
+      input.fragmentation.rectoOnRight,
+    )
+    if row > 0 {
+      let mut previous = rowBoundary(
+        nodes,
+        &output,
+        grid,
+        &scratch,
+        row - 1,
+        false,
+        input.fragmentation.rectoOnRight,
+      )
+      previous.merge(boundary)
+      boundary = previous
+    } else {
+      before.merge(boundary)
+      handled = handled || initial.beforeHandled || !input.fragmentation.canBreakBefore
+    }
+    let forced = boundary.forced.active(input.fragmentation.activeKinds())
+    if !handled && forced.kinds.any() {
+      if row == 0 {
+        blocked = true
+      } else {
+        run handleBefore(&mut output, grid, &scratch, row)
+        handled = true
+        requested = forced
+      }
+      break
+    }
+    let mut boundaryAllowed = !avoidedInside
+      && !boundary.avoided.intersects(input.fragmentation.boundaryKinds)
+      || input.fragmentation.relaxation == BreakRelaxation.Avoidance
+      || forced.kinds.any()
+    let savedGap = gap
+    let mut spacing = grid.rows[row].position
+    let mut gutter: f32 = 0.0
+    if row > 0 {
+      spacing = spacing - grid.rows[row - 1].position - grid.rows[row - 1].base
+      gutter = min(grid.rowGap, max(0.0, spacing))
+      spacing = spacing - gutter
+      if cursor <= 0.0 || gap.remaining != 1.0 {
+        gutter = 0.0
+      }
+      gutter = min(gutter, max(0.0, capacity - cursor))
+    }
+    let mut rowStart = cursor + gutter
+    if spacing < 0.0 && gap.remaining > 0.0 {
+      rowStart = rowStart + spacing
+      drop gap.consume(0.0, 0.0)
+    } else {
+      rowStart = rowStart + gap.consume(max(0.0, spacing), max(0.0, capacity - rowStart))
+    }
+    if gap.remaining > 0.0 {
+      cursor = rowStart
+      if !boundaryAllowed {
+        blocked = true
+      }
+      break
+    }
+    if capacity > 0.0 && rowStart >= capacity && grid.rows[row].base > 0.0 {
+      cursor = capacity
+      if !boundaryAllowed {
+        blocked = true
+      }
+      break
+    }
+    let checkpoint = output.checkpoint()
+    let mut retainedCheckpoint = false
+    let mut rowExtent: f32 = 0.0
+    let mut anyFit = false
+    let mut anyReady = false
+    let mut anyBlocked = false
+    let mut allNormal = true
+    let grows = grid.rows[row].minimum != GridBreadthKind.Length
+      || !grid.blockDefinite && grid.rows[row].maximum == GridBreadthKind.Flex
+    index = scratch.rows.asSlice()[row].firstStart
+    if handled {
+      run handleBefore(&mut output, grid, &scratch, row)
+    }
+    while index != NO_NODE {
+      let item = &grid.items[index]
+      let fit = run fitItem(
+        nodes,
+        &mut output,
+        &mut measurer,
+        input,
+        base,
+        grid,
+        &scratch,
+        index,
+        rowStart,
+        opening,
+        ending,
+        logical.inset.left,
+        capacity,
+        avoidedInside,
+        false,
+        forcedStart,
+        needBaselines,
+      )
+      published = published || fit.published
+      ready = ready || fit.ready
+      anyFit = anyFit || fit.fitted
+      anyReady = anyReady || fit.ready
+      anyBlocked = anyBlocked || fit.blocked
+      if i32.toUsize(item.row.end) == row + 1 {
+        rowExtent = max(rowExtent, fit.extent)
+        allNormal = allNormal && fit.normalComplete
+      }
+      index = scratch.items.asSlice()[index].nextStart
+    }
+    if !grows {
+      rowExtent = min(rowExtent, progress.resolve(grid.rows[row].base))
+    }
+    let discovered = rowBoundary(
+      nodes,
+      &output,
+      grid,
+      &scratch,
+      row,
+      true,
+      input.fragmentation.rectoOnRight,
+    )
+    if row == 0 {
+      before.merge(discovered)
+    }
+    boundary.merge(discovered)
+    let discoveredForced = discovered.forced.active(input.fragmentation.activeKinds())
+    boundaryAllowed = !avoidedInside
+      && !boundary.avoided.intersects(input.fragmentation.boundaryKinds)
+      || input.fragmentation.relaxation == BreakRelaxation.Avoidance
+      || boundary.forced.active(input.fragmentation.activeKinds()).kinds.any()
+    if !handled && discoveredForced.kinds.any() {
+      output.restoreCheckpoint(checkpoint)
+      if row == 0 {
+        blocked = true
+      } else {
+        run handleBefore(&mut output, grid, &scratch, row)
+        handled = true
+        requested = discoveredForced
+      }
+      output.closeCheckpoint(checkpoint)
+      break
+    }
+    if boundaryAllowed && cursor > 0.0 {
+      fallback = output.replaceCheckpoint(fallback, checkpoint)
+      fallbackCursor = cursor
+      fallbackRow = row
+      fallbackProgress = progress
+      fallbackGap = savedGap
+      fallbackHandled = handled
+      retainedCheckpoint = true
+    }
+    if anyBlocked
+      || !anyFit && !allNormal && (input.fragmentation.canBreakBefore || rowStart > 0.0) {
+      output.restoreCheckpoint(checkpoint)
+      if !retainedCheckpoint {
+        output.closeCheckpoint(checkpoint)
+      }
+      gap = savedGap
+      if rowStart == 0.0 || !boundaryAllowed {
+        blocked = true
+      }
+      break
+    }
+    if !anyReady && !allNormal {
+      if !retainedCheckpoint {
+        output.closeCheckpoint(checkpoint)
+      }
+      gap = savedGap
+      waiting = true
+      break
+    }
+    run handleBefore(&mut output, grid, &scratch, row)
+    handled = true
+    if !retainedCheckpoint {
+      output.closeCheckpoint(checkpoint)
+    }
+    let reserved = progress.consume(
+      grid.rows[row].base,
+      max(max(0.0, capacity - rowStart), rowExtent),
+    )
+    rowExtent = max(rowExtent, reserved)
+    cursor = rowStart + rowExtent
+    if progress.remaining > 0.0 || grows && !allNormal {
+      break
+    }
+    nextRow = nextRow + 1
+    progress = FractionalProgress.make()
+    gap = FractionalProgress.make()
+    handled = false
+  }
+  let forcedBefore = before.forced.active(input.fragmentation.activeKinds()).kinds.any()
+    && !initial.beforeHandled
+    && !initial.started
+  if blocked && fallbackCursor > 0.0 && !forcedBefore {
+    output.restoreCheckpoint(fallback)
+    cursor = fallbackCursor
+    nextRow = fallbackRow
+    progress = fallbackProgress
+    gap = fallbackGap
+    handled = fallbackHandled
+    blocked = false
+  }
+  output.closeCheckpoint(fallback)
+  let mut state = output.resumes.get(id)
+  state.before.merge(before)
+  state.after.merge(
+    outerBoundary(
+      nodes,
+      &output,
+      grid.items,
+      grid.rows.length,
+      false,
+      input.fragmentation.rectoOnRight,
+    ),
+  )
+  state.normalContentComplete = nextRow >= grid.rows.length
+  state.descendantsComplete = true
+  index = 0
+  while index < grid.items.length {
+    state.descendantsComplete = state.descendantsComplete
+      && output.resumes.get(grid.items[index].id).contentComplete
+    index = index + 1
+  }
+  waiting = waiting || !ready && !state.descendantsComplete
+  state.blocked = blocked
+  state.skipped = waiting && !published && cursor == 0.0
+  if !blocked && !state.normalContentComplete && cursor > 0.0 {
+    cursor = max(cursor, capacity)
+  }
+  state.cursor = FlowCursor.Grid {
+    row: nextRow,
+    progress: progress,
+    gap: gap,
+    columnRepeat: grid.columnRepeat,
+    rowRepeat: grid.rowRepeat,
+    consumed: consumed + max(0.0, cursor),
+    boundaryHandled: handled,
+  }
+  run output.resumes.set(id, state)
+  if requested.kinds.any() {
+    run output.defer(id, requested)
+  }
+  let extent = opening + cursor + ending
+  if grid.axis.vertical {
+    result.size.width = extent
+  } else {
+    result.size.height = extent
+  }
+  if grid.axis.reverseBlock {
+    index = 0
+    while index < grid.items.length {
+      let child = output.resumes.get(grid.items[index].id)
+      if child.fragmentainer == output.frame && child.fragment != NO_NODE && !child.skipped {
+        let mut layout = output.boxes[grid.items[index].id]
+        layout.location.x = extent - layout.location.x - layout.size.width
+        run output.store(grid.items[index].id, &layout, true)
+      }
+      index = index + 1
+    }
+  }
+  let mut inlineStart: f32 = 0.0
+  let mut inlineExtent: f32 = 0.0
+  if grid.columns.length > 0 {
+    inlineStart = grid.columns[0].position
+    inlineExtent = grid.columns[grid.columns.length - 1].position
+      + grid.columns[grid.columns.length - 1].base
+      - inlineStart
+  }
+  if style.usedDirection() == Direction.Rtl {
+    inlineStart = grid.inlineSize - inlineStart - inlineExtent
+  }
+  let overflowSize = grid.axis.size(Size { width: inlineExtent, height: max(0.0, cursor) })
+  let overflowPoint = grid.axis.physicalPoint(
+    Point { x: logical.inset.left + inlineStart, y: opening },
+    overflowSize,
+    result.size,
+  )
+  result.scrollableOverflow = Rect {
+    x: overflowPoint.x,
+    y: overflowPoint.y,
+    width: overflowSize.width,
+    height: overflowSize.height,
+  }
+  if input.baselines {
+    Baselines.containerBaselines(
+      nodes,
+      &output,
+      &mut measurer,
+      grid.items,
+      style,
+      &baselines,
+      &mut result,
+      true,
+    )
+  }
+  run output.cache.gridMemos.fragmentScratch.append(move scratch)
+}

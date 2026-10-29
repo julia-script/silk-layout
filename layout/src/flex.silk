@@ -442,8 +442,8 @@ effect fn collectLines(items: &[Item], count: usize, lines: &mut List<Line>, mai
   let mut used: f32 = 0.0
   let mut activeCount: usize = 0
   while index < count {
-    let item = items[index]
-    let present = active(&item, collapsed)
+    let item = &items[index]
+    let present = active(item, collapsed)
     let mut outer: f32 = 0.0
     let mut before: f32 = 0.0
     if present { outer = item.hypothetical + item.marginStart + item.marginEnd
@@ -498,15 +498,15 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collaps
   let space = main - gaps(line.count, gap)
   let mut hypothetical: f32 = 0.0
   let mut index = line.start
-  while index < line.end { let item = items[index]
-    if active(&item, collapsed) { hypothetical = hypothetical + item.hypothetical + item.marginStart + item.marginEnd }
+  while index < line.end { let item = &items[index]
+    if active(item, collapsed) { hypothetical = hypothetical + item.hypothetical + item.marginStart + item.marginEnd }
     index = index + 1 }
   let grow = hypothetical < space
   let mut initial = space
   index = line.start
   while index < line.end {
-    let mut item = items[index]
-    item.frozen = !active(&item, collapsed)
+    let item = &mut items[index]
+    item.frozen = (collapsed && item.collapsed)
     item.target = item.base
     let mut factor = item.shrink
     if grow { factor = item.grow }
@@ -514,8 +514,7 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collaps
       item.frozen = true
       item.target = item.hypothetical
     }
-    if active(&item, collapsed) { initial = initial - item.target - item.marginStart - item.marginEnd }
-    items[index] = item
+    if !collapsed || !item.collapsed { initial = initial - item.target - item.marginStart - item.marginEnd }
     index = index + 1
   }
   while true {
@@ -525,8 +524,8 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collaps
     let mut unfrozen: usize = 0
     index = line.start
     while index < line.end {
-      let item = items[index]
-      if active(&item, collapsed) {
+      let item = &items[index]
+      if active(item, collapsed) {
         remaining = remaining - item.marginStart - item.marginEnd
         if item.frozen { remaining = remaining - item.target }
         else {
@@ -545,7 +544,7 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collaps
     let mut violation: f32 = 0.0
     index = line.start
     while index < line.end {
-      let mut item = items[index]
+      let item = &mut items[index]
       if !item.frozen {
         let mut target = item.base
         if weights > 0.0 {
@@ -556,14 +555,12 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collaps
         item.violation = item.target - target
         violation = violation + item.violation
       }
-      items[index] = item
       index = index + 1
     }
     index = line.start
     while index < line.end {
-      let mut item = items[index]
+      let item = &mut items[index]
       if !item.frozen && (violation == 0.0 || (violation > 0.0 && item.violation > 0.0) || (violation < 0.0 && item.violation < 0.0)) { item.frozen = true }
-      items[index] = item
       index = index + 1
     }
   }

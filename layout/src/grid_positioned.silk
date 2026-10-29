@@ -124,10 +124,14 @@ pub effect fn allocateInheritedShell<'pass, 'source, M: Measure + TextMeasure>(
     input.indefiniteWidth = !allocation.widthDefinite
     input.indefiniteHeight = !allocation.heightDefinite
   }
-  let box = resolveBox(nodes.style(parent), &input)
+  let mut box = resolveBox(nodes.style(parent), &input)
   if !inheritedParent {
     input.known = OptionalSize.definite(metadata.content.width + box.inset.horizontal(),
       metadata.content.height + box.inset.vertical())
+    // Direct Grid dispatch bypasses engine's second box resolution. Its track
+    // sizing reads ResolvedBox, so install the accepted border-box allocation
+    // there as well as in the request before resolving flexible tracks.
+    box.size = input.known
     input.indefiniteWidth = !metadata.content.widthDefinite
     input.indefiniteHeight = !metadata.content.heightDefinite
   }

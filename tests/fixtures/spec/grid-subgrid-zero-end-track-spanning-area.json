@@ -1,0 +1,81 @@
+{
+  "name": "grid-subgrid-zero-end-track-spanning-area",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-margins"
+  ],
+  "derivation": "The parent rows are40 and0 separated by10. A row-subgrid spanning both has3px top and bottom padding: its border box is50 and its content span is44. A descendant spanning the whole inherited axis gets the parent50 minus both edge paddings6, not47 from flooring the last individual track before computing the whole span.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 30,
+          "gridTemplateColumns": [
+            30
+          ],
+          "gridTemplateRows": [
+            40,
+            0
+          ],
+          "rowGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridRowStart": 1,
+          "gridRowEnd": 3,
+          "gridTemplateColumns": [
+            30
+          ],
+          "gridTemplateRows": "subgrid",
+          "padding": {
+            "top": 3,
+            "bottom": 3
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridRowStart": 1,
+          "gridRowEnd": 3
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 50
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 50
+      },
+      {
+        "x": 0,
+        "y": 3,
+        "width": 30,
+        "height": 44
+      }
+    ]
+  }
+}

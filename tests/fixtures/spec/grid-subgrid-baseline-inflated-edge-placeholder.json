@@ -1,0 +1,114 @@
+{
+  "name": "grid-subgrid-baseline-inflated-edge-placeholder",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-edge-placeholders",
+    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims"
+  ],
+  "derivation": "The row-2 descendant has a20px box and baseline5; its peer has baseline15. The row-2 baseline shim is10, so its contribution is30. The hypothetical item spanning empty row1 and occupied row2 must use this inflated30 plus top padding10, hence40. Equal distribution adds5 to each auto track: rows5,35,0. The descendant starts at row2 origin5 plus shim10; peer starts at5. The subgrid is40 high including padding10.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 40,
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            "auto",
+            "auto",
+            "auto"
+          ],
+          "alignContent": "start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "gridRowEnd": 4,
+          "gridTemplateColumns": [
+            20
+          ],
+          "gridTemplateRows": "subgrid",
+          "padding": {
+            "top": 10
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 10,
+          "height": 20,
+          "gridRowStart": 2,
+          "alignSelf": "baseline"
+        },
+        "measure": {
+          "minWidth": 10,
+          "maxWidth": 10,
+          "height": 20,
+          "firstBaseline": 5
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10,
+          "height": 20,
+          "gridColumnStart": 2,
+          "gridRowStart": 2,
+          "alignSelf": "baseline"
+        },
+        "measure": {
+          "minWidth": 10,
+          "maxWidth": 10,
+          "height": 20,
+          "firstBaseline": 15
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 40,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 15,
+        "width": 10,
+        "height": 20
+      },
+      {
+        "x": 20,
+        "y": 5,
+        "width": 10,
+        "height": 20
+      }
+    ]
+  }
+}

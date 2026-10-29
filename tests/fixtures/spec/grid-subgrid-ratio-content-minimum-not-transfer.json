@@ -1,0 +1,91 @@
+{
+  "name": "grid-subgrid-ratio-content-minimum-not-transfer",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#min-size-auto",
+    "https://drafts.csswg.org/css-grid-2/#algo-single-span-items"
+  ],
+  "derivation": "The non-replaced empty ratio child has zero raw content minimum, not the replaced-element transferred suggestion. Its preferred height20 and ratio2 give40px min/max-content contributions, but Grid6.6 does not transfer the preferred cross size into its automatic minimum. The local auto column in the20px definite subgrid can therefore remain20 while the ratio child overflows at40. Rows inherit30. This deliberately differs from a per-item preferred-ratio floor.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 20,
+          "gridTemplateColumns": [
+            20
+          ],
+          "gridTemplateRows": [
+            30
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            "auto"
+          ],
+          "gridTemplateRows": "subgrid",
+          "justifyContent": "start"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "height": 20,
+          "aspectRatio": 2,
+          "justifySelf": "start",
+          "alignSelf": "start"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 40,
+        "height": 20
+      }
+    ]
+  }
+}

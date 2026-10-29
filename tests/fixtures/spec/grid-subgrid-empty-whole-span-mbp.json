@@ -1,0 +1,67 @@
+{
+  "name": "grid-subgrid-empty-whole-span-mbp",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-size-contribution",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-edge-placeholders"
+  ],
+  "derivation": "An empty subgrid contributes as an empty item (\u00a79), not a separate floor at either edge. Its 12px horizontal padding fits within the fixed 40px second column plus the 8px gap. The auto first column remains zero; the subgrid spans 48px. Edge placeholders explicitly apply only to non-empty subgrids.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "gridTemplateColumns": [
+            "auto",
+            40
+          ],
+          "gridTemplateRows": [
+            20
+          ],
+          "columnGap": 8,
+          "justifyContent": "start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "padding": {
+            "left": 7,
+            "right": 5
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 48,
+        "height": 20
+      }
+    ]
+  }
+}

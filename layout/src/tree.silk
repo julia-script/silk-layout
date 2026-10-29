@@ -1,6 +1,6 @@
 import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.core.effect { Effect }
-import silk.format { Debug, Format, Formatter }
+import silk.text.format { Debug, Format, Formatter }
 import silk.io.writer { Writer, WriterError }
 import silk.collections.list { List }
 import silk.core.ownership { Copy }
@@ -8,7 +8,7 @@ import silk.num.usize
 import silk.text.string { String }
 import style { Style, DisplayOutside, DisplayInside, Dimension, DimensionKind, Edges, BoxSizing }
 import geometry { Layout, Point, Rect, OptionalSize }
-import silk.option { Option }
+import silk.core.option { Option }
 import box_tree { BoxTree, BoxNode }
 import fragments { FragmentArena, FragmentKind, TextFragmentKind }
 import layout_cache { LayoutCache, Snapshot, BoxFacts, BoxWrites }

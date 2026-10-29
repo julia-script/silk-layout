@@ -3,7 +3,7 @@ import silk.core.effect { Effect }
 import silk.num.i32
 import silk.json.value { Value }
 import silk.collections.list { List }
-import silk.option { Option }
+import silk.core.option { Option }
 import layout.lib { Fragmentainers, FragmentAncestor, FragmentationError, FragmentainerKind, Rect, Point, WritingMode, Direction }
 import protocol as P
 import protocol { ProtocolError }

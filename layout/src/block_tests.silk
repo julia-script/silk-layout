@@ -6,12 +6,13 @@ import text { TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, Text
 import silk.core.effect { Effect }
 import silk.testing.testing { Testing, AssertionError }
 import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize, AvailableSpace, AvailableKind, max }
-import style { Style, Display, DisplayOutside, DisplayInside, Dimension, Direction, Float, Clear, Position, WritingMode, Align, Overflow, OverflowAlignment }
+import style { Style, Display, DisplayOutside, DisplayInside, Dimension, DimensionKind, Direction, Float, Clear, Position, WritingMode, Align, Overflow, OverflowAlignment }
 import tree { Tree, LayoutTree, InvalidNode }
 import context { Input }
-import engine { layoutNode }
+import engine { layoutNode, layoutNodeInPlace, probeNode }
 import layout_pass { LayoutPass }
 import box_tree as Boxes
+import box_tree { BoxTree }
 
 struct FixedMeasure {}
 impl Measure for FixedMeasure {
@@ -973,4 +974,155 @@ test effect fn blockifiedItemIgnoresFloatButPreservesExplicitShrinkRequest() -> 
   layouts.fragments.resolveLocations()
   layouts.adopt(move constructed)
   run Testing.expect(shrunk.size.width == 30.0, "explicit hypothetical cross-size shrink-to-fit request remains effective")
+}
+
+effect fn expectMinimumProbe<'pass, 'source>(
+  boxes: &BoxTree<'source>,
+  pass: &mut LayoutPass<'pass, 'source>,
+  measure: &mut FixedMeasure,
+  id: usize,
+  input: &Input,
+  width: f32,
+  height: f32,
+)
+  ! OutOfMemoryError | TextError | FragmentationError | AssertionError<'static>
+  ? &mut Allocator {
+  run probeNode(boxes, &mut pass, &mut measure, id, input)
+  let actual = pass.boxes[id].size
+  run Testing.expect(
+    actual.width == width && actual.height == height,
+    "request minima bound natural sizes and participate in effective probe keys",
+  )
+}
+
+// Grid §6.6 supplies a used minimum, not a preferred size. Sizing §5.1
+// intrinsic queries ignore the queried axis's min/max constraints, but a
+// cross-axis constraint still applies. Changing only a floor must not reuse
+// the previous bounded result.
+effect fn checkMinimumProbeRequests(intrinsicMinima: bool)
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static>
+  ? &mut Allocator {
+  let mut style = Style.make()
+  if intrinsicMinima {
+    style.minWidth = Dimension.keyword(DimensionKind.MinContent)
+    style.minHeight = Dimension.keyword(DimensionKind.MaxContent)
+  }
+  let mut tree = run Tree.make(move style)
+  let root = tree.root()
+  run tree.setMeasurement(root, 0)
+  let boxes = run Boxes.build(
+    tree.nodes.asSlice(),
+    tree.styles.asSlice(),
+    tree.grids.asSlice(),
+    tree.gridNames.asSlice(),
+    WritingMode.HorizontalTb,
+    Direction.Ltr,
+  )
+  let id = boxes.firstBySource.get(root.index)
+  let mut layouts = LayoutTree.make()
+  run layouts.prepare(boxes.boxes.length())
+  let mut pass = run LayoutPass.make(
+    layouts.boxes.asMutSlice(),
+    &mut layouts.fragments,
+    boxes.sources,
+  )
+  let mut measure = FixedMeasure {}
+  let mut input = Input.make(OptionalSize.none())
+  input.blockRoot = true
+  input.performLayout = false
+  input.minimum = Size { width: 120.0, height: 30.0 }
+  run expectMinimumProbe(&boxes, &mut pass, &mut measure, id, &input, 120.0, 30.0)
+  if intrinsicMinima { return }
+
+  input.minimum.height = 60.0
+  run expectMinimumProbe(&boxes, &mut pass, &mut measure, id, &input, 120.0, 60.0)
+  input.minimum.width = 40.0
+  run expectMinimumProbe(&boxes, &mut pass, &mut measure, id, &input, 80.0, 60.0)
+
+  input.minimum = Size { width: 40.0, height: 5.0 }
+  run expectMinimumProbe(&boxes, &mut pass, &mut measure, id, &input, 80.0, 12.0)
+
+  input.minimum = Size { width: 120.0, height: 30.0 }
+  input.intrinsicWidth = true
+  input.availableWidth = AvailableSpace.minContent()
+  run expectMinimumProbe(&boxes, &mut pass, &mut measure, id, &input, 20.0, 30.0)
+
+  input.intrinsicWidth = false
+  input.availableWidth = AvailableSpace.maxContent()
+  input.intrinsicHeight = true
+  run expectMinimumProbe(&boxes, &mut pass, &mut measure, id, &input, 120.0, 12.0)
+
+  input.intrinsicHeight = false
+  input.known = OptionalSize.definite(50.0, 5.0)
+  run expectMinimumProbe(&boxes, &mut pass, &mut measure, id, &input, 120.0, 30.0)
+}
+
+test effect fn blockRequestMinimumPreservesNaturalSizesAndProbeKeys()
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run checkMinimumProbeRequests(false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// CSS2 §10.4: the minimum wins over a smaller maximum. CSS2 §10.5:
+// a minimum height does not make an automatic height a definite percentage
+// basis. The 120px parent makes the child's width 60px; its 50% height stays
+// auto and follows its 6px child, rather than becoming 20px or inheriting 40px.
+effect fn checkMinimumInheritance()
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static>
+  ? &mut Allocator {
+  let mut style = Style.make()
+  style.width = Dimension.px(80.0)
+  style.maxWidth = Dimension.px(90.0)
+  let mut tree = run Tree.make(move style)
+  let root = tree.root()
+  let mut childStyle = Style.make()
+  childStyle.width = Dimension.pct(0.5)
+  childStyle.height = Dimension.pct(0.5)
+  let child = run tree.append(root, move childStyle)
+  let grandchild = run tree.append(child, sized(4.0, 6.0))
+  let boxes = run Boxes.build(
+    tree.nodes.asSlice(),
+    tree.styles.asSlice(),
+    tree.grids.asSlice(),
+    tree.gridNames.asSlice(),
+    WritingMode.HorizontalTb,
+    Direction.Ltr,
+  )
+  let rootBox = boxes.firstBySource.get(root.index)
+  let childBox = boxes.firstBySource.get(child.index)
+  let grandchildBox = boxes.firstBySource.get(grandchild.index)
+  let mut layouts = LayoutTree.make()
+  run layouts.prepare(boxes.boxes.length())
+  let mut pass = run LayoutPass.make(
+    layouts.boxes.asMutSlice(),
+    &mut layouts.fragments,
+    boxes.sources,
+  )
+  let mut measure = FixedMeasure {}
+  let mut input = Input.make(OptionalSize.none())
+  input.blockRoot = true
+  input.minimum = Size { width: 120.0, height: 40.0 }
+  run layoutNodeInPlace(&boxes, &mut pass, &mut measure, rootBox, &input)
+  run Testing.expect(
+    pass.boxes[rootBox].size.width == 120.0 && pass.boxes[rootBox].size.height == 40.0
+      && pass.boxes[childBox].size.width == 60.0
+      && pass.boxes[childBox].size.height == 6.0
+      && pass.boxes[grandchildBox].size.width == 4.0
+      && pass.boxes[grandchildBox].size.height == 6.0,
+    "request minima neither inherit nor establish an automatic-height percentage basis",
+  )
+}
+
+test effect fn blockRequestMinimumDoesNotInheritOrMakePercentHeightDefinite()
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run checkMinimumInheritance() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Sizing §3.2 intrinsic min-size keywords are resolved after ordinary lengths.
+// Resolving them must not erase the greater minimum supplied by the caller.
+test effect fn blockRequestMinimumSurvivesIntrinsicAuthoredMinima()
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run checkMinimumProbeRequests(true) |> Effect.provideMut<Allocator>(&mut allocator)
 }

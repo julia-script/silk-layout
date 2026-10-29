@@ -84,7 +84,7 @@ Grid probes and final layout share item placement across retained computes, keye
 
 Original native regressions exercise viewport changes within and across an automatic-repeat count boundary, then order changes, hide/show box renumbering and template replacement. They assert hand-derived item rectangles rather than cache implementation details.
 
-Grid contribution probes reuse their scalar result when the block-axis min-content and max-content requests are identical; they do not rebuild and search an identical size-cache key.
+Grid contribution probes reuse their scalar result when the block-axis min-content and max-content requests are identical; they do not rebuild and search an identical size-cache key. Width probes use the engine's axis-only request contract, retaining full-size requests for aspect ratios and natural dimensions. Contribution constraints also use the existing zero-edge resolution shortcut rather than resolving known-zero edges repeatedly.
 
 Baseline scratch is allocated only for containers requesting baseline self-alignment. Retained per-item samples and sparse used-track sharing groups avoid allocating a full group record for every possible track. Ordinary final placement still uses `layoutNode` and `LayoutPass.place`; neither baseline alignment nor track distribution adds fields to `Layout` or copies its record.
 

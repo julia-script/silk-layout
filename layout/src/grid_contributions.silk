@@ -14,21 +14,12 @@ import geometry {
 }
 import style { Style, Dimension, DimensionKind, BoxSizing, WritingMode, FlexWrap, FlexDirection }
 import box_tree { BoxTree }
-import context {
-  Input,
-  resolveBox,
-  resolve,
-  resolves,
-  isFlex,
-  isGrid,
-  scrollable,
-  overflowForAxis,
-  UNBOUNDED
-}
-import engine { normalizeKey, probeFresh }
+import context { Input, resolve, resolves, isFlex, isGrid, scrollable, overflowForAxis, UNBOUNDED }
+import engine { normalizeKey, probeFresh, shapedBox }
 import layout_pass { LayoutPass, CacheKind }
 import text { TextMeasure, TextError }
 import fragmentation { FragmentationError }
+import tree { Measurement }
 
 // Grid 2 §§6.6, 12.5. Contributions are margin-box sizes; usedMinimum is
 // border-box sized so final item layout can apply it without counting edges twice.
@@ -246,7 +237,12 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(
 ) -> Probe
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
+  // Match the engine's axis-only probe contract: ratios and natural dimensions
+  // can still require the opposite size, even when the contribution is scalar.
+  let fullSize = !horizontal || nodes.style(id).aspectRatio > 0.0
+    || nodes.node(id).measurement == Measurement.Natural
   let mut key = probeInput(input, horizontal, constraint)
+  key.fullSize = fullSize
   normalizeKey(output.keyShape(id), &mut key, output.viewportFree(id))
   let found = output.cache.find(id, &key, CacheKind.IndependentBox)
   if found != usize.MAX {
@@ -258,7 +254,8 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(
       ratioBorderBox: cached.ratioBorderBox,
     }
   }
-  let request = probeInput(input, horizontal, constraint)
+  let mut request = probeInput(input, horizontal, constraint)
+  request.fullSize = fullSize
   run probeFresh(nodes, &mut output, &mut measurer, id, &request, &key)
   let result = &output.boxes[id]
   return Probe {
@@ -303,7 +300,7 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
   propertyInput.intrinsicWidth = false
   propertyInput.intrinsicHeight = false
   propertyInput.known = OptionalSize.none()
-  let box = resolveBox(style, &propertyInput)
+  let box = shapedBox(&output, style, id, &propertyInput)
   let inset = edges(box.inset, horizontal)
   let crossInset = edges(box.inset, !horizontal)
   let margin = edges(box.margin, horizontal)

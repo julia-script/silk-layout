@@ -628,7 +628,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   if prepared {
     let mut columnOverride = usize.MAX
     let mut rowOverride = usize.MAX
-    if fragmented {
+    if output.frame != NO_NODE {
       let state = output.resumes.get(id)
       if state.started {
         match &state.cursor {
@@ -1094,6 +1094,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
         &output,
         items,
         rows.length,
+        axis.reverseBlock != Axes.make(output.frames.writingMode).reverseBlock,
         false,
         input.fragmentation.rectoOnRight,
       ),
@@ -1124,6 +1125,13 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       rowExplicit,
       rowNames,
     )
+    if output.frame != NO_NODE {
+      output.cache.gridGeometry.setFragment(id, output.publication(id), result.contentRect(), result.paddingRect())
+    }
+    if fragmented {
+      let scratch = &output.cache.gridMemos.fragmentScratch.asSlice()[output.cache.gridMemos.fragmentScratch.length() - 1]
+      output.cache.gridGeometry.captureRows(id, scratch)
+    }
   }
   output.cache.gridMemos.put(move lease)
   return result

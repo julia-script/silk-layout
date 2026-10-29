@@ -4,7 +4,8 @@ import grid_absolute { GridGeometry }
 import grid_lines { LineNames }
 import grid_tracks { TrackState }
 import tree { NO_NODE }
-import geometry { Rect }
+import geometry { Rect, max }
+import grid_fragment_scratch { GridFragmentScratch, logicalRow }
 
 struct Slot {
   geometry: GridGeometry,
@@ -43,12 +44,105 @@ impl GridGeometryStore {
     return &self.slots.asSlice()[slot].geometry
   }
 
+  pub fn findFragment(self: &Self, id: usize, fragment: usize) -> usize {
+    let mut index = self.find(id)
+    while index != NO_NODE {
+      let slot = &self.slots.asSlice()[index]
+      if slot.geometry.fragment == fragment { return index }
+      index = slot.previous
+    }
+    return NO_NODE
+  }
+
+  pub fn setFragment(self: &mut Self, id: usize, fragment: usize, content: Rect, padding: Rect) {
+    let index = self.find(id)
+    let geometry = &mut self.slots.asMutSlice()[index].geometry
+    geometry.fragment = fragment
+    geometry.content = content
+    geometry.padding = padding
+  }
+
+  // Copy only accepted row edges into a new version. Earlier fragment columns
+  // and rows stay immutable, including while a later page is being retried.
+  pub fn inheritRows(self: &mut Self, id: usize) {
+    let index = self.find(id)
+    let previous = self.slots.asSlice()[index].previous
+    if previous == NO_NODE { return }
+    let count = self.slots.asSlice()[index].geometry.rows.tracks.length()
+    if self.slots.asSlice()[previous].geometry.fragment == NO_NODE
+      || self.slots.asSlice()[previous].geometry.rows.tracks.length() != count { return }
+    let reversed = self.slots.asSlice()[previous].geometry.rows.reversed
+    let extent = self.slots.asSlice()[previous].geometry.rows.extent
+    let mut at: usize = 0
+    while at < count {
+      let edges = self.slots.asSlice()[previous].geometry.rows.tracks.get(at)
+      self.slots.asMutSlice()[index].geometry.rows.tracks.set(at, edges)
+      at = at + 1
+    }
+    self.slots.asMutSlice()[index].geometry.rows.reversed = reversed
+    self.slots.asMutSlice()[index].geometry.rows.extent = extent
+  }
+
+  pub fn captureRows(self: &mut Self, id: usize, scratch: &GridFragmentScratch) {
+    self.inheritRows(id)
+    let index = self.find(id)
+    let rows = &mut self.slots.asMutSlice()[index].geometry.rows
+    rows.reversed = scratch.reversed
+    let mut ordinal: usize = 0
+    while ordinal < scratch.rows.length() {
+      let row = &scratch.rows.asSlice()[ordinal]
+      if row.accepted {
+        let logical = logicalRow(ordinal, scratch.rows.length(), scratch.reversed)
+        let edge = &mut rows.tracks.asMutSlice()[logical]
+        if scratch.reversed {
+          if row.starts { edge.end = row.consumedStart }
+          edge.start = row.consumedEnd
+        } else {
+          if row.starts { edge.start = row.consumedStart }
+          edge.end = row.consumedEnd
+        }
+        rows.extent = max(rows.extent, row.consumedEnd)
+      }
+      ordinal = ordinal + 1
+    }
+  }
+
+  // A shell's checkpointed sizing pass owns a fresh pooled slot. Detach that
+  // slot, restore all probe state, then publish it in the enclosing journal.
+  // Tombstones keep outstanding checkpoint markers stable without copying
+  // either the track buffers or a full Layout.
+  pub fn retain(self: &mut Self, id: usize) -> usize {
+    let index = self.find(id)
+    let mut at = self.journal.length()
+    while at > 0 {
+      at = at - 1
+      if self.journal.get(at) == index {
+        self.journal.set(at, NO_NODE)
+        break
+      }
+    }
+    self.heads.set(id, self.slots.asSlice()[index].previous)
+    self.slots.asMutSlice()[index].previous = NO_NODE
+    return index
+  }
+
+  pub effect fn publish(self: &mut Self, id: usize, index: usize)
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    run self.journal.append(index)
+    self.slots.asMutSlice()[index].previous = self.find(id)
+    self.slots.asMutSlice()[index].id = id
+    self.heads.set(id, index)
+  }
+
   // Finalization follows track capture, before any positioned descendant can
   // observe this version. Preserve the engine's per-source overflow clipping.
-  pub fn setPadding(self: &mut Self, id: usize, padding: Rect) {
+  pub fn finish(self: &mut Self, id: usize, content: Rect, padding: Rect, normalPadding: Rect) {
     let index = self.find(id)
-    let slots = self.slots.asMutSlice()
-    slots[index].geometry.normalPadding = padding
+    let geometry = &mut self.slots.asMutSlice()[index].geometry
+    geometry.content = content
+    geometry.padding = padding
+    geometry.normalPadding = normalPadding
   }
 
   pub fn checkpoint(self: &Self) -> usize {
@@ -87,6 +181,10 @@ impl GridGeometryStore {
     let slot = &mut self.slots.asMutSlice()[index]
     run slot.geometry.columns.capture(columns, columnOrigin, columnExplicit, columnNames)
     run slot.geometry.rows.capture(rows, rowOrigin, rowExplicit, rowNames)
+    slot.geometry.fragment = NO_NODE
+    slot.geometry.content = Rect.zero()
+    slot.geometry.padding = Rect.zero()
+    slot.geometry.normalPadding = Rect.zero()
     run self.journal.append(index)
     self.free = slot.nextFree
     slot.nextFree = NO_NODE
@@ -110,6 +208,7 @@ impl GridGeometryStore {
     while count > marker {
       count = count - 1
       let index = self.journal.get(count)
+      if index == NO_NODE { continue }
       let slot = &self.slots.asSlice()[index]
       self.heads.set(slot.id, slot.previous)
       self.release(index)
@@ -123,6 +222,10 @@ impl GridGeometryStore {
     let mut at: usize = 0
     while at < self.journal.length() {
       let index = self.journal.get(at)
+      if index == NO_NODE {
+        at = at + 1
+        continue
+      }
       let previous = self.slots.asSlice()[index].previous
       if previous != NO_NODE {
         self.release(previous)

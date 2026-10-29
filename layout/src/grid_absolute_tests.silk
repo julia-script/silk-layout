@@ -59,7 +59,7 @@ test effect fn absoluteAreaExcludesBoundaryGapsButIncludesInteriorGaps()
   // Columns [40,105], row [22,34]: neither exterior gutter belongs to the area.
   run Testing.expect(
     same(
-      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 140.0, y: 222.0, width: 65.0, height: 12.0 },
     ),
     "area edges face inward across gutters",
@@ -92,7 +92,7 @@ test effect fn absoluteAreaUsesSignedImplicitOriginAndExplicitNegativeLines()
   }
   run Testing.expect(
     same(
-      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 20.0, y: 76.0, width: 80.0, height: 18.0 },
     ),
     "implicit endpoints index from signed origin, not explicit line one",
@@ -117,7 +117,7 @@ test effect fn absoluteAreaMixesAutoPaddingAndFinalTrackEdges()
   // Right is augmented padding 129; top is 29; definite bottom is 40+20.
   run Testing.expect(
     same(
-      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 65.0, y: 29.0, width: 64.0, height: 31.0 },
     ),
     "auto contributes only its corresponding padding edge",
@@ -130,7 +130,7 @@ test effect fn absoluteAreaMixesAutoPaddingAndFinalTrackEdges()
   }
   run Testing.expect(
     same(
-      containingArea(&Style.make(), &missing, &geometry, content, padding),
+      containingArea(&Style.make(), &missing, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 13.0, y: 70.0, width: 37.0, height: 43.0 },
     ),
     "nonexistent lines become auto without creating geometry",
@@ -155,7 +155,7 @@ test effect fn absoluteAreaPreservesCollapsedAndOuterBoundaryLines()
   }
   run Testing.expect(
     same(
-      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 30.0, y: 33.0, width: 0.0, height: 12.0 },
     ),
     "collapsed tracks preserve coincident distinct lines",
@@ -168,7 +168,7 @@ test effect fn absoluteAreaPreservesCollapsedAndOuterBoundaryLines()
   }
   run Testing.expect(
     same(
-      containingArea(&Style.make(), &outer, &geometry, content, padding),
+      containingArea(&Style.make(), &outer, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 60.0, y: 25.0, width: 35.0, height: 8.0 },
     ),
     "last start and first end use existing outer track boundaries",
@@ -182,7 +182,7 @@ test effect fn absoluteAreaEmptyGridKeepsItsSingleContentBoundary()
   let padding = Rect { x: 13.0, y: 29.0, width: 116.0, height: 84.0 }
   run Testing.expect(
     same(
-      containingArea(&Style.make(), &GridPlacement.make(), &geometry, content, padding),
+      containingArea(&Style.make(), &GridPlacement.make(), &geometry.columns, &geometry.rows, content, padding),
       padding,
     ),
     "all-auto empty grid uses augmented padding",
@@ -201,7 +201,7 @@ test effect fn absoluteAreaEmptyGridKeepsItsSingleContentBoundary()
   // Equal column endpoints discard the end. The only row boundary is at content start.
   run Testing.expect(
     same(
-      containingArea(&style, &placement, &geometry, content, padding),
+      containingArea(&style, &placement, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 20.0, y: 29.0, width: 109.0, height: 11.0 },
     ),
     "empty explicit grid retains one line without indexing a track",
@@ -255,7 +255,7 @@ test effect fn absoluteAreaMapsFlowRelativeSidesToPhysicalRectangles()
     style.writingMode = modes[at]
     style.direction = directions[at]
     run Testing.expect(
-      same(containingArea(&style, &placement, &geometry, content, padding), expected[at]),
+      same(containingArea(&style, &placement, &geometry.columns, &geometry.rows, content, padding), expected[at]),
       "grid lines follow container writing mode and direction, while padding stays physical",
     )
     at = at + 1
@@ -266,7 +266,7 @@ test effect fn absoluteAreaMapsFlowRelativeSidesToPhysicalRectangles()
   upright.textOrientation = TextOrientation.Upright
   run Testing.expect(
     same(
-      containingArea(&upright, &placement, &geometry, content, padding),
+      containingArea(&upright, &placement, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 195.0, y: 212.0, width: 38.0, height: 85.0 },
     ),
     "upright uses the container's used LTR direction",
@@ -308,14 +308,14 @@ test effect fn absoluteCaptureOwnsNamedEdgesAndReplacesRemovedGeometry()
   let padding = Rect { x: 7.0, y: 15.0, width: 108.0, height: 72.0 }
   run Testing.expect(
     same(
-      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding),
       Rect { x: 35.0, y: 15.0, width: 20.0, height: 72.0 },
     ),
     "retained edges and area aliases do not borrow source scratch",
   )
   run geometry.columns.capture(&rows, 0, 0, &names) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    same(containingArea(&Style.make(), &placement, &geometry, content, padding), padding),
+    same(containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding), padding),
     "recapture removes old tracks and names rather than retaining stale placement",
   )
 }

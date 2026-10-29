@@ -1,14 +1,47 @@
-import style { Style, Align, OverflowAlignment }
+import style { Style, Align, OverflowAlignment, WritingMode }
 import box_tree { BoxTree, BoxKind }
 import context { scrollable, usedOverflowForAxis }
 import geometry { Rect, Point }
 import grid_absolute { containingArea }
 import layout_pass { LayoutPass }
-import tree { Measurement }
+import tree { Measurement, NO_NODE }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import geometry { Measure }
+import text { TextMeasure, TextError }
+import fragmentation { FragmentInput, FragmentationError }
+import context { Input }
+import engine { layoutInBfc }
+import bfc { BfcState }
 
 pub fn isContainer(nodes: &BoxTree, id: usize) -> bool {
   return nodes.node(id).kind == BoxKind.Grid && nodes.node(id).measurement != Measurement.Content
     && !nodes.style(id).replaced
+}
+
+// Fresh inline allocation for a positioning-only continuation. Keep only the
+// pooled Grid geometry; the checkpoint owns every speculative layout/publication.
+pub effect fn captureShell<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  id: usize,
+  fragment: usize,
+  input: &Input,
+) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let checkpoint = output.checkpoint()
+  let mut request = input.*
+  request.performLayout = true
+  request.fragmentation = FragmentInput.continuous()
+  let mut bfc = BfcState.make()
+  drop run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)
+  let retained = output.cache.gridGeometry.retain(id)
+  output.restoreCheckpoint(checkpoint)
+  output.closeCheckpoint(checkpoint)
+  run output.cache.gridGeometry.publish(id, retained)
+  output.cache.gridGeometry.inheritRows(id)
+  let content = output.cache.gridGeometry.get(retained).content
+  let padding = output.cache.gridGeometry.get(retained).padding
+  output.cache.gridGeometry.setFragment(id, fragment, content, padding)
 }
 
 // The supplied padding rectangle selects the physical containing-block instance.
@@ -19,15 +52,32 @@ pub fn containingRect(
   container: usize,
   child: usize,
   padding: Rect,
+  fragment: usize,
 ) -> Rect {
   let style = nodes.style(container)
-  let layout = &output.boxes[container]
-  let localPadding = layout.paddingRect()
-  let origin = Point { x: padding.x - localPadding.x, y: padding.y - localPadding.y }
-  let content = layout.contentRect().translated(origin)
-  let mut boundary = padding
-  let slot = output.cache.gridGeometry.find(container)
+  let latest = output.cache.gridGeometry.find(container)
+  let mut slot = latest
+  if fragment != NO_NODE {
+    let found = output.cache.gridGeometry.findFragment(container, fragment)
+    if found != NO_NODE { slot = found }
+  }
   let geometry = output.cache.gridGeometry.get(slot)
+  let mut localPadding = geometry.padding
+  let mut localContent = geometry.content
+  if geometry.fragment == NO_NODE {
+    localPadding = output.boxes[container].paddingRect()
+    localContent = output.boxes[container].contentRect()
+  }
+  let origin = Point { x: padding.x - localPadding.x, y: padding.y - localPadding.y }
+  let mut content = localContent.translated(origin)
+  // Joined normal-flow padding supplies the continuous block extent, while
+  // the selected fragment supplies its own inline track allocation.
+  if style.writingMode == WritingMode.HorizontalTb {
+    content.height = padding.height - localPadding.height + localContent.height
+  } else {
+    content.width = padding.width - localPadding.width + localContent.width
+  }
+  let mut boundary = padding
   let scrollX = scrollable(usedOverflowForAxis(style, true))
   let scrollY = scrollable(usedOverflowForAxis(style, false))
   if scrollX || scrollY {
@@ -47,7 +97,8 @@ pub fn containingRect(
   return containingArea(
     style,
     &nodes.grids[nodes.style(child).grid].placement,
-    geometry,
+    &geometry.columns,
+    &output.cache.gridGeometry.get(latest).rows,
     content,
     boundary,
   )

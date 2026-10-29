@@ -28,7 +28,7 @@ def main():
     # Grid 2 §7.2–7.7 and §8.3: structured longhands only; reject invalid
     # track grammar, nonrectangular named areas, and zero placement indices.
     grid_invalid = [
-        ("gridTemplateColumns", "subgrid"), ("gridTemplateRows", "10px 1fr"),
+        ("gridTemplateRows", "10px 1fr"),
         ("gridTemplateColumns", []), ("gridTemplateColumns", [-1]),
         ("gridTemplateColumns", [{"fr": -1}]),
         ("gridTemplateColumns", [{"minmax": [{"fr": 1}, 20]}]),
@@ -55,6 +55,29 @@ def main():
         ("gridColumnStart", "span"), ("gridColumnEnd", "bad name"),
         ("gridRow", [1, 2]), ("grid", {}),
     ]
+    # Grid 2 §7.2.3.1: name-repeat grammar is distinct from track repeats.
+    subgrid_invalid = [
+        {"subgrid": [10]}, {"subgrid": ["auto"]},
+        {"subgrid": [{"names": ["auto"]}]},
+        {"subgrid": [], "tracks": []}, {"subgrid": "bad"},
+        {"subgrid": [{"names": [], "unknown": True}]},
+        {"subgrid": [{"repeat": {"count": 0, "lines": [{"names": []}]}}]},
+        {"subgrid": [{"repeat": {"count": -1, "lines": [{"names": []}]}}]},
+        {"subgrid": [{"repeat": {"count": 1.5, "lines": [{"names": []}]}}]},
+        {"subgrid": [{"repeat": {"count": 10001, "lines": [{"names": []}]}}]},
+        {"subgrid": [{"repeat": {"count": "auto-fit", "lines": [{"names": []}]}}]},
+        {"subgrid": [{"repeat": {"count": 2, "lines": []}}]},
+        {"subgrid": [{"repeat": {"count": 2, "tracks": [10]}}]},
+        {"subgrid": [{"repeat": {"count": 2, "lines": [10]}}]},
+        {"subgrid": [{"repeat": {"count": 2, "lines": [
+            {"repeat": {"count": 2, "lines": [{"names": []}]}}]}}]},
+        {"subgrid": [{"repeat": {"count": "auto-fill", "lines": [{"names": []}]}},
+                     {"repeat": {"count": "auto-fill", "lines": [{"names": []}]}}]},
+    ]
+    grid_invalid.extend(("gridTemplateColumns", value) for value in subgrid_invalid)
+    grid_invalid.extend((field, "normal") for field in [
+        "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
+        "flexBasis", "margin", "padding", "border", "inset"])
     for field, invalid in grid_invalid:
         style = {"display": "grid", field: invalid}
         malformed.append(json.dumps({**request, "nodes": [
@@ -193,6 +216,18 @@ def main():
     assert output["boxes"][source["firstBox"]]["source"] == 0
     assert output["fragments"] and source["rects"]
     assert "hasFirstBaseline" in source and "hasLastBaseline" in source and "hasBaseline" not in source
+    for template in ["subgrid", {"subgrid": []},
+                     {"subgrid": [{"names": []}, {"names": ["local"]}]},
+                     {"subgrid": [{"repeat": {"count": 2, "lines": [
+                         {"names": ["a"]}, {"names": []}]}}]},
+                     {"subgrid": [{"repeat": {"count": "auto-fill", "lines": [
+                         {"names": ["a"]}]}}]}]:
+        subgrid_request = {**request, "nodes": [{"parent": None, "style": {
+            "display": "grid", "gridTemplateColumns": template,
+            "gridTemplateRows": "subgrid", "rowGap": "normal", "columnGap": "normal"}}]}
+        completed = subprocess.run([executable], input=json.dumps(subgrid_request).encode(),
+                                   capture_output=True, timeout=10, check=True)
+        assert json.loads(completed.stdout)["schemaVersion"] == 3
     # Phase 1 stores all template forms but intentionally uses source-order
     # single-column layout (Grid 2 §6.1 item generation, not track sizing).
     grid_style = {

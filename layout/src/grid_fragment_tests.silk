@@ -235,6 +235,33 @@ effect fn repeatedRowBoundaries()
       )
       row = row + 1
     }
+    // Grid §11.6: each fragment exports baselines from its own first/last
+    // occupied rows, not from an item published on an earlier page.
+    let rootBox = output.firstBySource.get(root.index)
+    let mut fragment = output.fragments.first(rootBox)
+    let mut page: usize = 0
+    while fragment != usize.MAX {
+      let value = &output.fragments.values.asSlice()[fragment]
+      let mut firstBaseline: f32 = 27.0
+      let mut lastBaseline: f32 = 65.0
+      if pass == 1 {
+        run Testing.expect(page < heights.length, "one grid fragment per occupied page")
+        firstBaseline = heights[page]
+        lastBaseline = heights[page]
+      } else if page == 1 {
+        firstBaseline = 19.0
+        lastBaseline = 19.0
+      }
+      run Testing.expect(
+        value.hasFirstBaseline && value.hasLastBaseline
+          && value.firstBaselines.alphabetic == firstBaseline
+          && value.lastBaselines.alphabetic == lastBaseline,
+        "grid baseline export uses only the current fragment's rows",
+      )
+      fragment = value.nextForBox
+      page = page + 1
+    }
+    run Testing.expect(page == pass + 2, "grid fragment chain ends on the final occupied page")
     pass = pass + 1
   }
 }

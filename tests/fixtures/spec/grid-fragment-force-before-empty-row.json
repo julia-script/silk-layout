@@ -1,0 +1,111 @@
+{
+  "name": "grid-fragment-force-before-empty-row",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "fragmentation",
+    "forced-break",
+    "empty-row"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#pagination",
+    "https://drafts.csswg.org/css-break-3/#forced-breaks",
+    "https://drafts.csswg.org/css-align-3/#gaps"
+  ],
+  "derivation": "The 17px first row propagates break-after:page to its row boundary. The next page begins with the empty 13px row; only the following 7px gutter survives, putting row 3 at page origin 83 + 13 + 7 = 103. The handled boundary must not be replayed merely because the next row has no item. Content extent on page 2 is 13 + 7 + 19 = 39.",
+  "input": {
+    "viewport": {
+      "width": 79,
+      "height": 200
+    },
+    "fragmentation": {
+      "kind": "page",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 79,
+          "height": 61
+        }
+      ],
+      "repeatStep": {
+        "x": 0,
+        "y": 83
+      }
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            79
+          ],
+          "gridTemplateRows": [
+            17,
+            13,
+            19
+          ],
+          "rowGap": 7
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 17,
+          "gridRowStart": 1,
+          "gridRowEnd": 2,
+          "breakAfter": "page"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 19,
+          "gridRowStart": 3,
+          "gridRowEnd": 4
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 79,
+            "height": 61
+          },
+          {
+            "x": 0,
+            "y": 83,
+            "width": 79,
+            "height": 39
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 79,
+            "height": 17
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 103,
+            "width": 79,
+            "height": 19
+          }
+        ]
+      }
+    ]
+  }
+}

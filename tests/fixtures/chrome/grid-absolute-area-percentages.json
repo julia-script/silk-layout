@@ -1,0 +1,73 @@
+{
+  "name": "grid-absolute-area-percentages-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "The containing area is (60,80),60x50. Left inset and left margin each resolve to6; top inset10, width30,height20. Percentage bases are the area, not container content or padding.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 160,
+          "height": 180,
+          "paddingLeft": 10,
+          "paddingRight": 20,
+          "paddingTop": 30,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            40,
+            60
+          ],
+          "gridTemplateRows": [
+            30,
+            50
+          ],
+          "columnGap": 10,
+          "rowGap": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "gridColumnStart": 2,
+          "gridColumnEnd": 3,
+          "gridRowStart": 2,
+          "gridRowEnd": 3,
+          "inset": {
+            "left": {
+              "percent": 0.1
+            },
+            "top": {
+              "percent": 0.2
+            }
+          },
+          "width": {
+            "percent": 0.5
+          },
+          "height": {
+            "percent": 0.4
+          },
+          "marginLeft": {
+            "percent": 0.1
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "name": "grid-absolute-outside-start-span",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#grid-placement-errors",
+    "https://drafts.csswg.org/css-grid-2/#grid-align"
+  ],
+  "derivation": "Resolve line -5 to logical -1 and its two-track span endpoint to1. Grid \u00a710.1 makes only the nonexistent start auto; the containing interval is the padding start0 through the preceding track end10+20=30.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 120,
+          "height": 100,
+          "paddingLeft": 10,
+          "paddingRight": 10,
+          "paddingTop": 10,
+          "paddingBottom": 10,
+          "columnGap": 5,
+          "rowGap": 5,
+          "gridTemplateColumns": [
+            20,
+            30,
+            40
+          ],
+          "gridTemplateRows": [
+            20
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": 0,
+            "right": 0,
+            "top": 0,
+            "bottom": 0
+          },
+          "gridColumnStart": -5,
+          "gridColumnEnd": {
+            "span": 2
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 120,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 100
+      }
+    ]
+  }
+}

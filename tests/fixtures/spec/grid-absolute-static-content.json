@@ -1,0 +1,83 @@
+{
+  "name": "grid-absolute-static-content",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "Position3 \u00a73.5.3 uses the specified area only when this grid parent establishes the actual containing block; otherwise content bounds. End inline and center block alignment use the 20x10 margin box. A preceding in-flow item does not advance the static rectangle.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "static",
+          "boxSizing": "border-box",
+          "width": 160,
+          "height": 180,
+          "paddingLeft": 10,
+          "paddingRight": 20,
+          "paddingTop": 30,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            40,
+            60
+          ],
+          "gridTemplateRows": [
+            30,
+            50
+          ],
+          "columnGap": 10,
+          "rowGap": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 120
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "gridColumnStart": 2,
+          "gridColumnEnd": 3,
+          "gridRowStart": 2,
+          "gridRowEnd": 3,
+          "width": 20,
+          "height": 10,
+          "justifySelf": "end",
+          "alignSelf": "center"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 160,
+        "height": 180
+      },
+      { "x": 10, "y": 30, "width": 40, "height": 120 },
+      {
+        "x": 120,
+        "y": 95,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

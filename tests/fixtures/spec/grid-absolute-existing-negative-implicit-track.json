@@ -1,0 +1,85 @@
+{
+  "name": "grid-absolute-existing-negative-implicit-track",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "The in-flow item creates logical column -1 before the one explicit column. Absolute lines -3/-2 resolve to that existing 20px track at content x=10; no row lines makes the block boundaries the padding edges.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 160,
+          "height": 180,
+          "paddingLeft": 10,
+          "paddingRight": 20,
+          "paddingTop": 30,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            40
+          ],
+          "gridTemplateRows": [
+            30
+          ],
+          "columnGap": 10,
+          "rowGap": 20,
+          "gridAutoColumns": [
+            20
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": -3,
+          "gridColumnEnd": -2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": 0,
+            "right": 0,
+            "top": 0,
+            "bottom": 0
+          },
+          "gridColumnStart": -3,
+          "gridColumnEnd": -2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 160,
+        "height": 180
+      },
+      { "x": 10, "y": 30, "width": 20, "height": 30 },
+      {
+        "x": 10,
+        "y": 0,
+        "width": 20,
+        "height": 180
+      }
+    ]
+  }
+}

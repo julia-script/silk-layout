@@ -1,0 +1,86 @@
+import style { Style, Align, OverflowAlignment }
+import box_tree { BoxTree, BoxKind }
+import context { scrollable, usedOverflowForAxis }
+import geometry { Rect, Point }
+import grid_absolute { containingArea }
+import layout_pass { LayoutPass }
+import tree { Measurement }
+
+pub fn isContainer(nodes: &BoxTree, id: usize) -> bool {
+  return nodes.node(id).kind == BoxKind.Grid && nodes.node(id).measurement != Measurement.Content
+    && !nodes.style(id).replaced
+}
+
+// The supplied padding rectangle selects the physical containing-block instance.
+// Track geometry remains content-relative, including for repeated fixed grids.
+pub fn containingRect(
+  nodes: &BoxTree,
+  output: &LayoutPass,
+  container: usize,
+  child: usize,
+  padding: Rect,
+) -> Rect {
+  let style = nodes.style(container)
+  let layout = &output.boxes[container]
+  let localPadding = layout.paddingRect()
+  let origin = Point { x: padding.x - localPadding.x, y: padding.y - localPadding.y }
+  let content = layout.contentRect().translated(origin)
+  let mut boundary = padding
+  let slot = output.cache.gridGeometry.find(container)
+  let geometry = output.cache.gridGeometry.get(slot)
+  let scrollX = scrollable(usedOverflowForAxis(style, true))
+  let scrollY = scrollable(usedOverflowForAxis(style, false))
+  if scrollX || scrollY {
+    // Position 4 §2 excludes absolute descendants, descendant overflow and
+    // relative offsets. Keep the engine's clipped normal-flow padding area,
+    // including when fragmented layout does not record reusable finals.
+    let overflow = geometry.normalPadding
+    if scrollX {
+      boundary.x = origin.x + overflow.x
+      boundary.width = overflow.width
+    }
+    if scrollY {
+      boundary.y = origin.y + overflow.y
+      boundary.height = overflow.height
+    }
+  }
+  return containingArea(
+    style,
+    &nodes.grids[nodes.style(child).grid].placement,
+    geometry,
+    content,
+    boundary,
+  )
+}
+
+pub struct StaticAlignment {
+  pub value: Align,
+  pub safety: OverflowAlignment,
+}
+
+pub fn staticAlignment(style: &Style, parent: &Style, inline: bool) -> StaticAlignment {
+  let mut value = style.alignSelf
+  let mut safety = style.alignSelfSafety
+  if inline {
+    value = style.justifySelf
+    safety = style.justifySelfSafety
+    if value == Align.Auto {
+      value = parent.justifyItems
+      safety = parent.justifyItemsSafety
+    }
+  } else if value == Align.Auto {
+    value = parent.alignItems
+    safety = parent.alignItemsSafety
+  }
+
+  // A hypothetical sole item has no baseline-sharing peer.
+  if value == Align.Baseline {
+    value = Align.SelfStart
+    safety = OverflowAlignment.Safe
+  }
+  if value == Align.LastBaseline {
+    value = Align.SelfEnd
+    safety = OverflowAlignment.Safe
+  }
+  return StaticAlignment { value: value, safety: safety }
+}

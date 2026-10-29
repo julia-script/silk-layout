@@ -60,11 +60,16 @@ impl GridAxisGeometry {
 pub struct GridGeometry {
   pub columns: GridAxisGeometry,
   pub rows: GridAxisGeometry,
+  pub normalPadding: Rect,
 }
 
 impl GridGeometry {
   pub fn make() -> GridGeometry {
-    return GridGeometry { columns: GridAxisGeometry.make(), rows: GridAxisGeometry.make() }
+    return GridGeometry {
+      columns: GridAxisGeometry.make(),
+      rows: GridAxisGeometry.make(),
+      normalPadding: Rect.zero(),
+    }
   }
 }
 

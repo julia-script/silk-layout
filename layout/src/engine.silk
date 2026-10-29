@@ -1461,7 +1461,12 @@ effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
   result.preferredRatio = ratio
   result.ratioBorderBox = ratioBorder
   exportScrollBaselines(style, node.kind, &mut result)
-  if input.performLayout { overflowGeometry(nodes, &output, id, &sizing.box, &mut result) }
+  if input.performLayout {
+    overflowGeometry(nodes, &output, id, &sizing.box, &mut result)
+    if node.kind == BoxKind.Grid && node.measurement != Measurement.Content && !style.replaced && style.position != Position.Static {
+      output.cache.gridGeometry.setPadding(id, result.scrollableOverflow)
+    }
+  }
   run output.store(id, &result, input.performLayout)
   output.closeCheckpoint(passCheckpoint)
   output.fragmentParent = previousParent

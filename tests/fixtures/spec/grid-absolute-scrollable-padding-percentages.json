@@ -1,0 +1,76 @@
+{
+  "name": "grid-absolute-scrollable-padding-percentages",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "A 200px track plus10px padding on each side creates a220px scrollable padding area. The auto-line containing area resolves left10%=22 and width50%=110; scrolling50px yields x=-28. The absolute child does not enlarge the containing area recursively.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 120,
+          "height": 60,
+          "paddingLeft": 10,
+          "paddingRight": 10,
+          "paddingTop": 10,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            200
+          ],
+          "gridTemplateRows": [
+            20
+          ],
+          "overflowX": "auto",
+          "overflowY": "auto"
+        },
+        "scrollOffset": {
+          "x": 50,
+          "y": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": { "percent": 0.1 },
+            "top": 0
+          },
+          "width": { "percent": 0.5 },
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 120,
+        "height": 60
+      },
+      {
+        "x": -28,
+        "y": 0,
+        "width": 110,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "name": "grid-absolute-ancestor-grid-area",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "The nearest positioned ancestor is the outer grid even though the generated parent is an in-flow block at (10,30). Grid placement defines the global area (60,80),60x50. CLI source coordinates are parent-relative, so the absolute source reports (50,50).",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 160,
+          "height": 180,
+          "paddingLeft": 10,
+          "paddingRight": 20,
+          "paddingTop": 30,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            40,
+            60
+          ],
+          "gridTemplateRows": [
+            30,
+            50
+          ],
+          "columnGap": 10,
+          "rowGap": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 30
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": 0,
+            "right": 0,
+            "top": 0,
+            "bottom": 0
+          },
+          "gridColumnStart": 2,
+          "gridColumnEnd": 3,
+          "gridRowStart": 2,
+          "gridRowEnd": 3
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 160,
+        "height": 180
+      },
+      { "x": 10, "y": 30, "width": 40, "height": 30 },
+      {
+        "x": 50,
+        "y": 50,
+        "width": 60,
+        "height": 50
+      }
+    ]
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "name": "grid-absolute-scrollable-padding-excludes-descendant-overflow",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect",
+    "https://drafts.csswg.org/css-position-4/#scrollable-containing-block"
+  ],
+  "derivation": "Position4 \u00a72 excludes content overflowing descendant boxes from the scrollable containing block. The nested200px child extends published scrollable overflow to200px, but the normal-flow padding area and auto-line absolute width remain100px.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "width": 100,
+          "height": 60,
+          "overflowX": "auto",
+          "overflowY": "auto",
+          "gridTemplateColumns": [
+            100
+          ],
+          "gridTemplateRows": [
+            40
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 100,
+          "height": 40
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 200,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": 0,
+            "right": 0,
+            "top": 0
+          },
+          "height": 20
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 60,
+        "scrollableOverflowWidth": 200
+      },
+      { "x": 0, "y": 0, "width": 100, "height": 40 },
+      { "x": 0, "y": 0, "width": 200, "height": 20 },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      }
+    ]
+  }
+}

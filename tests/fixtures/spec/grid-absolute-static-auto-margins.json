@@ -1,0 +1,80 @@
+{
+  "name": "grid-absolute-static-auto-margins",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "Auto self alignment inherits the grid items alignment for the static position. All static auto margins are zero: column [60,120] centers the 20px box at80; row [80,130] ends the 10px box at120.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 160,
+          "height": 180,
+          "paddingLeft": 10,
+          "paddingRight": 20,
+          "paddingTop": 30,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            40,
+            60
+          ],
+          "gridTemplateRows": [
+            30,
+            50
+          ],
+          "columnGap": 10,
+          "rowGap": 20,
+          "justifyItems": "center",
+          "alignItems": "end"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "gridColumnStart": 2,
+          "gridColumnEnd": 3,
+          "gridRowStart": 2,
+          "gridRowEnd": 3,
+          "width": 20,
+          "height": 10,
+          "marginLeft": "auto",
+          "marginRight": "auto",
+          "marginTop": "auto",
+          "marginBottom": "auto"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 160,
+        "height": 180
+      },
+      {
+        "x": 80,
+        "y": 120,
+        "width": 20,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -22,6 +22,7 @@ import fragment_fit { WidowCheck, WidowDecision, collectWidows, validateWidows }
 import axes { Axes }
 import block { inlineOffset }
 import bfc { BfcState }
+import grid_positioned as GridPositioned
 
 // Fragment ancestry, generated ancestry and source ancestry are deliberately
 // separate. In particular an interrupted inline does not own its lifted blocks.
@@ -331,7 +332,8 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
   if positioned { parent = absoluteContainingBlock(nodes, id) }
   let mut input = Input.make(viewport)
   if positioned && parent != NO_NODE {
-    let rect = containingRect(nodes, output, parent, viewport)
+    let mut rect = containingRect(nodes, output, parent, viewport)
+    if GridPositioned.isContainer(nodes, parent) { rect = GridPositioned.containingRect(nodes, output, parent, id, rect) }
     input.parent = OptionalSize.definite(rect.width, rect.height)
   } else if parent != NO_NODE {
     let rect = output.boxes[parent].contentRect()
@@ -589,7 +591,8 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   // Unfragmented siblings with this containing block share its rectangle,
   // children input, limits and their parent's scroll ancestor, which
   // positionTree keeps with absoluteInputOwner.
-  let shared = !fragmented && cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline
+  let gridContaining = cb != NO_NODE && GridPositioned.isContainer(nodes, cb)
+  let shared = !fragmented && cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline && !gridContaining
   let cached = shared && output.absoluteInputOwner == cb
   let mut cbRect = output.absoluteRect
   if !cached { cbRect = containingRect(nodes, &output, cb, viewport) }
@@ -628,6 +631,8 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       }
     }
   }
+  let originalRect = cbRect
+  if gridContaining { cbRect = GridPositioned.containingRect(nodes, &output, cb, id, cbRect) }
   let mut containing = viewport
   if cb != NO_NODE || fragmented { containing = OptionalSize.definite(cbRect.width, cbRect.height) }
   let origin = Point { x: cbRect.x, y: cbRect.y }
@@ -638,7 +643,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       let cbInput = usedInput(nodes, &output, cb, viewport)
       let cbBox = withGutter(&shapedBox(&output, cbStyle, cb, &cbInput), output.boxes[cb].scrollbarGutter)
       input = usedChildrenInputOf(nodes, &output, cb, &cbInput, &cbBox, containing)
-      if !fragmented {
+      if shared {
         output.absoluteInputOwner = cb
         output.absoluteInput = input
         output.absoluteBox = cbBox
@@ -648,14 +653,14 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       }
     }
   }
-  let mut limits = ResolvedEdges { left: cbRect.x, right: cbRect.x + cbRect.width, top: cbRect.y, bottom: cbRect.y + cbRect.height }
+  let mut limits = ResolvedEdges { left: originalRect.x, right: originalRect.x + originalRect.width, top: originalRect.y, bottom: originalRect.y + originalRect.height }
   if style.position != Position.Fixed && shared && output.absoluteLimitsSet {
     limits = output.absoluteLimits
   } else if style.position != Position.Fixed {
     // A scrollable original CB can expose abspos overflow in each reachable
     // direction. Fixed boxes without anchor positioning retain finite limits.
     let viewportContaining = cb == NO_NODE || cb == 0
-    let reachable = reachableLimits(cbStyle, cbRect, cbRect, viewportContaining)
+    let reachable = reachableLimits(cbStyle, originalRect, originalRect, viewportContaining)
     if viewportContaining || scrollable(usedOverflowForAxis(cbStyle, true)) {
       if reachable.left == -UNBOUNDED { limits.left = -UNBOUNDED }
       if reachable.right == UNBOUNDED { limits.right = UNBOUNDED }
@@ -819,6 +824,20 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
         x = absoluteAlignment(x, x + innerWidth, result.size.width + box.margin.horizontal(), limits.left, limits.right, xReverse, reverseX, crossAlign, crossSafety, startReverse(style, true), true)
         y = y + alignmentOffset(ps.justifyContent, innerHeight - result.size.height - box.margin.vertical(), yReverse, reverseY, startReverse(style, false), false, ps.justifyContentSafety == OverflowAlignment.Safe)
       }
+    } else if parent != NO_NODE && GridPositioned.isContainer(nodes, parent) {
+      // Position 3 §3.5.3: the sole item's static rectangle is its grid
+      // area when this parent is also its actual CB; otherwise content.
+      if parent == cb && cb != NO_NODE {
+        x = cbRect.x
+        y = cbRect.y
+        innerWidth = cbRect.width
+        innerHeight = cbRect.height
+      }
+      let horizontal = ps.writingMode == WritingMode.HorizontalTb
+      let alignX = GridPositioned.staticAlignment(style, ps, horizontal)
+      let alignY = GridPositioned.staticAlignment(style, ps, !horizontal)
+      x = absoluteAlignment(x, x + innerWidth, result.size.width + box.margin.horizontal(), limits.left, limits.right, reverseX, reverseX, alignX.value, alignX.safety, startReverse(style, true), true)
+      y = absoluteAlignment(y, y + innerHeight, result.size.height + box.margin.vertical(), limits.top, limits.bottom, reverseY, reverseY, alignY.value, alignY.safety, startReverse(style, false), false)
     } else {
       physicalStatic = true
       // Position 3 §3.5.3: zero block thickness, spanning the inline
@@ -1772,10 +1791,11 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
     let mut positioned = false
     let mut fixed = false
     let mut overflow = fragment.scrollableOverflow
+    let inside = overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height
     // The childless in-flow fast path below, without reading the style.
     if marked && id != NO_NODE && kind == FragmentKind.Box && fragment.firstChild == NO_NODE && !nonpainting && parentId == limitsParent && parentCovers
       && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0 && !output.outOfFlowBoxes.get(id)
-      && overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height {
+      && inside {
       if output.frame == NO_NODE || single { output.boxes[id].scrollableOverflow = overflow }
       continue
     }
@@ -1794,7 +1814,7 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
         // parentCovers below, set by an earlier sibling).
         if fragment.firstChild == NO_NODE && !positioned && !nonpainting && parentId == limitsParent && parentCovers
           && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0
-          && overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height {
+          && inside {
           continue
         }
         overflow = propagatedOverflow(style, overflow, paddingRect)
@@ -1818,7 +1838,9 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
             if output.frame == NO_NODE { normal = output.boxes[cb].normalFlowOverflow() }
             let parentStyle = nodes.style(cb)
             parentLimits = reachableLimits(parentStyle, parent.paddingRect, normal, cb == 0)
-            parentCovers = output.frame == NO_NODE && usedOverflowForAxis(parentStyle, true) == Overflow.Visible && usedOverflowForAxis(parentStyle, false) == Overflow.Visible
+            // Unscrollable overflow, visible or clipped, starts as the padding box
+            // and every child's margin box (see overflowGeometry).
+            parentCovers = output.frame == NO_NODE && !scrollable(usedOverflowForAxis(parentStyle, true)) && !scrollable(usedOverflowForAxis(parentStyle, false))
             limitsParent = parentId
           }
           limits = parentLimits
@@ -1841,7 +1863,11 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
           combined = addOverflow(combined, margin, limits)
         }
         let fragments = output.fragments.values.asMutSlice()
-        let grown = addOverflow(combined, overflow, limits)
+        // A covered box's overflow inside its border box adds nothing either.
+        // Skipping it keeps the parent's edges from re-rounding, which is what
+        // the plain pass relies on to skip unmarked fragments.
+        let mut grown = combined
+        if !covered || !inside { grown = addOverflow(combined, overflow, limits) }
         fragments[parentId].scrollableOverflow = grown
         if plain && (grown.x < 0.0 || grown.y < 0.0 || grown.x + grown.width > fragments[parentId].size.width || grown.y + grown.height > fragments[parentId].size.height) {
           let marks = output.overflowMarks.asMutSlice()
@@ -2037,8 +2063,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   // Layout an absolute ancestor before visiting any of its source descendants.
   output.outOfFlowBoxes.clear()
   run output.outOfFlowBoxes.appendRepeated(false, output.boxes.length)
-  // Whether no box is out of flow, interrupted, or a parent with clipped or
-  // scrolled overflow.
+  // Whether no box is fixed, interrupted, or a scroll container with children.
   let mut plainParents = true
   let mut at: usize = 0
   while at < output.visits.length() {
@@ -2048,11 +2073,14 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
       plainParents = false
       run interruptions(nodes, &mut output, id)
     }
-    if nodes.node(id).firstChild != NO_NODE && (usedOverflowForAxis(style, true) != Overflow.Visible || usedOverflowForAxis(style, false) != Overflow.Visible) { plainParents = false }
+    if nodes.node(id).firstChild != NO_NODE && (scrollable(usedOverflowForAxis(style, true)) || scrollable(usedOverflowForAxis(style, false))) { plainParents = false }
     if outOfFlow(style) {
-      plainParents = false
+      if style.position == Position.Fixed { plainParents = false }
       output.outOfFlowBoxes.set(id, true)
       run absolute(nodes, &mut output, &mut measurer, id, viewport, false, &viewportStyle)
+      // Its border box always adds to its containing block's overflow.
+      let placed = output.publication(id)
+      if placed != NO_NODE { run output.overflowEscapes.append(placed) }
     }
     else if output.boxes[id].hasBox() && generatedParent(nodes, id) == NO_NODE && nodes.node(id).kind != BoxKind.Inline {
       let layout = output.boxes[id]
@@ -2080,9 +2108,9 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   let mut moved = false
   if relative { moved = run positionRelative(nodes, &mut output, viewport) }
   if moved || visual { output.fragments.offsetting() }
-  // Every box is an unmoved in-flow box fragment under the root, and every
-  // parent's overflow is visible and so already covers its children's
-  // border and margin boxes (see overflowGeometry).
+  // Every box is an unmoved box fragment under the root, every in-flow one
+  // under a parent whose visible overflow already covers its border and
+  // margin boxes (see overflowGeometry), and every absolute one marked.
   let plain = plainParents && !moved && !visual && output.fragments.plain
     && output.frame == NO_NODE && output.fragments.settled.length() == 0 && output.stats.reusedLayouts == 0
   if plain { run markOverflowEscapes(&mut output) }

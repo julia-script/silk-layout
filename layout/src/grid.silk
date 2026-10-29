@@ -14,7 +14,7 @@ import geometry {
   max,
   clamp
 }
-import style { Style, Dimension, DimensionKind, Direction, Align }
+import style { Style, Dimension, DimensionKind, Direction, Align, Position }
 import context { Input, ResolvedBox, UNBOUNDED, childrenInput, resolveBox, resolve }
 import box_tree { BoxTree }
 import layout_pass { LayoutPass }
@@ -966,6 +966,31 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       style,
       &baselines,
       &mut result,
+    )
+  }
+  if input.performLayout && style.position != Position.Static {
+    let emptyNames = LineNames.make()
+    let mut columnNames = &emptyNames
+    let mut rowNames = &emptyNames
+    let mut columnExplicit = template.columns.tracks.length()
+    let mut rowExplicit = template.rows.tracks.length()
+    if prepared {
+      let value = &lease.value.template.asSlice()[0]
+      columnNames = &value.columnNames
+      rowNames = &value.rowNames
+      columnExplicit = value.columns.explicitTracks
+      rowExplicit = value.rows.explicitTracks
+    }
+    run output.cache.gridGeometry.capture(
+      id,
+      columns,
+      bounds.columnOrigin,
+      columnExplicit,
+      columnNames,
+      rows,
+      bounds.rowOrigin,
+      rowExplicit,
+      rowNames,
     )
   }
   output.gridScratch.put(move lease)

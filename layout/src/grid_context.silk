@@ -21,6 +21,14 @@ impl InheritedAxis {
   pub fn make() -> InheritedAxis {
     return InheritedAxis { active: false, definite: false, tracks: List<TrackState>.make(), lines: List<GridNamedLine>.make(), gap: 0.0, extent: 0.0 }
   }
+  fn clear(self: &mut Self) {
+    self.active = false
+    self.definite = false
+    self.tracks.clear()
+    self.lines.clear()
+    self.gap = 0.0
+    self.extent = 0.0
+  }
 }
 pub struct GridContext {
   pub vertical: bool,
@@ -104,6 +112,27 @@ impl GridContextStore {
   pub fn make() -> GridContextStore {
     return GridContextStore { heads: List<usize>.make(), slots: List<Slot>.make(), journal: List<usize>.make(), free: NO_NODE, identity: 0 }
   }
+  // Reuse only released versions; active and rollback-visible descriptors
+  // remain immutable. Moving the buffers out needs no allocation or copying.
+  pub fn take(self: &mut Self, vertical: bool) -> GridContext {
+    if self.free == NO_NODE { return GridContext.make(vertical) }
+    let index = self.free
+    let mut context = Intrinsic.replace(self.slots.asMutSlice()[index].context, GridContext.make(vertical))
+    context.vertical = vertical
+    context.phase = 0
+    context.firstColumns = true
+    context.columns.clear()
+    context.rows.clear()
+    context.areas.clear()
+    return context
+  }
+  effect fn ensureFree(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
+    if self.free == NO_NODE {
+      let index = self.slots.length()
+      run self.slots.append(Slot { context: GridContext.make(false), key: 0, id: NO_NODE, previous: NO_NODE, nextFree: NO_NODE })
+      self.free = index
+    }
+  }
   fn find(self: &Self, id: usize) -> usize {
     if id >= self.heads.length() { return NO_NODE }
     return self.heads.get(id)
@@ -126,6 +155,10 @@ impl GridContextStore {
     ! OutOfMemoryError ? &mut Allocator {
     let previous = self.find(id)
     if previous != NO_NODE && sameContext(&self.slots.asSlice()[previous].context, &context) {
+      // Equal incoming buffers become the spare for the next parent probe.
+      run self.ensureFree()
+      let index = self.free
+      self.slots.asMutSlice()[index].context = move context
       return self.slots.asSlice()[previous].key
     }
     // Exhaustion must fail rather than wrap into a still-cached identity.
@@ -134,11 +167,7 @@ impl GridContextStore {
       let additional = id + 1 - self.heads.length()
       run self.heads.appendRepeated(NO_NODE, additional)
     }
-    if self.free == NO_NODE {
-      let index = self.slots.length()
-      run self.slots.append(Slot { context: GridContext.make(false), key: 0, id: NO_NODE, previous: NO_NODE, nextFree: NO_NODE })
-      self.free = index
-    }
+    run self.ensureFree()
     let index = self.free
     run self.journal.append(index)
     self.identity = self.identity + 4

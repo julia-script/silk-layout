@@ -1831,15 +1831,15 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
           if explicitMargins { aligned = aligned - authoredStart }
           let mut blockMargin: f32 = 0.0
           if !old.started && !overflowOnly && old.notBeforeFrame <= output.frame {
-            blockMargin = old.flexLeading.consume(aligned, max(0.0, capacity - rowStart))
-            if explicitMargins && old.flexLeading.remaining == 0.0 {
+            blockMargin = old.alignmentLeading.consume(aligned, max(0.0, capacity - rowStart))
+            if explicitMargins && old.alignmentLeading.remaining == 0.0 {
               blockMargin = blockMargin + FragmentBox.startMargin(itemStyle, authoredStart, old, marginInput, output.frames.writingMode)
             }
             run output.resumes.set(item.id, old)
             rowExtent = max(rowExtent, blockMargin)
             anyFit = anyFit || blockMargin > 0.0
           }
-          if !old.started && !overflowOnly && (old.flexLeading.remaining > 0.0 || capacity > 0.0 && rowStart + blockMargin >= capacity && childCross > 0.0 && (!explicitMargins || rowStart > 0.0 || input.fragmentation.canBreakBefore)) {
+          if !old.started && !overflowOnly && (old.alignmentLeading.remaining > 0.0 || capacity > 0.0 && rowStart + blockMargin >= capacity && childCross > 0.0 && (!explicitMargins || rowStart > 0.0 || input.fragmentation.canBreakBefore)) {
             allNormal = false
             mainCursor = mainCursor + item.target + item.marginEnd + mainGap + between
             if item.autoEnd { mainCursor = mainCursor + autoShare }
@@ -1853,7 +1853,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
           finalInput.fragmentation.marginStart = marginInput.marginStart
           finalInput.fragmentation.marginEnd = marginInput.marginEnd
           finalInput.fragmentation.forcedStart = marginInput.forcedStart
-          finalInput.fragmentation.flexAutoExtent = axisDimension(nodes.style(item.id), blockHorizontal).kind == DimensionKind.Auto
+          finalInput.fragmentation.allocatedAutoExtent = axisDimension(nodes.style(item.id), blockHorizontal).kind == DimensionKind.Auto
           finalInput.fragmentation.offset = input.fragmentation.offset + opening + rowStart + blockMargin
           finalInput.fragmentation.limit = input.fragmentation.limit - ending
           finalInput.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || rowStart > 0.0
@@ -2113,16 +2113,16 @@ effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
             if autoStart { startMargin = startMargin + distribution.autoShare }
             if activeOrdinal == 0 { startMargin = startMargin + leading }
             else { startMargin = startMargin + distribution.alignment.between }
-            let consumed = old.flexLeading.consume(startMargin, max(0.0, capacity - position))
+            let consumed = old.alignmentLeading.consume(startMargin, max(0.0, capacity - position))
             position = position + consumed
-            if explicitMargins && old.flexLeading.remaining == 0.0 {
+            if explicitMargins && old.alignmentLeading.remaining == 0.0 {
               position = position + FragmentBox.startMargin(itemStyle, authoredMargin, old, marginInput, output.frames.writingMode)
             }
             cursor = max(cursor, position)
             extent = max(extent, cursor)
             anyFit = anyFit || consumed > 0.0
             run output.resumes.set(item.id, old)
-            if old.flexLeading.remaining > 0.0 {
+            if old.alignmentLeading.remaining > 0.0 {
               output.closeCheckpoint(boundaryCheckpoint)
               break
             }
@@ -2142,7 +2142,7 @@ effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
           finalInput.fragmentation.marginStart = marginInput.marginStart
           finalInput.fragmentation.marginEnd = marginInput.marginEnd
           finalInput.fragmentation.forcedStart = marginInput.forcedStart
-          finalInput.fragmentation.flexAutoExtent = axisDimension(nodes.style(item.id), blockHorizontal).kind == DimensionKind.Auto
+          finalInput.fragmentation.allocatedAutoExtent = axisDimension(nodes.style(item.id), blockHorizontal).kind == DimensionKind.Auto
           finalInput.fragmentation.offset = input.fragmentation.offset + opening + position
           finalInput.fragmentation.limit = input.fragmentation.limit - ending
           finalInput.fragmentation.canBreakBefore = input.fragmentation.canBreakBefore || position > 0.0

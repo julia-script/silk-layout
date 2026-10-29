@@ -172,7 +172,7 @@ pub fn childrenInput(input: &Input, style: &Style, box: &ResolvedBox, parent: Op
   result.baselines = input.baselines
   result.fragmentation = input.fragmentation
   result.fragmentation.active = input.fragmentation.active && input.performLayout
-  result.fragmentation.flexAutoExtent = false
+  result.fragmentation.allocatedAutoExtent = false
   result.fragmentation.avoidInside = input.fragmentation.avoidInside || input.fragmentation.avoidsInside(style.breakInside)
   result.parentWritingMode = style.writingMode
   result.parentTextOrientation = style.textOrientation

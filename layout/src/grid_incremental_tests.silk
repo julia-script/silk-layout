@@ -32,7 +32,7 @@ import text {
   TextShapeRequest,
   TextRun
 }
-import grid_style { GridTemplate, GridTrack, GridBreadth, GridError }
+import grid_style { GridTemplate, GridTrack, GridBreadth, GridError, GridRepeat, GridRepeatKind }
 import tree { Tree, LayoutTree, NodeId, InvalidNode }
 import engine { compute }
 
@@ -273,4 +273,124 @@ test effect fn gridTextGrowthInvalidatesIntrinsicRowSize()
     | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run autoRowTextEdit() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 2 §7.2.3.2: repeat counts follow the definite inline size, not the
+// previous compute. Two 100px tracks plus a 10px gap fit at 210px; three need 320px.
+effect fn repeatResize()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut style = gridStyle()
+  style.columnGap = Dimension.px(10.0)
+  style.rowGap = Dimension.px(5.0)
+  let mut tree = run Tree.make(move style)
+  let root = tree.root()
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(100.0)))
+  run template.columns.repeats.append(
+    GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFill },
+  )
+  run template.autoRows.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+  run tree.setGrid(root, move template)
+  let first = run tree.append(root, Style.make())
+  let second = run tree.append(root, Style.make())
+  let third = run tree.append(root, Style.make())
+  let mut output = LayoutTree.make()
+  let mut host = TextHost {}
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(210.0, 200.0))
+  run expectBounds(&mut output, third, 0.0, 25.0, 100.0, 20.0)
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(230.0, 200.0))
+  run expectBounds(&mut output, root, 0.0, 0.0, 230.0, 45.0)
+  run expectBounds(&mut output, third, 0.0, 25.0, 100.0, 20.0)
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(320.0, 200.0))
+  run expectBounds(&mut output, root, 0.0, 0.0, 320.0, 20.0)
+  run expectBounds(&mut output, first, 0.0, 0.0, 100.0, 20.0)
+  run expectBounds(&mut output, second, 110.0, 0.0, 100.0, 20.0)
+  run expectBounds(&mut output, third, 220.0, 0.0, 100.0, 20.0)
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(210.0, 200.0))
+  run expectBounds(&mut output, root, 0.0, 0.0, 210.0, 45.0)
+  run expectBounds(&mut output, third, 0.0, 25.0, 100.0, 20.0)
+}
+
+test effect fn gridRepeatPlacementFollowsResizesAcrossTheCountBoundary()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run repeatResize() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 2 §§6, 8.5: order-modified items are placed anew after restyling;
+// display:none contributes no item, even when rebuilding renumbers other boxes.
+effect fn placementInvalidation()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut style = gridStyle()
+  style.columnGap = Dimension.px(10.0)
+  style.rowGap = Dimension.px(5.0)
+  let mut tree = run Tree.make(move style)
+  let root = tree.root()
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(40.0)))
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(40.0)))
+  run template.autoRows.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+  run tree.setGrid(root, move template)
+  let first = run tree.append(root, Style.make())
+  let second = run tree.append(root, Style.make())
+  let third = run tree.append(root, Style.make())
+  let mut output = LayoutTree.make()
+  let mut host = TextHost {}
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(120.0, 200.0))
+  run expectBounds(&mut output, third, 0.0, 25.0, 40.0, 20.0)
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(130.0, 200.0))
+  run expectBounds(&mut output, second, 50.0, 0.0, 40.0, 20.0)
+  let mut ordered = Style.make()
+  ordered.order = -1
+  run tree.setStyle(third, move ordered)
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(130.0, 200.0))
+  run expectBounds(&mut output, third, 0.0, 0.0, 40.0, 20.0)
+  run expectBounds(&mut output, first, 50.0, 0.0, 40.0, 20.0)
+  run expectBounds(&mut output, second, 0.0, 25.0, 40.0, 20.0)
+  let mut hidden = Style.make()
+  hidden.display = Display.None
+  run tree.setStyle(first, move hidden)
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(130.0, 200.0))
+  run expectBounds(&mut output, third, 0.0, 0.0, 40.0, 20.0)
+  run expectBounds(&mut output, second, 50.0, 0.0, 40.0, 20.0)
+  run tree.setStyle(first, Style.make())
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(130.0, 200.0))
+  run expectBounds(&mut output, first, 50.0, 0.0, 40.0, 20.0)
+  run expectBounds(&mut output, second, 0.0, 25.0, 40.0, 20.0)
+  let mut narrower = GridTemplate.make()
+  run narrower.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(60.0)))
+  run narrower.autoRows.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+  run tree.setGrid(root, move narrower)
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(130.0, 200.0))
+  run expectBounds(&mut output, third, 0.0, 0.0, 60.0, 20.0)
+  run expectBounds(&mut output, first, 0.0, 25.0, 60.0, 20.0)
+  run expectBounds(&mut output, second, 0.0, 50.0, 60.0, 20.0)
+}
+
+test effect fn gridPlacementInvalidatesAfterOrderTemplateAndBoxChanges()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run placementInvalidation() |> Effect.provideMut<Allocator>(&mut allocator)
 }

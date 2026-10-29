@@ -1,0 +1,239 @@
+{
+  "name": "grid-subgrid-fragment-shared-baseline-groups",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "baseline",
+    "fragmentation"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims",
+    "https://drafts.csswg.org/css-grid-2/#row-align",
+    "https://drafts.csswg.org/css-grid-2/#pagination",
+    "https://drafts.csswg.org/css-break-3/#unforced-breaks"
+  ],
+  "derivation": "The two43px rows use the same cross-subgrid first/last baseline groups as the continuous case: first-row child offsets16/0, last-row offsets30/14. Each row fits exactly one frame; the7px inter-row gap is discarded at the unforced break under the existing minimal-distortion Grid fragmentation policy. Rectangles are world coordinates at frame origins(5,7) and(11,70). Each subgrid and its child is published only on its owning row frame. Grid2 section13 does not uniquely prescribe all fragment distributions.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 78,
+          "gridTemplateColumns": [
+            31,
+            47
+          ],
+          "gridTemplateRows": [
+            43,
+            43
+          ],
+          "rowGap": 7
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "gridTemplateColumns": [
+            31
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 11,
+          "height": 13,
+          "alignSelf": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 2,
+          "gridRowStart": 1,
+          "gridTemplateColumns": [
+            47
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "width": 17,
+          "height": 29,
+          "alignSelf": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridRowStart": 2,
+          "gridTemplateColumns": [
+            31
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 5,
+        "style": {
+          "width": 11,
+          "height": 13,
+          "alignSelf": "last baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 2,
+          "gridRowStart": 2,
+          "gridTemplateColumns": [
+            47
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 7,
+        "style": {
+          "width": 17,
+          "height": 29,
+          "alignSelf": "last baseline"
+        }
+      }
+    ],
+    "fragmentation": {
+      "kind": "page",
+      "frames": [
+        {
+          "x": 5,
+          "y": 7,
+          "width": 78,
+          "height": 43
+        },
+        {
+          "x": 11,
+          "y": 70,
+          "width": 78,
+          "height": 43
+        }
+      ]
+    }
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 5,
+            "y": 7,
+            "width": 78,
+            "height": 43
+          },
+          {
+            "x": 11,
+            "y": 70,
+            "width": 78,
+            "height": 43
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 5,
+            "y": 7,
+            "width": 31,
+            "height": 43
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 5,
+            "y": 23,
+            "width": 11,
+            "height": 13
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 36,
+            "y": 7,
+            "width": 47,
+            "height": 43
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 36,
+            "y": 7,
+            "width": 17,
+            "height": 29
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 11,
+            "y": 70,
+            "width": 31,
+            "height": 43
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 11,
+            "y": 100,
+            "width": 11,
+            "height": 13
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 42,
+            "y": 70,
+            "width": 47,
+            "height": 43
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 42,
+            "y": 84,
+            "width": 17,
+            "height": 29
+          }
+        ]
+      }
+    ]
+  }
+}

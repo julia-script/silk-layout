@@ -208,3 +208,21 @@ test effect fn inheritedPhysicalHeightLeavesWidthConstraintsOrdinary()
   let ordinary = resolveBox(&style, &input)
   run Testing.expect(ordinary.size.height == 500.0 && ordinary.min.height == 400.0 && ordinary.max.height == 600.0, "key zero preserves ordinary sizing")
 }
+
+test effect fn inheritedContextPooledDescriptorsResetWithoutRecyclingIdentity()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridContextStore.make()
+  let accepted = run bind(&mut store, 2, 32) |> Effect.provideMut<Allocator>(&mut allocator)
+  let equal = run bind(&mut store, 2, 32) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut spare = store.take(true)
+  run Testing.expect(equal == accepted && spare.vertical && spare.phase == 0 && spare.firstColumns, "equal bindings return a reusable descriptor with fresh request metadata")
+  run Testing.expect(!spare.columns.active && !spare.columns.definite && spare.columns.gap == 0.0 && spare.columns.extent == 0.0 && spare.columns.tracks.length() == 0 && spare.columns.lines.length() == 0 && spare.areas.length() == 0, "taking a pooled descriptor clears every inherited dependency")
+  spare.rows.active = true
+  run spare.rows.tracks.append(TrackState.fixed(20.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let changed = run store.bind(2, move spare) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.commit()
+  let recycled = store.take(false)
+  run Testing.expect(!recycled.vertical && recycled.phase == 0 && recycled.columns.tracks.length() == 0 && recycled.columns.lines.length() == 0 && recycled.areas.length() == 0, "committed predecessor buffers reset before reuse")
+  run Testing.expect(changed != accepted && store.valid(2, changed) && !store.valid(2, accepted), "taking released buffers cannot alias a live context")
+}

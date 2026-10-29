@@ -1,7 +1,7 @@
 import style { Style, Align, OverflowAlignment, WritingMode }
 import box_tree { BoxTree, BoxKind }
 import context { scrollable, usedOverflowForAxis }
-import geometry { Rect, Point }
+import geometry { Rect, Point, max }
 import grid_absolute { containingArea }
 import layout_pass { LayoutPass }
 import tree { Measurement, NO_NODE }
@@ -55,6 +55,7 @@ pub fn containingRect(
   child: usize,
   padding: Rect,
   fragment: usize,
+  joined: bool,
 ) -> Rect {
   let style = nodes.style(container)
   let latest = output.cache.gridGeometry.find(container)
@@ -81,6 +82,39 @@ pub fn containingRect(
     content.height = padding.height - localPadding.height + localContent.height
   } else {
     content.width = padding.width - localPadding.width + localContent.width
+  }
+  if joined && geometry.fragment != NO_NODE {
+    // A joined box keeps its first frame-start decoration and final frame-end
+    // decoration. The first fragment alone cannot supply a sliced ending edge.
+    let mut last = output.fragments.last(container)
+    while last != NO_NODE {
+      let value = &output.fragments.values.asSlice()[last]
+      if !value.positioningShell && !value.overflowOnly {
+        break
+      }
+      last = value.previousForBox
+    }
+    if last != NO_NODE {
+      let value = &output.fragments.values.asSlice()[last]
+      if output.frames.writingMode == WritingMode.HorizontalTb {
+        let top = localContent.y - localPadding.y
+        let bottom = value.paddingRect.y + value.paddingRect.height
+          - value.contentRect.y - value.contentRect.height
+        content.y = padding.y + top
+        content.height = max(0.0, padding.height - top - bottom)
+      } else {
+        let mut left = localContent.x - localPadding.x
+        let mut right = value.paddingRect.x + value.paddingRect.width
+          - value.contentRect.x - value.contentRect.width
+        if output.frames.writingMode == WritingMode.VerticalRl
+          || output.frames.writingMode == WritingMode.SidewaysRl {
+          left = value.contentRect.x - value.paddingRect.x
+          right = localPadding.x + localPadding.width - localContent.x - localContent.width
+        }
+        content.x = padding.x + left
+        content.width = max(0.0, padding.width - left - right)
+      }
+    }
   }
   let mut boundary = padding
   let scrollX = scrollable(usedOverflowForAxis(style, true))

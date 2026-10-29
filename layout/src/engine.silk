@@ -133,7 +133,7 @@ fn measureLeafInto<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, inp
 
 // A size probe of a flex container whose border box is already fixed needs
 // nothing from its items unless the caller reads baselines.
-effect fn firstContents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn firstContents<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, natural: NaturalDimensions, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator with Intrinsic.inlineAlways() {
   let style = nodes.style(id)
   if !input.performLayout && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && box.size.widthDefinite && box.size.heightDefinite && isFlex(style) && !style.replaced {
     let mut result = Layout.zero()
@@ -699,7 +699,7 @@ pub effect fn layoutNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
 
 // layoutNode's fresh final layout, kept to one returned local so the result
 // is built in the caller's slot.
-effect fn layoutFinal<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, request: &Input, key: &Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutFinal<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, request: &Input, key: &Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator with Intrinsic.inlineAlways() {
   let start = output.fragments.checkpoint()
   let mut bfc = BfcState.make()
   let result = run layoutInBfc(nodes, &mut output, &mut measurer, id, &request, &mut bfc)

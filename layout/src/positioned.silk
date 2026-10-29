@@ -1792,8 +1792,9 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
     let mut fixed = false
     let mut overflow = fragment.scrollableOverflow
     let inside = overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height
-    // The childless in-flow fast path below, without reading the style.
-    if marked && id != NO_NODE && kind == FragmentKind.Box && fragment.firstChild == NO_NODE && !nonpainting && parentId == limitsParent && parentCovers
+    // The in-flow fast path below, without reading the style: a box whose
+    // overflow, its descendants' included, stays inside its border box.
+    if marked && id != NO_NODE && kind == FragmentKind.Box && !nonpainting && parentId == limitsParent && parentCovers
       && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0 && u64.bitAnd(output.outOfFlowBoxes.get(id / 64), u64.shiftLeft(1, usize.toU64(id % 64))) == 0
       && inside {
       if output.frame == NO_NODE || single { output.boxes[id].scrollableOverflow = overflow }
@@ -1809,10 +1810,10 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
         if output.frame == NO_NODE || single {
           output.boxes[id].scrollableOverflow = overflow
         }
-        // A childless in-flow box whose overflow stays inside its border box
-        // adds nothing to a parent that already covers its border box (see
+        // An in-flow box whose overflow stays inside its border box adds
+        // nothing to a parent that already covers its border box (see
         // parentCovers below, set by an earlier sibling).
-        if fragment.firstChild == NO_NODE && !positioned && !nonpainting && parentId == limitsParent && parentCovers
+        if !positioned && !nonpainting && parentId == limitsParent && parentCovers
           && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0
           && inside {
           continue

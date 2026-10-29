@@ -1,0 +1,25 @@
+{
+  "name": "grid-fragment-matching-vertical-rl",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "writing-modes", "forced-breaks"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-writing-modes-4/#logical-to-physical", "https://drafts.csswg.org/css-break-3/#fragmentation-model"],
+  "derivation": "The frames, grid, and all items use vertical-rl: inline coordinates increase downward and block coordinates increase leftward. Logical columns 41/82 become physical heights at y20/61 on frame 1 and y170/211 on frame 2. The first frame's block-start is its right edge x10+73=83; the 17px first row occupies x83-17=66. Row 2 forces a break, suppressing the interrupted 5px row gap. Frame 2's right edge is x110+73=183, so its 23px second row occupies x160. The first grid fragment fills physical width73; the final fragment is physical width23. Both have physical height123.",
+  "input": {
+    "viewport": {"width": 210, "height": 320},
+    "fragmentation": {"kind": "page", "writingMode": "vertical-rl", "frames": [{"x": 10, "y": 20, "width": 73, "height": 123}, {"x": 110, "y": 170, "width": 73, "height": 123}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "writingMode": "vertical-rl", "gridTemplateColumns": [41, 82], "gridTemplateRows": [17, 23], "rowGap": 5}},
+      {"parent": 0, "style": {"writingMode": "vertical-rl"}},
+      {"parent": 0, "style": {"writingMode": "vertical-rl"}},
+      {"parent": 0, "style": {"writingMode": "vertical-rl", "breakBefore": "page"}},
+      {"parent": 0, "style": {"writingMode": "vertical-rl"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 10, "y": 20, "width": 73, "height": 123}, {"x": 160, "y": 170, "width": 23, "height": 123}]},
+    {"rects": [{"x": 66, "y": 20, "width": 17, "height": 41}]},
+    {"rects": [{"x": 66, "y": 61, "width": 17, "height": 82}]},
+    {"rects": [{"x": 160, "y": 170, "width": 23, "height": 41}]},
+    {"rects": [{"x": 160, "y": 211, "width": 23, "height": 82}]}
+  ]}
+}

@@ -1,0 +1,25 @@
+{
+  "name": "grid-fragment-spanning-item-continuation",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "spanning-items", "forced-breaks"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-grid-2/#grid-item-sizing", "https://drafts.csswg.org/css-break-3/#box-splitting"],
+  "derivation": "Column 1 spans two fixed rows of 29px and 31px, with no gap: its stretched allocation is 60px. Its sole 60px-tall child also crosses the break. Column 2 has one item in each row; the second forces a page break exactly at the first 29px frame's end. The spanning item and child each consume 29px on page 1, leaving 60-29=31px on page 2 at y47. Each must publish exactly two rectangles, not be restarted or published again when the second row is scheduled. The column-2 row items each publish one rectangle at x41, with widths 82px. Both grid fragments exactly fill their respective 29px and 31px frames.",
+  "input": {
+    "viewport": {"width": 123, "height": 96},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 29}, {"x": 0, "y": 47, "width": 123, "height": 31}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [41, 82], "gridTemplateRows": [29, 31]}},
+      {"parent": 0, "style": {"gridColumnStart": 1, "gridRowStart": 1, "gridRowEnd": 3}},
+      {"parent": 1, "style": {"height": 60}},
+      {"parent": 0, "style": {"gridColumnStart": 2, "gridRowStart": 1}},
+      {"parent": 0, "style": {"gridColumnStart": 2, "gridRowStart": 2, "breakBefore": "page"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 29}, {"x": 0, "y": 47, "width": 123, "height": 31}]},
+    {"rects": [{"x": 0, "y": 0, "width": 41, "height": 29}, {"x": 0, "y": 47, "width": 41, "height": 31}]},
+    {"rects": [{"x": 0, "y": 0, "width": 41, "height": 29}, {"x": 0, "y": 47, "width": 41, "height": 31}]},
+    {"rects": [{"x": 41, "y": 0, "width": 82, "height": 29}]},
+    {"rects": [{"x": 41, "y": 47, "width": 82, "height": 31}]}
+  ]}
+}

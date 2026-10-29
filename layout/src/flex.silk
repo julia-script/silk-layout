@@ -907,16 +907,14 @@ fn emptyFlex(style: &Style, box: &ResolvedBox) -> Layout {
   return result
 }
 pub fn emptyFlexSize(style: &Style, box: &ResolvedBox) -> Size {
-  let axis = axes(style)
-  let mainInset = edgeTotal(box.inset, axis.horizontal)
-  let crossInset = edgeTotal(box.inset, !axis.horizontal)
-  let mut main = max(0.0, optionalSize(box.size, axis.horizontal) - mainInset)
-  let mut cross = max(0.0, optionalSize(box.size, !axis.horizontal) - crossInset)
-  if !definite(box.size, axis.horizontal) { main = max(0.0, clamp(mainInset, axisSize(box.min, axis.horizontal), axisSize(box.max, axis.horizontal)) - mainInset) }
-  if !definite(box.size, !axis.horizontal) { cross = max(0.0, clamp(crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset) }
-  let mut result = Size.zero()
-  if axis.horizontal { result = Size { width: main + mainInset, height: cross + crossInset } }
-  else { result = Size { width: cross + crossInset, height: main + mainInset } }
+  // Each axis sizes alike whichever is main, so no axes are needed.
+  let insetWidth = box.inset.horizontal()
+  let insetHeight = box.inset.vertical()
+  let mut width = max(0.0, box.size.width - insetWidth)
+  let mut height = max(0.0, box.size.height - insetHeight)
+  if !box.size.widthDefinite { width = max(0.0, clamp(insetWidth, box.min.width, box.max.width) - insetWidth) }
+  if !box.size.heightDefinite { height = max(0.0, clamp(insetHeight, box.min.height, box.max.height) - insetHeight) }
+  let mut result = Size { width: width + insetWidth, height: height + insetHeight }
   if box.gutter.horizontal() > 0.0 {
     result.width = clamp(result.width, box.min.width, box.max.width)
     if box.size.widthDefinite { result.width = box.size.width }

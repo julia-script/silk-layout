@@ -1,0 +1,251 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.num.usize
+import silk.core.effect { Effect }
+import silk.core.option { Option }
+import silk.testing.testing { Testing, AssertionError }
+import fragmentation { FragmentationError, Fragmentainers, FragmentAncestor }
+import breaks { FragmentainerKind }
+import fragment_flow { computeFragmented }
+import text {
+  TextMeasure,
+  TextError,
+  TextContext,
+  TextBreak,
+  TextAnalysis,
+  TextShapeRequest,
+  TextRun
+}
+import style {
+  Style,
+  Dimension,
+  Display,
+  DisplayOutside,
+  DisplayInside,
+  BreakInside,
+  WritingMode,
+  Direction
+}
+import geometry {
+  Measure,
+  MeasureRequest,
+  Measured,
+  BaselineSet,
+  NaturalDimensions,
+  ScrollbarRequest,
+  ScrollbarMetrics,
+  FontRequest,
+  FontMetrics,
+  Size,
+  Rect,
+  Point,
+  OptionalSize
+}
+import grid_style { GridTemplate, GridTrack, GridBreadth, GridError }
+import tree { Tree, LayoutTree, NodeId, InvalidNode }
+
+struct EmptyMeasure {}
+
+impl Measure for EmptyMeasure {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    return FontMetrics.zero()
+  }
+
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop provider
+    drop request
+    return ScrollbarMetrics.zero()
+  }
+
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop provider
+    drop key
+    let mut size = Size { width: 0.0, height: 0.0 }
+    if request.known.widthDefinite {
+      size.width = request.known.width
+    }
+    if request.known.heightDefinite {
+      size.height = request.known.height
+    }
+    return Measured {
+      size: size,
+      scrollableOverflow: Rect.zero(),
+      contentBlockSize: 0.0,
+      firstBaselines: BaselineSet.zero(),
+      lastBaselines: BaselineSet.zero(),
+      hasBaseline: false,
+      hasLineBoxes: false,
+    }
+  }
+}
+
+impl TextMeasure for EmptyMeasure {
+  fn beginTextLayout(provider: &mut Self) {
+    drop provider
+  }
+
+  effect fn analyze(
+    provider: &mut Self,
+    context: TextContext,
+    output: &mut List<TextBreak>,
+  ) -> TextAnalysis
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if context.tokens.length > 0 {
+      source = context.tokens[0].source
+    }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>)
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if request.start.unit < request.context.tokens.length {
+      source = request.context.tokens[request.start.unit].source
+    }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+}
+
+fn pageFrames<'a>(pages: &'a [Rect]) -> Fragmentainers<'a> {
+  return Fragmentainers {
+    rects: Option<&'a [Rect]>.Some { value: pages },
+    repeatStep: Option<Point>.None,
+    contexts: Option<&'a [FragmentainerKind]>.None,
+    ancestors: Option<&'a [FragmentAncestor]>.None,
+    kind: FragmentainerKind.Page,
+    writingMode: WritingMode.HorizontalTb,
+    direction: Direction.Ltr,
+    firstPageRight: true,
+    rectoOnRight: true,
+  }
+}
+
+effect fn expectItem(output: &mut LayoutTree, source: NodeId, frame: usize, expected: Rect)
+  ! InvalidNode | AssertionError<'static> {
+  let box = output.firstBySource.get(source.index)
+  let first = output.fragments.first(box)
+  run Testing.expect(first != usize.MAX, "each grid item has an accepted fragment")
+  let fragment = &output.fragments.values.asSlice()[first]
+  run Testing.expect(fragment.fragmentainer == frame, "grid rows belong to the expected pages")
+  run Testing.expect(
+    fragment.nextForBox == usize.MAX,
+    "avoid-inside grid items are not split or replayed",
+  )
+  let actual = run output.sourceBounds(source)
+  run Testing.expect(
+    actual.x == expected.x && actual.y == expected.y && actual.width == expected.width
+      && actual.height == expected.height,
+    "grid item bounds use row gaps only inside a page, not across its boundary",
+  )
+}
+
+// Grid §13 and Align §8: 27 + 7 + 31 exactly fills a 65px page;
+// the third 19px row starts on the next page without its 7px gutter.
+// A second compute into 40px pages must rebuild all row progress: each
+// avoid-inside row now occupies a separate page. Origins are presentation-only.
+effect fn repeatedRowBoundaries()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut style = Style.make()
+  style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  style.rowGap = Dimension.px(7.0)
+  let mut tree = run Tree.make(move style)
+  let root = tree.root()
+  let heights: [f32; 3] = [27.0, 31.0, 19.0]
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(41.0)))
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(82.0)))
+  let mut children = List<NodeId>.make()
+  let mut row: usize = 0
+  while row < heights.length {
+    run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(heights[row])))
+    let mut column: usize = 0
+    while column < 2 {
+      let mut child = Style.make()
+      child.height = Dimension.px(heights[row])
+      child.breakInside = BreakInside.Avoid
+      run children.append(run tree.append(root, move child))
+      column = column + 1
+    }
+    row = row + 1
+  }
+  run tree.setGrid(root, move template)
+  let pages = [
+    Rect { x: 0.0, y: 0.0, width: 123.0, height: 65.0 },
+    Rect { x: 0.0, y: 83.0, width: 123.0, height: 65.0 },
+  ]
+  let smaller = [
+    Rect { x: 0.0, y: 0.0, width: 123.0, height: 40.0 },
+    Rect { x: 0.0, y: 59.0, width: 123.0, height: 40.0 },
+    Rect { x: 0.0, y: 118.0, width: 123.0, height: 40.0 },
+  ]
+  let firstY: [f32; 3] = [0.0, 34.0, 83.0]
+  let secondY: [f32; 3] = [0.0, 59.0, 118.0]
+  let mut output = LayoutTree.make()
+  let mut measure = EmptyMeasure {}
+  let mut pass: usize = 0
+  while pass < 2 {
+    let mut frames = pageFrames(&pages)
+    if pass == 1 {
+      frames = pageFrames(&smaller)
+    }
+    run computeFragmented(&tree, &mut output, &mut measure, OptionalSize.none(), move frames)
+    row = 0
+    while row < heights.length {
+      let mut frame: usize = 0
+      let mut y = firstY[row]
+      if row == 2 {
+        frame = 1
+      }
+      if pass == 1 {
+        frame = row
+        y = secondY[row]
+      }
+      run expectItem(
+        &mut output,
+        children.get(row * 2),
+        frame,
+        Rect { x: 0.0, y: y, width: 41.0, height: heights[row] },
+      )
+      run expectItem(
+        &mut output,
+        children.get(row * 2 + 1),
+        frame,
+        Rect { x: 41.0, y: y, width: 82.0, height: heights[row] },
+      )
+      row = row + 1
+    }
+    pass = pass + 1
+  }
+}
+
+test effect fn gridRowBreaksResetAcrossFragmentedComputes()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run repeatedRowBoundaries() |> Effect.provideMut<Allocator>(&mut allocator)
+}

@@ -2,7 +2,7 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.usize
 import silk.effect { Effect }
 import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
-import style { Style, Display, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
+import style { Style, Display, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, FlexDirection, FlexWrap, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
 import context { Input, ResolvedBox, resolveBox, resolves, withGutter, scrollbarGutter, edges, isFlex, isGrid, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
 import block { layoutBlock, leafBlockInto }
@@ -392,6 +392,12 @@ const KEY_PERCENT: u16 = 64
 const KEY_PERCENT_WIDTH: u16 = 128
 const KEY_PERCENT_HEIGHT: u16 = 256
 const KEY_PERCENT_EDGES: u16 = 512
+// A horizontal block or flex box whose min- and max-content widths cannot
+// read its own height: no aspect ratio, measure function, replaced content,
+// scrollbars, floats or column wrapping. KEY_WIDTH_FREE_TREE holds when the
+// whole subtree has KEY_WIDTH_FREE; see widthFreeTrees.
+const KEY_WIDTH_FREE: u16 = 1024
+const KEY_WIDTH_FREE_TREE: u16 = 2048
 
 fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   let node = nodes.node(id)
@@ -407,7 +413,30 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   if percentLike(style.width) || percentLike(style.minWidth) || percentLike(style.maxWidth) { shape = shape | KEY_PERCENT | KEY_PERCENT_WIDTH }
   if percentLike(style.height) || percentLike(style.minHeight) || percentLike(style.maxHeight) { shape = shape | KEY_PERCENT | KEY_PERCENT_HEIGHT }
   if percentEdges(&style.padding) || percentEdges(&style.margin) || percentEdges(&style.inset) { shape = shape | KEY_PERCENT | KEY_PERCENT_EDGES }
+  let columnWrap = isFlex(style) && style.flexWrap != FlexWrap.NoWrap && (style.flexDirection == FlexDirection.Column || style.flexDirection == FlexDirection.ColumnReverse)
+  if (node.kind == BoxKind.Block || node.kind == BoxKind.Flex) && node.measurement == Measurement.None && style.writingMode == WritingMode.HorizontalTb && style.aspectRatio <= 0.0 && style.overflowX == Overflow.Visible && style.overflowY == Overflow.Visible && style.float == Float.None && !columnWrap {
+    shape = shape | KEY_WIDTH_FREE
+  }
   return shape
+}
+
+// Sets KEY_WIDTH_FREE_TREE on boxes whose whole subtree is KEY_WIDTH_FREE.
+// A child's id is always greater than its parent's, so one reverse pass
+// sees every child before its parent.
+fn widthFreeTrees(nodes: &BoxTree, shapes: &mut List<u16>) {
+  let count = shapes.length()
+  let slice = shapes.asMutSlice()
+  let mut id: usize = 0
+  while id < count {
+    if slice[id] & KEY_WIDTH_FREE != 0 { slice[id] = slice[id] | KEY_WIDTH_FREE_TREE } else { slice[id] = slice[id] & ~KEY_WIDTH_FREE_TREE }
+    id = id + 1
+  }
+  id = count
+  while id > 0 {
+    id = id - 1
+    let parent = nodes.node(id).parent
+    if slice[id] & KEY_WIDTH_FREE_TREE == 0 && parent != NO_NODE && parent < count { slice[parent] = slice[parent] & ~KEY_WIDTH_FREE_TREE }
+  }
 }
 
 effect fn keyShapes(nodes: &BoxTree, result: &mut List<u16>) ! OutOfMemoryError ? &mut Allocator {
@@ -419,6 +448,7 @@ effect fn keyShapes(nodes: &BoxTree, result: &mut List<u16>) ! OutOfMemoryError 
     run result.append(keyShape(nodes, id))
     id = id + 1
   }
+  widthFreeTrees(nodes, &mut result.*)
 }
 
 fn cacheKey(shape: u16, input: &Input, viewportFree: bool) -> Input {
@@ -440,6 +470,15 @@ pub fn normalizeKey(shape: u16, key: &mut Input, viewportFree: bool) {
   }
   if key.known.widthDefinite { key.availableWidth = AvailableSpace.maxContent() }
   if key.known.heightDefinite { key.availableHeight = AvailableSpace.maxContent() }
+  // A width-only probe of a subtree whose widths never read heights gets the
+  // same answer at any height (a stretched flex item's definite height, §9.8).
+  if key.intrinsicWidth && !key.fullSize && shape & KEY_WIDTH_FREE_TREE != 0 && key.parentWritingMode == WritingMode.HorizontalTb {
+    key.known.height = 0.0
+    key.known.heightDefinite = false
+    key.availableHeight = AvailableSpace.maxContent()
+    key.parent.height = 0.0
+    key.parent.heightDefinite = false
+  }
   // Inline formatting boxes and replaced boxes keep the rest of the request.
   if shape & KEY_FIXED != 0 { return }
   // An empty box has the same min- and max-content contribution, and a
@@ -1661,6 +1700,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       shapes[restyled.get(at)] = keyShape(&nodes, restyled.get(at))
       at = at + 1
     }
+    if restyled.length() != 0 { widthFreeTrees(&nodes, &mut facts.keyShapes) }
     // Every style a visit depends on (position, overflow, display) regenerates
     // boxes when it changes; see Tree.setStyle.
     if !restoring {

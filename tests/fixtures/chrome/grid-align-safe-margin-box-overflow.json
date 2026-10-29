@@ -1,0 +1,62 @@
+{
+  "name": "grid-align-safe-margin-box-overflow",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#overflow-values"
+  ],
+  "derivation": "The 40px border box fits, but fixed 10px margins make its 60px margin box overflow the 50px area. Safe center/end fall back to start, retaining 10px physical start margins.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 50,
+          "height": 50,
+          "gridTemplateColumns": [
+            50
+          ],
+          "gridTemplateRows": [
+            50
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 40,
+          "height": 40,
+          "margin": 10,
+          "justifySelf": "center",
+          "justifySelfSafety": "safe",
+          "alignSelf": "end",
+          "alignSelfSafety": "safe"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 50
+      },
+      {
+        "x": 10,
+        "y": 10,
+        "width": 40,
+        "height": 40
+      }
+    ]
+  }
+}

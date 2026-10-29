@@ -1,0 +1,78 @@
+{
+  "name": "grid-align-auto-fit-coincident-distribution",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#gutters",
+    "https://drafts.csswg.org/css-grid-2/#grid-align"
+  ],
+  "derivation": "Three 20px repetitions fit in 100px with two 10px gaps. Only tracks 1 and 3 are occupied, so track 2 collapses. Two live 20px tracks and one coincident 10px gutter use 50px; space-between adds 50px to that gutter, placing track 3 at 80px.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "height": 20,
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": "auto-fit",
+                "tracks": [
+                  20
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            20
+          ],
+          "columnGap": 10,
+          "justifyContent": "space-between"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 3
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 20
+      },
+      {
+        "x": 80,
+        "y": 0,
+        "width": 20,
+        "height": 20
+      }
+    ]
+  }
+}

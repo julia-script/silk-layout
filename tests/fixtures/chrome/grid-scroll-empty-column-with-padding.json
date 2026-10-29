@@ -1,0 +1,75 @@
+{
+  "name": "grid-scroll-empty-column-with-padding",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "alignment",
+    "scroll-state"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#overflow",
+    "https://drafts.csswg.org/css-grid-2/#grid-align",
+    "https://drafts.csswg.org/css-align-3/#overflow-scroll-position"
+  ],
+  "derivation": "An empty 120px grid column is still part of grid overflow even with zero row extent. Its 10px start/end padding makes 140px scrollable width; no grid item supplies this extent. The 1px absolute probe creates no tracks and moves to x=-70 when the 100px request clamps to the 70px scroll range.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 70,
+          "height": 20,
+          "paddingLeft": 10,
+          "paddingRight": 10,
+          "gridTemplateColumns": [
+            120
+          ],
+          "gridTemplateRows": "none",
+          "overflowX": "auto",
+          "overflowY": "auto"
+        },
+        "scrollOffset": {
+          "x": 100,
+          "y": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "width": 1,
+          "height": 1,
+          "inset": {
+            "left": 0,
+            "top": 0
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 70,
+        "height": 20,
+        "scrollableOverflowX": 0,
+        "scrollableOverflowWidth": 140
+      },
+      {
+        "x": -70,
+        "y": 0,
+        "width": 1,
+        "height": 1
+      }
+    ]
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "name": "grid-scroll-safe-end-does-not-open-origin",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "alignment",
+    "scroll-state"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#overflow",
+    "https://drafts.csswg.org/css-grid-2/#grid-align",
+    "https://drafts.csswg.org/css-align-3/#overflow-scroll-position"
+  ],
+  "derivation": "Safe end alignment falls back to start for the overfull track. The origin remains zero; the 120px grid can scroll toward its end, but the negative absolute box cannot open the start edge.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "width": 50,
+          "height": 20,
+          "gridTemplateColumns": [
+            120
+          ],
+          "gridTemplateRows": [
+            20
+          ],
+          "justifyContent": "end",
+          "justifyContentSafety": "safe",
+          "overflowX": "auto",
+          "overflowY": "auto"
+        },
+        "scrollOffset": {
+          "x": -100,
+          "y": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": -100,
+            "top": 0
+          },
+          "width": 10,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 20,
+        "scrollableOverflowX": 0,
+        "scrollableOverflowWidth": 120
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": -100,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

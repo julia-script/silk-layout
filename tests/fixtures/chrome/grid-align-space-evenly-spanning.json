@@ -1,0 +1,81 @@
+{
+  "name": "grid-align-space-evenly-spanning",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-align",
+    "https://drafts.csswg.org/css-align-3/#distribution-values"
+  ],
+  "derivation": "Three 20px tracks and two 10px gaps use 80px per axis, leaving 120px. space-evenly starts at 30px and advances 60px per track. The spanning item includes both expanded gutters.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 200,
+          "height": 200,
+          "gridTemplateColumns": [
+            20,
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            20,
+            20,
+            20
+          ],
+          "columnGap": 10,
+          "rowGap": 10,
+          "justifyContent": "space-evenly",
+          "alignContent": "space-evenly"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridColumnEnd": 4,
+          "gridRowStart": 1,
+          "gridRowEnd": 4
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 200
+      },
+      {
+        "x": 30,
+        "y": 30,
+        "width": 140,
+        "height": 140
+      },
+      {
+        "x": 90,
+        "y": 90,
+        "width": 20,
+        "height": 20
+      }
+    ]
+  }
+}

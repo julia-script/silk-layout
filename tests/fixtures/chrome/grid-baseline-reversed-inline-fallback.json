@@ -1,0 +1,102 @@
+{
+  "name": "grid-baseline-reversed-inline-fallback",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "baseline",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#baseline-values",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline"
+  ],
+  "derivation": "Each sideways-lr LTR item has physical inline-start at the bottom of its 100px column. The singleton first-baseline group uses safe self-start, placing its 2px item at y=98. The last-baseline group uses safe self-end, placing its item at y=0. The horizontal-tb mode assumed for baseline synthesis does not change the subject's physical self edges.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "width": 10,
+          "height": 100,
+          "writingMode": "sideways-lr",
+          "direction": "ltr",
+          "gridTemplateColumns": [
+            100
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "justifyItems": "baseline"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 1,
+          "height": 2,
+          "writingMode": "sideways-lr",
+          "direction": "ltr"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "width": 10,
+          "height": 100,
+          "writingMode": "sideways-lr",
+          "direction": "ltr",
+          "gridTemplateColumns": [
+            100
+          ],
+          "gridTemplateRows": [
+            10
+          ],
+          "justifyItems": "last baseline"
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "width": 1,
+          "height": 2,
+          "writingMode": "sideways-lr",
+          "direction": "ltr"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 10,
+        "height": 200
+      },
+      {
+        "y": 0
+      },
+      {
+        "x": 0,
+        "y": 98
+      },
+      {
+        "y": 100
+      },
+      {
+        "x": 0,
+        "y": 0
+      }
+    ]
+  }
+}

@@ -74,6 +74,47 @@ test effect fn gridGeometryNestedRollbackRestoresRepeatedVersions()
   )
 }
 
+test effect fn gridGeometryAcceptedFragmentsRemainImmutableAcrossRollback()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridGeometryStore.make()
+  run captureBox(&mut store, 4, 43.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  let first = store.findFragment(4, 7)
+  let checkpoint = store.checkpoint()
+  run captureBox(&mut store, 4, 33.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 19, Rect.zero(), Rect.zero())
+  run Testing.expect(
+    store.get(first).columns.tracks.get(0).start == 43.0
+      && store.get(store.findFragment(4, 19)).columns.tracks.get(0).start == 33.0,
+    "Grid 10.1 areas retain each accepted frame's own flexible columns",
+  )
+  store.restore(checkpoint)
+  run Testing.expect(store.findFragment(4, 19) == NO_NODE, "rollback removes rejected frame geometry")
+  run Testing.expect(store.findFragment(4, 7) == first, "rollback preserves earlier published geometry")
+}
+
+test effect fn gridGeometryShellRetentionDoesNotPublishProbeRows()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridGeometryStore.make()
+  run captureBox(&mut store, 4, 43.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  let checkpoint = store.checkpoint()
+  run captureBox(&mut store, 4, 53.0, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let retained = store.retain(4)
+  store.restore(checkpoint)
+  run store.publish(4, retained) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 31, Rect.zero(), Rect.zero())
+  run Testing.expect(
+    store.get(store.findFragment(4, 7)).columns.tracks.get(0).start == 43.0
+      && store.get(store.findFragment(4, 31)).columns.tracks.get(0).start == 53.0,
+    "positioning-only shell retains its allocation without replacing an accepted frame",
+  )
+  store.restore(checkpoint)
+  run Testing.expect(store.findFragment(4, 31) == NO_NODE, "shell publication participates in outer rollback")
+}
+
 test effect fn gridGeometryCommitKeepsLatestAndUntouchedFinals()
   ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()

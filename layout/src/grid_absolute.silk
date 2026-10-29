@@ -1,0 +1,200 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.i32
+import axes { Axes }
+import geometry { Rect }
+import grid_lines { LineNames, resolveAbsoluteSpan }
+import grid_style { GridLine, GridPlacement }
+import grid_tracks { TrackState }
+import style { Style, Direction }
+
+pub struct TrackEdges {
+  pub start: f64,
+  pub end: f64
+}
+
+impl Copy for TrackEdges {}
+
+// Final, content-relative flow coordinates only: no sizing scratch or Layout copies.
+pub struct GridAxisGeometry {
+  pub tracks: List<TrackEdges>,
+  pub names: LineNames,
+  pub origin: i32,
+  pub explicitTracks: usize,
+}
+
+impl GridAxisGeometry {
+  pub fn make() -> GridAxisGeometry {
+    return GridAxisGeometry {
+      tracks: List<TrackEdges>.make(),
+      names: LineNames.make(),
+      origin: 0,
+      explicitTracks: 0,
+    }
+  }
+
+  pub effect fn capture(
+    self: &mut Self,
+    tracks: &[TrackState],
+    origin: i32,
+    explicitTracks: usize,
+    names: &LineNames,
+  )
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    self.tracks.clear()
+    let mut at: usize = 0
+    while at < tracks.length {
+      run self.tracks.append(
+        TrackEdges { start: tracks[at].position, end: tracks[at].position + tracks[at].base },
+      )
+      at = at + 1
+    }
+    run self.names.copyOccurrencesFrom(names)
+    self.origin = origin
+    self.explicitTracks = explicitTracks
+  }
+}
+
+pub struct GridGeometry {
+  pub columns: GridAxisGeometry,
+  pub rows: GridAxisGeometry,
+}
+
+impl GridGeometry {
+  pub fn make() -> GridGeometry {
+    return GridGeometry { columns: GridAxisGeometry.make(), rows: GridAxisGeometry.make() }
+  }
+}
+
+fn lineEdge(axis: &GridAxisGeometry, line: i32, start: bool) -> f64 {
+  let tracks = axis.tracks.asSlice()
+
+  // Grid §11.5 explicitly fixes an empty grid's sole line at flow-start,
+  // independently of justify-content/align-content.
+  if tracks.length == 0 {
+    return 0.0
+  }
+  let index = i32.toUsize(line - axis.origin)
+
+  // The resolver already restricts endpoints to existing lines. A start
+  // faces the following track and an end faces the preceding track, so
+  // gutters are included inside spans but excluded at their outside edges.
+  if index == 0 {
+    return tracks[0].start
+  }
+  if index == tracks.length {
+    return tracks[tracks.length - 1].end
+  }
+  if start {
+    return tracks[index].start
+  }
+  return tracks[index - 1].end
+}
+
+fn axisArea(
+  axis: &GridAxisGeometry,
+  start: &GridLine,
+  end: &GridLine,
+  contentStart: f64,
+  contentSize: f64,
+  paddingStart: f64,
+  paddingSize: f64,
+  reverse: bool,
+) -> TrackEdges {
+  let span = resolveAbsoluteSpan(
+    start,
+    end,
+    axis.explicitTracks,
+    &axis.names,
+    axis.origin,
+    axis.tracks.asSlice().length,
+  )
+  let mut low = paddingStart
+  let mut high = paddingStart + paddingSize
+  if span.hasStart {
+    let position = lineEdge(axis, span.start, true)
+    if reverse {
+      high = contentStart + contentSize - position
+    } else {
+      low = contentStart + position
+    }
+  }
+  if span.hasEnd {
+    let position = lineEdge(axis, span.end, false)
+    if reverse {
+      low = contentStart + contentSize - position
+    } else {
+      high = contentStart + position
+    }
+  }
+  return TrackEdges { start: low, end: high }
+}
+
+// Grid §10.1: padding is the augmented padding boundary in physical coordinates.
+// Insets and static positions are deliberately not part of this pure resolver.
+pub fn containingArea(
+  style: &Style,
+  placement: &GridPlacement,
+  geometry: &GridGeometry,
+  content: Rect,
+  padding: Rect,
+) -> Rect {
+  let axes = Axes.make(style.writingMode)
+  let reverseInline = (style.usedDirection() == Direction.Rtl) != axes.reverseLine
+  if axes.vertical {
+    let inline = axisArea(
+      &geometry.columns,
+      &placement.columnStart,
+      &placement.columnEnd,
+      content.y,
+      content.height,
+      padding.y,
+      padding.height,
+      reverseInline,
+    )
+    let block = axisArea(
+      &geometry.rows,
+      &placement.rowStart,
+      &placement.rowEnd,
+      content.x,
+      content.width,
+      padding.x,
+      padding.width,
+      axes.reverseBlock,
+    )
+    return Rect {
+      x: block.start,
+      y: inline.start,
+      width: block.end - block.start,
+      height: inline.end - inline.start,
+    }
+  }
+  let inline = axisArea(
+    &geometry.columns,
+    &placement.columnStart,
+    &placement.columnEnd,
+    content.x,
+    content.width,
+    padding.x,
+    padding.width,
+    reverseInline,
+  )
+  let block = axisArea(
+    &geometry.rows,
+    &placement.rowStart,
+    &placement.rowEnd,
+    content.y,
+    content.height,
+    padding.y,
+    padding.height,
+    axes.reverseBlock,
+  )
+  return Rect {
+    x: inline.start,
+    y: block.start,
+    width: inline.end - inline.start,
+    height: block.end - block.start,
+  }
+}

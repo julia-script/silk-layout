@@ -9,7 +9,7 @@ import block { layoutBlock, leafBlockInto }
 import flex { layoutFlex, emptyFlexSize, FlexScratch }
 import grid_scratch { GridScratchPool }
 import grid { layoutGrid }
-import positioned { positionTree, positionVisits, reachableLimits, addOverflow, subtreeOverflow }
+import positioned { positionTree, positionVisits, reachableLimits, addOverflow, propagatedOverflow, subtreeOverflow }
 import bfc { BfcState }
 import silk.option { Option }
 import layout_pass { LayoutPass, CacheKind, FullBoxGeometry, REUSE_INDEPENDENT, REUSE_IN_FLOW }
@@ -333,7 +333,27 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
   result.setOverflowGeometry(content, padding, flow)
   let style = nodes.style(id)
   if !scrollable(usedOverflowForAxis(style, true)) && !scrollable(usedOverflowForAxis(style, false)) {
-    result.scrollableOverflow = padding.unionWith(flow)
+    let mut overflow = padding.unionWith(flow)
+    // Unmoved children's own overflow, so that this already holds what
+    // treeOverflow propagates through unmoved in-flow boxes. The root clips
+    // its children to the viewport's reachable area there instead, and
+    // inline formatting places its children, and lines carry their overflow.
+    if output.frame == NO_NODE && id != 0 && !measured {
+      let unlimited = ResolvedEdges { left: -UNBOUNDED, right: UNBOUNDED, top: -UNBOUNDED, bottom: UNBOUNDED }
+      child = nodes.node(id).firstChild
+      while child != NO_NODE {
+        let layout = &output.boxes[child]
+        let own = layout.scrollableOverflow
+        if layout.hasBox() && (own.x < 0.0 || own.y < 0.0 || own.x + own.width > layout.size.width || own.y + own.height > layout.size.height) {
+          let childStyle = nodes.style(child)
+          if unmoved(childStyle) && nodes.node(child).kind != BoxKind.InlineFormatting {
+            overflow = addOverflow(overflow, propagatedOverflow(childStyle, own, layout.paddingRect()).translated(layout.location), unlimited)
+          }
+        }
+        child = nodes.node(child).nextSibling
+      }
+    }
+    result.scrollableOverflow = overflow
     return
   }
   let limits = reachableLimits(style, padding, flow, false)
@@ -362,6 +382,13 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
     child = nodes.node(child).nextSibling
   }
   result.scrollableOverflow = overflow
+}
+
+// Whether a box stays where normal flow put it: static, or relative with
+// every inset auto.
+fn unmoved(style: &Style) -> bool {
+  return style.position == Position.Static || (style.position == Position.Relative && style.inset.left.kind == DimensionKind.Auto
+    && style.inset.right.kind == DimensionKind.Auto && style.inset.top.kind == DimensionKind.Auto && style.inset.bottom.kind == DimensionKind.Auto)
 }
 
 // overflowGeometry of a box emptyBoxApplies to: no children, no measured

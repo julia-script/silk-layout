@@ -1,0 +1,23 @@
+{
+  "name": "grid-fragment-absolute-forced-row",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "absolute-positioning", "forced-break"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#abspos-items", "https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-grid-2/#gutters"],
+  "derivation": "Pinned Grid2 section13 normatively propagates item break-before to its row. Section11.1 suppresses the inter-row gutter at a fragment break. Section10.1 selects actual row2 as the absolute CB, not its unfragmented y22. With pages61 high at y0/83, the forced row2 starts y83 and is23 high. Its absolute child therefore starts y83 with height23 from 100%. Exact fragmentation is an engine policy, not the nonnormative section13.1 sample algorithm.",
+  "input": {
+    "viewport": {"width": 101, "height": 166},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 101, "height": 61}], "repeatStep": {"x": 0, "y": 83}},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "position": "relative", "gridTemplateColumns": [101], "gridTemplateRows": [17, 23], "rowGap": 5}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {"breakBefore": "page"}},
+      {"parent": 0, "style": {"position": "absolute", "inset": {"left": 0, "top": 0}, "width": 13, "height": {"percent": 1}, "gridRowStart": 2, "gridRowEnd": 3}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 101, "height": 61}, {"x": 0, "y": 83, "width": 101, "height": 23}]},
+    {"rects": [{"x": 0, "y": 0, "width": 101, "height": 17}]},
+    {"rects": [{"x": 0, "y": 83, "width": 101, "height": 23}]},
+    {"rects": [{"x": 0, "y": 83, "width": 13, "height": 23}]}
+  ]}
+}

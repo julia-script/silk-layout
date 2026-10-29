@@ -285,6 +285,8 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   axis: &Axes,
   own: &mut GridAxisScratch,
   cross: &GridAxisScratch,
+  priorTracks: &[TrackState],
+  priorGap: f32,
   sizing: &AxisSizing,
   crossSizing: &AxisSizing,
   crossFinal: bool,
@@ -295,6 +297,12 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   ? &mut Allocator {
   let tracks = own.tracks.asSlice()
   let crossTracks = cross.tracks.asSlice()
+  let mut contextTracks = tracks
+  let mut contextGap = sizing.usedGap
+  if priorTracks.length != 0 {
+    contextTracks = priorTracks
+    contextGap = priorGap
+  }
   let constraint = usedSpace(sizing)
   let mut intrinsic = false
   let mut index: usize = 0
@@ -352,7 +360,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
         }
       }
       let key = run sizingContext(nodes, &mut output, item, parent, inherited,
-        &own, cross, sizing, crossSizing, crossFinal)
+        contextTracks, contextGap, cross, sizing, crossSizing, crossFinal)
       let request = itemInput(&output, item.id, base, nodes.style(item.id), parent, axis, area, key)
       let mut measured = ItemContribution {
         minimum: 0.0,
@@ -443,7 +451,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
               area.widthDefinite = true }
           }
           let key = run sizingContext(nodes, &mut output, item, parent, inherited,
-            &own, cross, sizing, crossSizing, crossFinal)
+            contextTracks, contextGap, cross, sizing, crossSizing, crossFinal)
           let request = itemInput(&output, item.id, base, nodes.style(item.id), parent, axis, area, key)
           next = run collectInherited(nodes, &mut output, &mut measurer, item.id, &request,
             tracks, sizing, parent, horizontal, Subgrid.reversed(parent, sizing.columns), start, end,
@@ -528,6 +536,25 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
 )
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
+  // §12.1 adjustments retain the preceding pass's used tracks while the
+  // solver reinitializes this axis. Descendant contexts must describe that
+  // estimate, not the zero bases currently being solved. Only an actual
+  // adjustment of this physical axis owns a previous pass: collectInherited
+  // can reconstruct the opposite axis at this phase, with no memo dependency.
+  let mut priorTracks = List<TrackState>.make()
+  let priorGap = sizing.usedGap
+  if inherited.phase >= 3
+    && sizing.columns == (inherited.firstColumns == (inherited.phase == 3)) {
+    let mut itemIndex: usize = 0
+    let mut needsEstimate = false
+    while itemIndex < items.length && !needsEstimate {
+      needsEstimate = Subgrid.eligible(nodes, items[itemIndex].id)
+      itemIndex = itemIndex + 1
+    }
+    if needsEstimate {
+      run priorTracks.appendSlice(own.tracks.asSlice())
+    }
+  }
   sizing.resolvedCyclic = false
   sizing.usedGap = max(0.0, resolve(sizing.gap, sizing.size, sizing.definite, sizing.gap.value))
   run initializeTracks(
@@ -560,6 +587,8 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     axis,
     &mut own,
     cross,
+    priorTracks.asSlice(),
+    priorGap,
     &sizing,
     crossSizing,
     crossFinal,
@@ -596,6 +625,8 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
       axis,
       &mut own,
       cross,
+      priorTracks.asSlice(),
+      priorGap,
       &sizing,
       crossSizing,
       crossFinal,
@@ -929,6 +960,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   if phase != 0 { lastPhase = phase }
   let mut stage: usize = 1
   let mut adjusted = false
+  let noPriorTracks: [TrackState; 0] = []
   while stage <= lastPhase {
     let columns = firstColumns == (stage == 1 || stage == 3)
     let mut needed = stage <= 2 || stage == 3 || adjusted
@@ -939,7 +971,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       if stage > 2 {
         needed = run collectContributions(nodes, &mut output, &mut measurer, items, &base,
           style, &inheritance, &axis, &mut lease.value.columns, &lease.value.rows,
-          &columnSizing, &rowSizing, true, true, &mut baselines)
+          &noPriorTracks, 0.0, &columnSizing, &rowSizing, true, true, &mut baselines)
       }
       if needed {
         run sizeAxis(nodes, &mut output, &mut measurer, items, &base, style, &inheritance,
@@ -952,7 +984,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       if stage > 2 {
         needed = run collectContributions(nodes, &mut output, &mut measurer, items, &base,
           style, &inheritance, &axis, &mut lease.value.rows, &lease.value.columns,
-          &rowSizing, &columnSizing, true, true, &mut baselines)
+          &noPriorTracks, 0.0, &rowSizing, &columnSizing, true, true, &mut baselines)
       }
       if needed {
         run sizeAxis(nodes, &mut output, &mut measurer, items, &base, style, &inheritance,
@@ -1323,17 +1355,17 @@ fn axisSizing(columns: bool, bounds: GridBounds, logical: &ResolvedBox,
 }
 
 effect fn sizingContext(nodes: &BoxTree, output: &mut LayoutPass, item: &GridItem,
-  parent: &Style, inherited: &InheritanceSource, own: &GridAxisScratch,
+  parent: &Style, inherited: &InheritanceSource, ownTracks: &[TrackState], ownGap: f32,
   cross: &GridAxisScratch, sizing: &AxisSizing, crossSizing: &AxisSizing, crossFinal: bool,
 ) -> usize ! OutOfMemoryError ? &mut Allocator {
   if !Subgrid.eligible(nodes, item.id) { return 0 }
   if sizing.columns {
     return run Subgrid.bind(nodes, &mut output.cache.gridContexts, item, parent, inherited,
-      own.tracks.asSlice(), cross.tracks.asSlice(), sizing.usedGap, crossSizing.usedGap,
+      ownTracks, cross.tracks.asSlice(), ownGap, crossSizing.usedGap,
       inherited.phase >= 3, crossFinal)
   }
   return run Subgrid.bind(nodes, &mut output.cache.gridContexts, item, parent, inherited,
-    cross.tracks.asSlice(), own.tracks.asSlice(), crossSizing.usedGap, sizing.usedGap,
+    cross.tracks.asSlice(), ownTracks, crossSizing.usedGap, ownGap,
     crossFinal, inherited.phase >= 3)
 }
 
@@ -1505,8 +1537,8 @@ effect fn collectInherited<'pass, 'source, M: Measure + TextMeasure>(
       else { area.width = crossSize
         area.widthDefinite = true }
     }
-    let key = run sizingContext(nodes, &mut output, item, style, &local, own, cross,
-      ownSizing, crossSizing, crossFinal)
+    let key = run sizingContext(nodes, &mut output, item, style, &local,
+      own.tracks.asSlice(), ownSizing.usedGap, cross, ownSizing, crossSizing, crossFinal)
     let request = itemInput(&output, item.id, &base, nodes.style(item.id), style, &axis, area, key)
     let nested = Subgrid.inherits(nodes, item.id, rootHorizontal)
     let before = SubgridContributions.edge(work.layers.asSlice(), start, true)

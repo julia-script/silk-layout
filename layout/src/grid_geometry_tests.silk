@@ -431,4 +431,7 @@ test effect fn gridGeometryStaticInheritedProvenanceIsKeyOnly()
   store.restore(marker)
   run Testing.expect(store.get(store.find(1)).gridContext == 5,
     "static inherited provenance rolls back with the same geometry journal")
+  run store.captureContext(1, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(store.get(store.find(1)).gridContext == 0,
+    "removing inheritance explicitly replaces the existing static provenance")
 }

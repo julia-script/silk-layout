@@ -634,6 +634,24 @@ effect fn subgridPositionedEdits()
   run layout(&tree, &mut output)
   run expectRect(&mut output, absolute, 120.0, 0.0, 60.0, 20.0)
   run expectFresh(&tree, &mut output, absolute)
+
+  // Changing only the parent removes eligibility. The unchanged child now
+  // obeys min-width400 plus40px padding; absent column lines use its padding CB.
+  let mut block = Style.make()
+  block.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  block.width = Dimension.px(200.0)
+  block.height = Dimension.px(20.0)
+  run tree.setStyle(root, move block)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, subgrid, 0.0, 0.0, 440.0, 20.0)
+  run expectRect(&mut output, absolute, 0.0, 0.0, 440.0, 20.0)
+  run expectFresh(&tree, &mut output, absolute)
+  let mut ordinaryEdit = absoluteStyle()
+  ordinaryEdit.inset.left = Dimension.px(10.0)
+  run tree.setStyle(absolute, move ordinaryEdit)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, absolute, 10.0, 0.0, 430.0, 20.0)
+  run expectFresh(&tree, &mut output, absolute)
 }
 
 test effect fn positionedSubgridRetainsExactContextAcrossEdits()

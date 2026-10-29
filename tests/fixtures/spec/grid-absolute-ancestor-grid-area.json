@@ -10,7 +10,7 @@
     "https://drafts.csswg.org/css-grid-2/#static-position",
     "https://drafts.csswg.org/css-position-3/#static-position-rect"
   ],
-  "derivation": "The nearest positioned ancestor is the outer grid even though the generated parent is an in-flow block. Grid placement defines the global area (60,80),60x50 independently of that block parent.",
+  "derivation": "The nearest positioned ancestor is the outer grid even though the generated parent is an in-flow block at (10,30). Grid placement defines the global area (60,80),60x50. CLI source coordinates are parent-relative, so the absolute source reports (50,50).",
   "input": {
     "viewport": {
       "width": 800,
@@ -74,10 +74,10 @@
         "width": 160,
         "height": 180
       },
-      {},
+      { "x": 10, "y": 30, "width": 40, "height": 30 },
       {
-        "x": 60,
-        "y": 80,
+        "x": 50,
+        "y": 50,
         "width": 60,
         "height": 50
       }

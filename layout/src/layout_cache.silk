@@ -511,8 +511,28 @@ impl LayoutCache {
       run self.heads.reserve(missing)
       while self.heads.length() <= id { run self.heads.append(ABSENT) }
     }
-    let index = self.entries.length()
     let previous = self.heads.get(id)
+    // An entry neither this compute nor the previous one used is one compact
+    // would drop: the new result takes its place, so a cache whose requests
+    // all change (a drag-resize) stays the same size instead of growing
+    // into fresh memory until it is compacted.
+    if self.generation > 1 {
+      let mut at = previous
+      while at != ABSENT {
+        let entry = self.entries.get(at)
+        if entry.generation + 1 < self.generation {
+          self.entries.set(at, Entry { kind: kind, next: entry.next, generation: self.generation })
+          let inputs = self.inputs.asMutSlice()
+          inputs[at] = input.*
+          let layouts = self.layouts.asMutSlice()
+          layouts[at] = layout.*
+          self.touched = self.touched + 1
+          return
+        }
+        at = entry.next
+      }
+    }
+    let index = self.entries.length()
     run self.inputs.appendSlice(one<Input>(input))
     run self.layouts.appendSlice(one<Layout>(layout))
     run self.entries.append(Entry { kind: kind, next: previous, generation: self.generation })

@@ -1729,6 +1729,20 @@ effect fn markOverflowEscapes(output: &mut LayoutPass) ! OutOfMemoryError ? &mut
   run output.overflowMarks.appendRepeated(0, (count + 63) / 64)
   let marks = output.overflowMarks.asMutSlice()
   if count > 0 { marks[0] = 1 }
+  // A settled range's first fragment gets back its final overflow, which
+  // its parent's layout-time overflow already holds unless that is the root.
+  let values = output.fragments.values.asMutSlice()
+  let mut range: usize = 0
+  while range < output.fragments.settled.length() {
+    let settled = output.fragments.settled.get(range)
+    let first = settled.start
+    values[first].scrollableOverflow = settled.overflow
+    let overflow = settled.overflow
+    if values[first].parent == 0 && (overflow.x < 0.0 || overflow.y < 0.0 || overflow.x + overflow.width > values[first].size.width || overflow.y + overflow.height > values[first].size.height) {
+      marks[first / 64] = u64.bitOr(marks[first / 64], u64.shiftLeft(1, usize.toU64(first % 64)))
+    }
+    range = range + 1
+  }
   let mut at: usize = 0
   while at < output.overflowEscapes.length() {
     let escape = output.overflowEscapes.get(at)
@@ -1759,9 +1773,11 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
   // anything to its parent's: visit those, their parents when that makes
   // theirs leave too, and the root, marked in overflowMarks (see
   // markOverflowEscapes).
-  // Settled ranges already hold their final overflow: skip to their first fragment.
+  // Settled ranges already hold their final overflow: skip to their first
+  // fragment. The plain pass visits none it need not, and
+  // markOverflowEscapes restored their first fragments' overflow.
   let mut settled = output.fragments.settled.length()
-  if output.frame != NO_NODE { settled = 0 }
+  if output.frame != NO_NODE || plain { settled = 0 }
   let mut limitsParent = NO_NODE
   let mut parentLimits = unlimited
   // Whether the parent's layout-time scrollable overflow already holds the
@@ -2113,8 +2129,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   // Every box is an unmoved box fragment under the root, every in-flow one
   // under a parent whose visible overflow already covers its border and
   // margin boxes (see overflowGeometry), and every absolute one marked.
-  let plain = plainParents && !moved && !visual && output.fragments.plain
-    && output.frame == NO_NODE && output.fragments.settled.length() == 0 && output.stats.reusedLayouts == 0
+  let plain = plainParents && !moved && !visual && output.fragments.plain && output.frame == NO_NODE
   if plain { run markOverflowEscapes(&mut output) }
   let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport, true, plain)
   run output.selectScrollbars(nodes)

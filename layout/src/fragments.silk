@@ -223,8 +223,8 @@ pub struct FragmentArena {
   adopted: List<usize>, previousAdopted: List<usize>,
   // How many times this compute moved the previous output.
   shifts: usize,
-  // Whether this compute appended only box fragments of boxes, all under the
-  // first one, and kept nothing of the previous output (see treeOverflow).
+  // Whether every fragment, kept and copied ones included, is a box fragment
+  // of a box under the first one (see treeOverflow).
   pub plain: bool,
 }
 impl FragmentArena {
@@ -292,7 +292,7 @@ impl FragmentArena {
       run self.prepare(boxCount)
       return
     }
-    self.plain = false
+    // The kept output stays plain if it was (see `plain`).
     // Positioning applies visual offsets afresh.
     if self.offsets {
       let values = self.values.asMutSlice()
@@ -986,6 +986,7 @@ impl FragmentArena {
   // the normal-flow fragments. Works in chunks small enough to stay cached
   // between checking, copying and relinking them. Not for in-place computes.
   pub effect fn appendRange(self: &mut Self, source: &FragmentArena, start: usize, end: usize, parent: usize) -> bool ! OutOfMemoryError ? &mut Allocator {
+    if !source.plain { self.plain = false }
     let base = self.values.length()
     let sourceValues = source.values.asSlice()
     let sourceTexts = source.texts.asSlice()

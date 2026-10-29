@@ -1684,10 +1684,11 @@ fn fragmentFlowMargin(nodes: &BoxTree, output: &LayoutPass, parentId: usize, chi
 
 // Propagates the scrollable overflow of a pass holding one subtree alone.
 pub fn subtreeOverflow(nodes: &BoxTree, output: &mut LayoutPass) {
-  drop treeOverflow(nodes, &mut output, Rect.zero(), Rect.zero())
+  drop treeOverflow(nodes, &mut output, Rect.zero(), Rect.zero(), false)
 }
 
-fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normalViewport: Rect) -> Rect {
+// With `marked`, output.outOfFlowBoxes holds which boxes are out of flow.
+fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normalViewport: Rect, marked: bool) -> Rect {
   let mut result = normalViewport
   let viewportStyle = Style.make()
   let mut viewportLimits = reachableLimits(&viewportStyle, viewport, viewport, true)
@@ -1728,6 +1729,13 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
     let mut positioned = false
     let mut fixed = false
     let mut overflow = fragment.scrollableOverflow
+    // The childless in-flow fast path below, without reading the style.
+    if marked && id != NO_NODE && kind == FragmentKind.Box && fragment.firstChild == NO_NODE && !nonpainting && parentId == limitsParent && parentCovers
+      && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0 && !output.outOfFlowBoxes.get(id)
+      && overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height {
+      if output.frame == NO_NODE || single { output.boxes[id].scrollableOverflow = overflow }
+      continue
+    }
     if id != NO_NODE {
       let style = nodes.style(id)
       positioned = outOfFlow(style)
@@ -1969,12 +1977,17 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   let mut relative = false
   // Source preorder is not generated arena order after an inline interruption.
   // Layout an absolute ancestor before visiting any of its source descendants.
+  output.outOfFlowBoxes.clear()
+  run output.outOfFlowBoxes.appendRepeated(false, output.boxes.length)
   let mut at: usize = 0
   while at < output.visits.length() {
     let id = output.visits.get(at)
     let style = nodes.style(id)
     if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
-    if outOfFlow(style) { run absolute(nodes, &mut output, &mut measurer, id, viewport, false, &viewportStyle) }
+    if outOfFlow(style) {
+      output.outOfFlowBoxes.set(id, true)
+      run absolute(nodes, &mut output, &mut measurer, id, viewport, false, &viewportStyle)
+    }
     else if output.boxes[id].hasBox() && generatedParent(nodes, id) == NO_NODE && nodes.node(id).kind != BoxKind.Inline {
       let layout = output.boxes[id]
       let box = usedBox(nodes, &output, id, viewport)
@@ -1998,7 +2011,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   }
   if relative || visual { output.fragments.offsetting() }
   if relative { run positionRelative(nodes, &mut output, viewport) }
-  let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport)
+  let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport, true)
   run output.selectScrollbars(nodes)
   if output.needsRelayout || !visual { return overflow }
   let usedViewportScroll = clampScroll(viewportScroll, viewportRect, overflow)
@@ -2155,7 +2168,7 @@ pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(n
   output.frame = savedFrame
   output.fragments.offsetting()
   run positionRelative(nodes, &mut output, viewport)
-  let overflow = treeOverflow(nodes, &mut output, viewportRect, viewportRect)
+  let overflow = treeOverflow(nodes, &mut output, viewportRect, viewportRect, false)
   run output.selectScrollbars(nodes)
   if output.needsRelayout { return overflow }
   let usedViewportScroll = clampScroll(viewportScroll, viewportRect, overflow)

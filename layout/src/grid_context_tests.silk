@@ -10,7 +10,9 @@ import geometry { OptionalSize, Layout }
 import style { Style, Dimension }
 import engine { normalizeKey }
 import layout_cache { LayoutCache, CacheKind }
-import tree { NO_NODE }
+import tree { Node, NO_NODE }
+import fragments { FragmentArena }
+import layout_pass { LayoutPass }
 
 // Grid 2 §9: inherited tracks, names, areas, gaps and definiteness are request
 // dependencies even when the subgrid's available rectangle does not change.
@@ -75,8 +77,9 @@ test effect fn inheritedContextKeysCompareCompleteDependencies()
   run Testing.expect(key == equal && key & 3 == 1, "equal horizontal columns retain their width identity")
   let mut change: usize = 1
   while change <= 33 {
+    let baseline = run bind(&mut store, 3, 0) |> Effect.provideMut<Allocator>(&mut allocator)
     let changed = run bind(&mut store, 3, change) |> Effect.provideMut<Allocator>(&mut allocator)
-    run Testing.expect(changed != key && !store.valid(3, key), "every descriptor dependency invalidates the previous identity")
+    run Testing.expect(changed != baseline && !store.valid(3, baseline), "every descriptor dependency invalidates the previous identity")
     if change == 1 { run Testing.expect(changed & 3 == 2, "vertical columns mark physical height") }
     if change == 20 { run Testing.expect(changed & 3 == 3, "two inherited axes mark both physical dimensions") }
     store.commit()
@@ -163,4 +166,45 @@ test effect fn inheritedContextRequestSizingAndCacheKeys()
   input.known.widthDefinite = false
   let unknown = resolveBox(&style, &input)
   run Testing.expect(!unknown.size.widthDefinite, "indefinite inherited tracks must not fall back to authored width")
+}
+
+test effect fn inheritedContextPassCheckpointPreservesAcceptedBindings()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut layouts: [Layout; 0] = []
+  let sources: [Node; 0] = []
+  let mut arena = FragmentArena.make()
+  let mut pass = run LayoutPass.make(&mut layouts, &mut arena, &sources) |> Effect.provideMut<Allocator>(&mut allocator)
+  let parent = run bind(&mut pass.cache.gridContexts, 0, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let accepted = run bind(&mut pass.cache.gridContexts, 1, 3) |> Effect.provideMut<Allocator>(&mut allocator)
+  pass.cache.gridContexts.commit()
+  let checkpoint = pass.checkpoint()
+  let speculative = run bind(&mut pass.cache.gridContexts, 1, 4) |> Effect.provideMut<Allocator>(&mut allocator)
+  let descendant = run bind(&mut pass.cache.gridContexts, 2, 5) |> Effect.provideMut<Allocator>(&mut allocator)
+  pass.restoreCheckpoint(checkpoint)
+  pass.closeCheckpoint(checkpoint)
+  run Testing.expect(pass.cache.gridContexts.valid(0, parent) && pass.cache.gridContexts.valid(1, accepted), "shell rollback preserves both its input and accepted final child context")
+  run Testing.expect(!pass.cache.gridContexts.valid(1, speculative) && !pass.cache.gridContexts.valid(2, descendant), "fragment checkpoint removes speculative inherited contexts")
+}
+
+test effect fn inheritedPhysicalHeightLeavesWidthConstraintsOrdinary()
+  ! AssertionError<'static> {
+  let mut input = Input.make(OptionalSize.definite(200.0, 150.0))
+  input.gridContext = 6
+  input.known.height = 87.0
+  input.known.heightDefinite = true
+  let mut style = Style.make()
+  style.width = Dimension.px(42.0)
+  style.minWidth = Dimension.px(30.0)
+  style.maxWidth = Dimension.px(60.0)
+  style.height = Dimension.px(500.0)
+  style.minHeight = Dimension.px(400.0)
+  style.maxHeight = Dimension.px(600.0)
+  let box = resolveBox(&style, &input)
+  run Testing.expect(box.size.height == 87.0 && box.min.height == 0.0 && box.max.height == UNBOUNDED, "physical-height inheritance ignores authored height constraints")
+  run Testing.expect(box.size.width == 42.0 && box.min.width == 30.0 && box.max.width == 60.0, "noninherited physical width keeps all authored constraints")
+  input.gridContext = 0
+  input.known = OptionalSize.none()
+  let ordinary = resolveBox(&style, &input)
+  run Testing.expect(ordinary.size.height == 500.0 && ordinary.min.height == 400.0 && ordinary.max.height == 600.0, "key zero preserves ordinary sizing")
 }

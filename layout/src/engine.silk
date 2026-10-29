@@ -725,6 +725,17 @@ pub effect fn probeFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   let mut bfc = BfcState.make()
   // layoutBox stores every unfragmented result in output.boxes[id].
   if input.bfcContentOrigin.x == 0.0 && input.bfcContentOrigin.y == 0.0 {
+    // Use the same complete measured-leaf path without the container dispatch.
+    // Baselines, overflow, cross constraints and min/max relayout stay intact.
+    if output.frame == NO_NODE && plainMeasuredBox(nodes, &output, id, &input) {
+      let style = nodes.style(id)
+      let mut box = shapedBox(&output, style, id, &input)
+      if plainLeafWidth(style, &input, &mut box, false) {
+        drop run layoutMeasuredBox(nodes, &mut output, &mut measurer, id, &input, &bfc, &mut box)
+        run output.rememberStored(id, &key, CacheKind.IndependentBox)
+        return
+      }
+    }
     drop run layoutInBfc(nodes, &mut output, &mut measurer, id, &input, &mut bfc)
   } else {
     let mut request = input.*

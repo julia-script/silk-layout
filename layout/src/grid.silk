@@ -7,6 +7,7 @@ import geometry {
   Size,
   Point,
   OptionalSize,
+  Rect,
   AvailableSpace,
   AvailableKind,
   Measure,
@@ -26,8 +27,11 @@ import grid_style { GridTrack, GridBreadthKind }
 import grid_scratch { GridAxisScratch }
 import grid_lines { LineNames }
 import grid_template { expandedTracks }
-import grid_preparation { needsPreparation, prepareTemplate }
-import grid_contributions { measureContribution }
+import grid_preparation { needsPreparation, prepareTemplate, preferredSizes }
+import grid_contributions { ItemContribution, measureContribution }
+import grid_alignment { selfAlignment, alignTracks, alignItem }
+import grid_baselines as Baselines
+import grid_baselines { GridBaselines }
 import grid_tracks {
   TrackState,
   TrackContribution,
@@ -41,37 +45,23 @@ import grid_tracks {
   spanSize
 }
 
-fn selfAlignment(style: &Style, parent: &Style, inline: bool) -> Align {
-  let mut value = style.alignSelf
-  if inline {
-    value = style.justifySelf
-    if value == Align.Auto {
-      value = parent.justifyItems
+fn needsBaselines(nodes: &BoxTree, items: &[GridItem], parent: &Style) -> bool {
+  let mut index: usize = 0
+  while index < items.length {
+    let style = nodes.style(items[index].id)
+    let inline = selfAlignment(style, parent, true)
+    let block = selfAlignment(style, parent, false)
+    if inline == Align.Baseline || inline == Align.LastBaseline || block == Align.Baseline
+      || block == Align.LastBaseline {
+      return true
     }
-  } else if value == Align.Auto {
-    value = parent.alignItems
+    index = index + 1
   }
-  if value == Align.Normal {
-    if !style.replaced && style.aspectRatio == 0.0 {
-      return Align.Stretch
-    }
-    return Align.Start
-  }
-  return value
+  return false
 }
 
 fn stretchContent(value: Align) -> bool {
   return value == Align.Normal || value == Align.Stretch
-}
-
-fn alignmentOffset(value: Align, free: f64) -> f64 {
-  if value == Align.End || value == Align.FlexEnd {
-    return free
-  }
-  if value == Align.Center {
-    return free / 2.0
-  }
-  return 0.0
 }
 
 // Grid §6.2: the area supplies both available space and the percentage basis.
@@ -181,6 +171,7 @@ struct AxisSizing {
   origin: i32,
   count: usize,
   definite: bool,
+  baselineDefinite: bool,
   size: f64,
   minimum: f64,
   maximum: f64,
@@ -235,6 +226,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   sizing: &AxisSizing,
   crossSizing: &AxisSizing,
   crossFinal: bool,
+  baselines: &mut GridBaselines,
 ) -> bool
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
@@ -251,6 +243,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
     own.contributions.clear()
     return false
   }
+  Baselines.reset(&mut baselines, sizing.columns, own.contributions.asSlice())
   let constraint = usedSpace(sizing)
   let mut changed = false
   index = 0
@@ -275,7 +268,8 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
       AvailableKind.Definite,
     )
     let mut contribution = TrackContribution.make(start, end, 0.0, 0.0, 0.0)
-    if policy.intrinsic {
+    let aligned = Baselines.active(&baselines, index, sizing.columns)
+    if policy.intrinsic || aligned {
       let mut crossSize = crossPolicy.cap
       let crossDefinite = crossFinal || crossPolicy.fixed
       if crossFinal {
@@ -292,24 +286,48 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
         }
       }
       let request = itemInput(base, nodes.style(item.id), parent, axis, area)
-      let measured = run measureContribution(
-        nodes,
-        &mut output,
-        &mut measurer,
-        item.id,
-        &request,
-        sizing.columns != axis.vertical,
-        policy.automatic,
-        policy.cap,
-        crossPolicy.cap,
-        policy.needMin,
-        policy.needMax,
-      )
-      contribution.minimum = measured.minimum
-      contribution.minContent = measured.minContent
-      contribution.maxContent = measured.maxContent
+      let mut measured = ItemContribution {
+        minimum: 0.0,
+        minContent: 0.0,
+        maxContent: 0.0,
+        usedMinimum: 0.0,
+      }
+      if policy.intrinsic {
+        measured = run measureContribution(
+          nodes,
+          &mut output,
+          &mut measurer,
+          item.id,
+          &request,
+          sizing.columns != axis.vertical,
+          policy.automatic,
+          policy.cap,
+          crossPolicy.cap,
+          policy.needMin,
+          policy.needMax,
+        )
+        contribution.minimum = measured.minimum
+        contribution.minContent = measured.minContent
+        contribution.maxContent = measured.maxContent
+      }
+      if aligned {
+        // Fixed-track members still establish the group's baseline for members
+        // whose spans include intrinsically sized tracks.
+        run Baselines.captureContribution(
+          nodes,
+          &mut output,
+          &mut measurer,
+          &mut baselines,
+          index,
+          sizing.columns,
+          item.id,
+          &request,
+          &measured,
+          parent,
+        )
+      }
     }
-    if index < own.contributions.length() {
+    if index < own.contributions.length() && !aligned {
       let previous = &own.contributions.asSlice()[index]
       changed = changed || previous.minContent != contribution.minContent
         || previous.minimum != contribution.minimum
@@ -321,7 +339,8 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
     }
     index = index + 1
   }
-  return changed
+  let shimChanged = Baselines.applyShims(&baselines, sizing.columns, own.contributions.asMutSlice())
+  return changed || shimChanged
 }
 
 effect fn finishTracks(
@@ -373,6 +392,8 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
   collapsed: &[usize],
   crossFinal: bool,
   work: &mut List<usize>,
+  baselines: &mut GridBaselines,
+  prepareBaselines: bool,
 )
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
@@ -388,6 +409,19 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     &mut own.tracks,
   )
   collapseTracks(own.tracks.asMutSlice(), collapsed)
+  if prepareBaselines {
+    run Baselines.prepare(
+      nodes,
+      &mut measurer,
+      items,
+      parent,
+      own.tracks.asSlice(),
+      cross.tracks.asSlice(),
+      sizing.baselineDefinite,
+      crossSizing.baselineDefinite,
+      &mut baselines,
+    )
+  }
   drop run collectContributions(
     nodes,
     &mut output,
@@ -401,8 +435,9 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     &sizing,
     crossSizing,
     crossFinal,
+    &mut baselines,
   )
-  let natural = run finishTracks(&mut own, &sizing, &mut work)
+  let mut natural = run finishTracks(&mut own, &sizing, &mut work)
   if !sizing.definite {
     sizing.size = clamp(natural, sizing.minimum, sizing.maximum)
   }
@@ -434,9 +469,11 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
       &sizing,
       crossSizing,
       crossFinal,
+      &mut baselines,
     )
-    drop run finishTracks(&mut own, &sizing, &mut work)
+    natural = run finishTracks(&mut own, &sizing, &mut work)
   }
+  alignTracks(own.tracks.asMutSlice(), natural, sizing.size, parent, sizing.columns)
 }
 
 effect fn applyMinimum<'pass, 'source, M: Measure + TextMeasure>(
@@ -532,6 +569,15 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   }
   let bounds = lease.value.bounds
   let items = lease.value.items.asSlice()
+  let baselineRequested = needsBaselines(nodes, items, style)
+  let mut emptyBaselines = GridBaselines.make()
+  let mut baselines = &mut emptyBaselines
+  if baselineRequested {
+    if lease.value.baselines.length() == 0 {
+      run lease.value.baselines.append(GridBaselines.make())
+    }
+    baselines = &mut lease.value.baselines.asMutSlice()[0]
+  }
   let inlineSize = max(0.0, logical.size.width - logical.inset.horizontal())
   let blockSize = max(0.0, logical.size.height - logical.inset.vertical())
   let mut columnSizing = AxisSizing {
@@ -539,6 +585,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     origin: bounds.columnOrigin,
     count: bounds.columns,
     definite: logical.size.widthDefinite,
+    baselineDefinite: false,
     size: inlineSize,
     minimum: max(0.0, limits.min.width - logical.inset.horizontal()),
     maximum: max(0.0, limits.max.width - logical.inset.horizontal()),
@@ -557,6 +604,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     origin: bounds.rowOrigin,
     count: bounds.rows,
     definite: logical.size.heightDefinite,
+    baselineDefinite: false,
     size: blockSize,
     minimum: max(0.0, limits.min.height - logical.inset.vertical()),
     maximum: max(0.0, limits.max.height - logical.inset.vertical()),
@@ -572,6 +620,13 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   }
   columnSizing.maximum = max(columnSizing.minimum, columnSizing.maximum)
   rowSizing.maximum = max(rowSizing.minimum, rowSizing.maximum)
+  if baselineRequested {
+    // A content-derived used size does not turn indefinite fr tracks into
+    // definite tracks for the frozen baseline-cycle decision (§11.3–11.4).
+    let preferred = preferredSizes(style, input, &logical, &limits, &axis)
+    columnSizing.baselineDefinite = preferred.widthDefinite
+    rowSizing.baselineDefinite = preferred.heightDefinite
+  }
 
   // §12.1's first column pass estimates rows using their definite maxima.
   run initializeTracks(
@@ -601,6 +656,8 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     collapsedColumns,
     false,
     &mut lease.value.trackWork,
+    &mut baselines,
+    baselineRequested,
   )
   run sizeAxis(
     nodes,
@@ -619,6 +676,8 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     collapsedRows,
     true,
     &mut lease.value.trackWork,
+    &mut baselines,
+    false,
   )
   let columnsChanged = run collectContributions(
     nodes,
@@ -633,6 +692,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &columnSizing,
     &rowSizing,
     true,
+    &mut baselines,
   )
   if columnsChanged {
     run sizeAxis(
@@ -652,6 +712,8 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       collapsedColumns,
       true,
       &mut lease.value.trackWork,
+      &mut baselines,
+      false,
     )
     let rowsChanged = run collectContributions(
       nodes,
@@ -666,6 +728,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       &rowSizing,
       &columnSizing,
       true,
+      &mut baselines,
     )
     if rowsChanged {
       run sizeAxis(
@@ -685,6 +748,8 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
         collapsedRows,
         true,
         &mut lease.value.trackWork,
+        &mut baselines,
+        false,
       )
     }
   }
@@ -701,127 +766,207 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   if box.size.heightDefinite {
     result.size.height = box.size.height
   }
+  let columns = lease.value.columns.tracks.asSlice()
+  let rows = lease.value.rows.tracks.asSlice()
+  let rtl = style.usedDirection() == Direction.Rtl
+  let mut gridInline = 0.0
+  let mut gridBlock = 0.0
+  let mut gridWidth = 0.0
+  let mut gridHeight = 0.0
+  if columns.length > 0 {
+    gridInline = columns[0].position
+    gridWidth = columns[columns.length - 1].position + columns[columns.length - 1].base - gridInline
+  }
+  if rows.length > 0 {
+    gridBlock = rows[0].position
+    gridHeight = rows[rows.length - 1].position + rows[rows.length - 1].base - gridBlock
+  }
+  if rtl {
+    gridInline = columnSizing.size - gridInline - gridWidth
+  }
+  let gridSize = axis.size(Size { width: gridWidth, height: gridHeight })
+  let gridLocation = axis.physicalPoint(
+    Point { x: logical.inset.left + gridInline, y: logical.inset.top + gridBlock },
+    gridSize,
+    result.size,
+  )
+
+  // Grid §5.3 includes the grid itself in the scrollable overflow area,
+  // independently of whether any item fills its tracks.
+  result.scrollableOverflow = Rect {
+    x: gridLocation.x,
+    y: gridLocation.y,
+    width: gridSize.width,
+    height: gridSize.height,
+  }
   if !input.performLayout && !input.baselines {
     output.gridScratch.put(move lease)
     return result
   }
-  let columns = lease.value.columns.tracks.asSlice()
-  let rows = lease.value.rows.tracks.asSlice()
-  let rtl = style.usedDirection() == Direction.Rtl
-  let mut index: usize = 0
-  while index < items.length {
-    let item = &items[index]
-    let column = i32.toUsize(item.column.start)
-    let columnEnd = i32.toUsize(item.column.end)
-    let row = i32.toUsize(item.row.start)
-    let rowEnd = i32.toUsize(item.row.end)
-    let areaWidth = spanSize(columns, column, columnEnd)
-    let areaHeight = spanSize(rows, row, rowEnd)
-    let itemStyle = nodes.style(item.id)
-    let mut request = itemInput(
-      &base,
-      itemStyle,
+  let sharing = baselines.any()
+  let mut passes: usize = 1
+  if sharing {
+    Baselines.resetFinal(&mut baselines)
+    passes = 2
+  }
+  let mut pass: usize = 0
+  while pass < passes {
+    let mut index: usize = 0
+    while index < items.length {
+      let item = &items[index]
+      let column = i32.toUsize(item.column.start)
+      let columnEnd = i32.toUsize(item.column.end)
+      let row = i32.toUsize(item.row.start)
+      let rowEnd = i32.toUsize(item.row.end)
+      let areaWidth = spanSize(columns, column, columnEnd)
+      let areaHeight = spanSize(rows, row, rowEnd)
+      let itemStyle = nodes.style(item.id)
+      if pass == 0 {
+        let mut request = itemInput(
+          &base,
+          itemStyle,
+          style,
+          &axis,
+          OptionalSize.definite(areaWidth, areaHeight),
+        )
+        let columnPolicy = trackPolicy(
+          columns,
+          column,
+          columnEnd,
+          columnSizing.usedGap,
+          AvailableKind.Definite,
+        )
+        let rowPolicy = trackPolicy(rows, row, rowEnd, rowSizing.usedGap, AvailableKind.Definite)
+        let mut inlineMinimum = itemStyle.minWidth
+        let mut blockMinimum = itemStyle.minHeight
+        if axis.vertical {
+          inlineMinimum = itemStyle.minHeight
+          blockMinimum = itemStyle.minWidth
+        }
+        if columnPolicy.automatic && inlineMinimum.kind == DimensionKind.Auto {
+          let measured = run measureContribution(
+            nodes,
+            &mut output,
+            &mut measurer,
+            item.id,
+            &request,
+            !axis.vertical,
+            true,
+            columnPolicy.cap,
+            rowPolicy.cap,
+            false,
+            false,
+          )
+          run applyMinimum(
+            nodes,
+            &mut output,
+            &mut measurer,
+            item.id,
+            &mut request,
+            !axis.vertical,
+            measured.usedMinimum,
+          )
+        }
+        if rowPolicy.automatic && blockMinimum.kind == DimensionKind.Auto {
+          let measured = run measureContribution(
+            nodes,
+            &mut output,
+            &mut measurer,
+            item.id,
+            &request,
+            axis.vertical,
+            true,
+            rowPolicy.cap,
+            columnPolicy.cap,
+            false,
+            false,
+          )
+          run applyMinimum(
+            nodes,
+            &mut output,
+            &mut measurer,
+            item.id,
+            &mut request,
+            axis.vertical,
+            measured.usedMinimum,
+          )
+        }
+        request.performLayout = input.performLayout
+        request.baselines = input.baselines || Baselines.active(&baselines, index, true)
+          || Baselines.active(&baselines, index, false)
+        if input.performLayout {
+          run layoutNodeInPlace(nodes, &mut output, &mut measurer, item.id, &request)
+        } else {
+          run probeNode(nodes, &mut output, &mut measurer, item.id, &request)
+        }
+      }
+      if sharing && pass == 0 {
+        let mut inlineInset = logical.inset.left
+        if rtl {
+          inlineInset = logical.inset.right
+        }
+        Baselines.captureFinal(
+          &mut baselines,
+          index,
+          itemStyle,
+          style,
+          &output.boxes[item.id],
+          Point {
+            x: inlineInset + columns[column].position,
+            y: logical.inset.top + rows[row].position,
+          },
+          Size { width: areaWidth, height: areaHeight },
+        )
+      }
+      if !sharing || pass > 0 {
+        let size = axis.size(output.boxes[item.id].size)
+        let aligned = alignItem(
+          itemStyle,
+          style,
+          &axis,
+          Size { width: areaWidth, height: areaHeight },
+          size,
+          output.boxes[item.id].usedMargin,
+        )
+        let margin = axis.edges(aligned.margin)
+        let mut inlineShift = aligned.inlineShift
+        let mut blockShift = aligned.blockShift
+        if sharing {
+          inlineShift = Baselines.shift(&baselines, index, true, inlineShift)
+          blockShift = Baselines.shift(&baselines, index, false, blockShift)
+        }
+        let mut inlineOffset = logical.inset.left + columns[column].position + margin.left
+          + inlineShift
+        if rtl {
+          inlineOffset = logical.inset.left + columnSizing.size - columns[column].position
+            - margin.right
+            - size.width
+            - inlineShift
+        }
+        let location = axis.physicalPoint(
+          Point {
+            x: inlineOffset,
+            y: logical.inset.top + rows[row].position + margin.top + blockShift,
+          },
+          output.boxes[item.id].size,
+          result.size,
+        )
+        run output.place(item.id, location, aligned.margin, false, input.performLayout)
+      }
+      index = index + 1
+    }
+    pass = pass + 1
+  }
+  if input.baselines {
+    Baselines.containerBaselines(
+      nodes,
+      &output,
+      &mut measurer,
+      items,
       style,
-      &axis,
-      OptionalSize.definite(areaWidth, areaHeight),
+      &baselines,
+      &mut result,
     )
-    let columnPolicy = trackPolicy(
-      columns,
-      column,
-      columnEnd,
-      columnSizing.usedGap,
-      AvailableKind.Definite,
-    )
-    let rowPolicy = trackPolicy(rows, row, rowEnd, rowSizing.usedGap, AvailableKind.Definite)
-    let mut inlineMinimum = itemStyle.minWidth
-    let mut blockMinimum = itemStyle.minHeight
-    if axis.vertical {
-      inlineMinimum = itemStyle.minHeight
-      blockMinimum = itemStyle.minWidth
-    }
-    if columnPolicy.automatic && inlineMinimum.kind == DimensionKind.Auto {
-      let measured = run measureContribution(
-        nodes,
-        &mut output,
-        &mut measurer,
-        item.id,
-        &request,
-        !axis.vertical,
-        true,
-        columnPolicy.cap,
-        rowPolicy.cap,
-        false,
-        false,
-      )
-      run applyMinimum(
-        nodes,
-        &mut output,
-        &mut measurer,
-        item.id,
-        &mut request,
-        !axis.vertical,
-        measured.usedMinimum,
-      )
-    }
-    if rowPolicy.automatic && blockMinimum.kind == DimensionKind.Auto {
-      let measured = run measureContribution(
-        nodes,
-        &mut output,
-        &mut measurer,
-        item.id,
-        &request,
-        axis.vertical,
-        true,
-        rowPolicy.cap,
-        columnPolicy.cap,
-        false,
-        false,
-      )
-      run applyMinimum(
-        nodes,
-        &mut output,
-        &mut measurer,
-        item.id,
-        &mut request,
-        axis.vertical,
-        measured.usedMinimum,
-      )
-    }
-    request.performLayout = input.performLayout
-    request.baselines = input.baselines
-    if input.performLayout {
-      run layoutNodeInPlace(nodes, &mut output, &mut measurer, item.id, &request)
-    } else {
-      run probeNode(nodes, &mut output, &mut measurer, item.id, &request)
-    }
-    let size = axis.size(output.boxes[item.id].size)
-    let usedMargin = output.boxes[item.id].usedMargin
-    let margin = axis.edges(usedMargin)
-    let inlineShift = alignmentOffset(
-      selfAlignment(itemStyle, style, true),
-      areaWidth - size.width - margin.horizontal(),
-    )
-    let blockShift = alignmentOffset(
-      selfAlignment(itemStyle, style, false),
-      areaHeight - size.height - margin.vertical(),
-    )
-    let mut inlineOffset = logical.inset.left + columns[column].position + margin.left + inlineShift
-    if rtl {
-      inlineOffset = logical.inset.left + columnSizing.size - columns[column].position
-        - margin.right
-        - size.width
-        - inlineShift
-    }
-    let location = axis.physicalPoint(
-      Point {
-        x: inlineOffset,
-        y: logical.inset.top + rows[row].position + margin.top + blockShift,
-      },
-      output.boxes[item.id].size,
-      result.size,
-    )
-    run output.place(item.id, location, usedMargin, false, input.performLayout)
-    index = index + 1
   }
   output.gridScratch.put(move lease)
   return result

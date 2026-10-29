@@ -1620,7 +1620,7 @@ effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
   if input.performLayout {
     overflowGeometry(nodes, &output, id, &sizing.box, &mut result)
     if node.kind == BoxKind.Grid && node.measurement != Measurement.Content && !style.replaced && style.position != Position.Static {
-      output.cache.gridGeometry.setPadding(id, result.scrollableOverflow)
+      output.cache.gridGeometry.finish(id, result.contentRect(), result.paddingRect(), result.scrollableOverflow)
     }
   }
   run output.store(id, &result, input.performLayout)

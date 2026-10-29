@@ -125,6 +125,17 @@ struct TrackPolicy {
   needMax: bool,
 }
 
+// Grid §12.5 only grows intrinsic bounds; §12.7's definite flex fraction
+// uses available space, not item contributions. Indefinite fr still needs them.
+fn needsContribution(
+  track: &TrackState,
+  constraint: AvailableKind,
+) -> bool with Intrinsic.inlineAlways() {
+  return track.minimum != GridBreadthKind.Length
+    || (track.maximum != GridBreadthKind.Length
+      && (track.maximum != GridBreadthKind.Flex || constraint != AvailableKind.Definite))
+}
+
 fn trackPolicy(
   tracks: &[TrackState],
   start: usize,
@@ -148,8 +159,7 @@ fn trackPolicy(
     flexible = flexible || track.maximum == GridBreadthKind.Flex
     result.fixed = result.fixed && track.maximum == GridBreadthKind.Length
     result.cap = result.cap + track.cap
-    result.intrinsic = result.intrinsic || track.minimum != GridBreadthKind.Length
-      || track.maximum != GridBreadthKind.Length
+    result.intrinsic = result.intrinsic || needsContribution(track, constraint)
     result.needMin = result.needMin || track.minimum == GridBreadthKind.MinContent
       || track.minimum == GridBreadthKind.MaxContent
       || (track.minimum == GridBreadthKind.Auto && constraint != AvailableKind.Definite)
@@ -237,11 +247,11 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   ? &mut Allocator {
   let tracks = own.tracks.asSlice()
   let crossTracks = cross.tracks.asSlice()
+  let constraint = usedSpace(sizing)
   let mut intrinsic = false
   let mut index: usize = 0
   while index < tracks.length {
-    intrinsic = intrinsic || tracks[index].minimum != GridBreadthKind.Length
-      || tracks[index].maximum != GridBreadthKind.Length
+    intrinsic = intrinsic || needsContribution(&tracks[index], constraint.kind)
     index = index + 1
   }
   if !intrinsic {
@@ -249,7 +259,6 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
     return false
   }
   Baselines.reset(&mut baselines, sizing.columns, own.contributions.asSlice())
-  let constraint = usedSpace(sizing)
   let mut changed = false
   index = 0
   while index < items.length {
@@ -316,8 +325,8 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
         contribution.maxContent = measured.maxContent
       }
       if aligned {
-        // Fixed-track members still establish the group's baseline for members
-        // whose spans include intrinsically sized tracks.
+        // Members without track contributions still establish the group's
+        // baseline for members whose spans include intrinsically sized tracks.
         run Baselines.captureContribution(
           nodes,
           &mut output,

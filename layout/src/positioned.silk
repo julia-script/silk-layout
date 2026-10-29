@@ -583,7 +583,13 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   let cb = absoluteContainingBlock(nodes, id)
   let mut cbStyle = viewportStyle
   if cb != NO_NODE { cbStyle = nodes.style(cb) }
-  let mut cbRect = containingRect(nodes, &output, cb, viewport)
+  // Unfragmented siblings with this containing block share its rectangle,
+  // children input, limits and their parent's scroll ancestor, which
+  // positionTree keeps with absoluteInputOwner.
+  let shared = !fragmented && cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline
+  let cached = shared && output.absoluteInputOwner == cb
+  let mut cbRect = output.absoluteRect
+  if !cached { cbRect = containingRect(nodes, &output, cb, viewport) }
   let attached = fragmented && fixedTree(nodes, id)
   if fragmented && !attached {
     if cb == NO_NODE {
@@ -622,10 +628,10 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   let mut containing = viewport
   if cb != NO_NODE || fragmented { containing = OptionalSize.definite(cbRect.width, cbRect.height) }
   let origin = Point { x: cbRect.x, y: cbRect.y }
-  let mut input = Input.make(containing)
-  if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
-    if !fragmented && output.absoluteInputOwner == cb { input = output.absoluteInput }
-    else {
+  let mut input = output.absoluteInput
+  if !cached {
+    input = Input.make(containing)
+    if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
       let cbInput = usedInput(nodes, &output, cb, viewport)
       let cbBox = withGutter(&resolveBox(cbStyle, &cbInput), output.boxes[cb].scrollbarGutter)
       input = usedChildrenInputOf(nodes, &output, cb, &cbInput, &cbBox, containing)
@@ -633,14 +639,12 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
         output.absoluteInputOwner = cb
         output.absoluteInput = input
         output.absoluteBox = cbBox
+        output.absoluteRect = cbRect
         output.absoluteLimitsSet = false
         output.absoluteScrollParent = NO_NODE
       }
     }
   }
-  // Unfragmented siblings with this containing block share its limits and
-  // their parent's scroll ancestor (positionTree keeps them with absoluteInput).
-  let shared = !fragmented && cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline
   let mut limits = ResolvedEdges { left: cbRect.x, right: cbRect.x + cbRect.width, top: cbRect.y, bottom: cbRect.y + cbRect.height }
   if style.position != Position.Fixed && shared && output.absoluteLimitsSet {
     limits = output.absoluteLimits
@@ -746,7 +750,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   output.fragmentParent = physicalParent
   let checkpoint = output.checkpoint()
   if fragmented { input.performLayout = false }
-  let mut result = run layoutNode(nodes, &mut output, &mut measurer, id, &input)
+  let result = run layoutNode(nodes, &mut output, &mut measurer, id, &input)
   if fragmented { output.restoreCheckpoint(checkpoint) }
   output.closeCheckpoint(checkpoint)
   input.performLayout = true
@@ -930,11 +934,13 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   }
   // Scalar layout remains normal and generated-parent-relative. The physical
   // fragment is CB-owned, so publish its final placement in that coordinate space.
+  // layoutNode stored `result`; only its location changes.
   let generatedOrigin = normalPosition(nodes, &output, nodes.node(id).parent)
-  result.location = Point { x: x - generatedOrigin.x, y: y - generatedOrigin.y }
-  run output.store(id, &result, true)
+  run output.touch(id)
+  output.boxes[id].location = Point { x: x - generatedOrigin.x, y: y - generatedOrigin.y }
   let physicalOrigin = fragmentPosition(&output, physicalParent, false)
   let fragment = output.publication(id)
+  run output.fragments.editPosition(fragment)
   let fragments = output.fragments.values.asMutSlice()
   fragments[fragment].location = Point { x: x - physicalOrigin.x, y: y - physicalOrigin.y }
 }

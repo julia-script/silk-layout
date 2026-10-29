@@ -42,6 +42,7 @@ fn frameSelectionIndex(entries: &[FrameScrollbarSelection], frame: usize) -> usi
 pub struct FullBoxGeometry {
   pub parent: OptionalSize, pub known: OptionalSize, pub content: OptionalSize,
   pub minimum: Size,
+  pub gridContext: usize,
 }
 impl Copy for FullBoxGeometry {}
 pub struct PassCheckpoint {

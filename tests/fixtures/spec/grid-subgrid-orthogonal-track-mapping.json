@@ -1,0 +1,28 @@
+{
+  "name": "grid-subgrid-orthogonal-track-mapping",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "writing-mode"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrids", "https://drafts.csswg.org/css-grid-2/#subgrid-gaps"],
+  "derivation": "The horizontal parent is (30+6+50) by (20+4+40), or 86x64. Its vertical-rl child inherits parent rows as columns (20,40 with gap 4) and parent columns in reversed order as rows (50,30 with gap 6). Child row 1 is the right-hand 50px track at x=36; row 2 is the left-hand 30px track. Child columns still progress top-to-bottom at y=0 and 24. Normal gaps follow the mapped physical axes.",
+  "input": {
+    "viewport": {"width": 200, "height": 160},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 86, "gridTemplateColumns": [30, 50], "gridTemplateRows": [20, 40], "columnGap": 6, "rowGap": 4}},
+      {"parent": 0, "style": {"display": "grid", "writingMode": "vertical-rl", "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 1, "gridRowEnd": 3, "columnGap": "normal", "rowGap": "normal"}},
+      {"parent": 1, "style": {"writingMode": "vertical-rl", "gridColumnStart": 1, "gridRowStart": 1}},
+      {"parent": 1, "style": {"writingMode": "vertical-rl", "gridColumnStart": 2, "gridRowStart": 1}},
+      {"parent": 1, "style": {"writingMode": "vertical-rl", "gridColumnStart": 1, "gridRowStart": 2}},
+      {"parent": 1, "style": {"writingMode": "vertical-rl", "gridColumnStart": 2, "gridRowStart": 2}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 86, "height": 64},
+      {"x": 0, "y": 0, "width": 86, "height": 64},
+      {"x": 36, "y": 0, "width": 50, "height": 20},
+      {"x": 36, "y": 24, "width": 50, "height": 40},
+      {"x": 0, "y": 0, "width": 30, "height": 20},
+      {"x": 0, "y": 24, "width": 30, "height": 40}
+    ]
+  }
+}

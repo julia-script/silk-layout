@@ -1,0 +1,20 @@
+{
+  "name": "grid-subgrid-name-repeat-auto-span",
+  "kind": "spec",
+  "features": ["grid", "subgrid"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-span", "https://drafts.csswg.org/css-grid-2/#typedef-name-repeat"],
+  "derivation": "The local groups are [start] [edge] [edge] [], four distinct lines, so the automatically placed subgrid spans three parent tracks. The empty final group must not disappear and adjacent repeated groups must not merge. The second edge is local line3; its item occupies the73px final column at41+7+59+7=114. Explicit normal inherits the parent's7px gap.",
+  "input": {
+    "viewport": {"width": 240, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 187, "gridTemplateColumns": [41, 59, 73], "gridTemplateRows": [17], "columnGap": 7}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": {"subgrid": [{"names": ["start"]}, {"repeat": {"count": 2, "tracks": [{"names": ["edge"]}]}}, {"names": []}]}, "columnGap": "normal", "gridTemplateRows": [17]}},
+      {"parent": 1, "style": {"gridColumnStart": {"line": 2, "name": "edge"}, "gridColumnEnd": -1}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 187, "height": 17},
+    {"x": 0, "y": 0, "width": 187, "height": 17},
+    {"x": 114, "y": 0, "width": 73, "height": 17}
+  ]}
+}

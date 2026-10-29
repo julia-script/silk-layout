@@ -1,0 +1,28 @@
+{
+  "name": "grid-subgrid-reversed-track-mapping",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "writing-mode"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrids", "https://drafts.csswg.org/css-grid-2/#subgrid-gaps"],
+  "derivation": "The vertical-rl/ltr parent has top-to-bottom columns 20,40 separated by 4 and right-to-left rows 30,50 separated by 6. Its vertical-lr/rtl subgrid reverses both axes: local columns are 40,20 from bottom to top, and local rows are 50,30 from left to right. The physical track origins remain x=0/56 and y=0/24; reversing line order must not exchange the 4px and 6px gaps.",
+  "input": {
+    "viewport": {"width": 200, "height": 160},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 86, "height": 64, "writingMode": "vertical-rl", "direction": "ltr", "gridTemplateColumns": [20, 40], "gridTemplateRows": [30, 50], "columnGap": 4, "rowGap": 6}},
+      {"parent": 0, "style": {"display": "grid", "writingMode": "vertical-lr", "direction": "rtl", "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 1, "gridRowEnd": 3, "columnGap": "normal", "rowGap": "normal"}},
+      {"parent": 1, "style": {"writingMode": "vertical-lr", "direction": "rtl", "gridColumnStart": 1, "gridRowStart": 1}},
+      {"parent": 1, "style": {"writingMode": "vertical-lr", "direction": "rtl", "gridColumnStart": 2, "gridRowStart": 1}},
+      {"parent": 1, "style": {"writingMode": "vertical-lr", "direction": "rtl", "gridColumnStart": 1, "gridRowStart": 2}},
+      {"parent": 1, "style": {"writingMode": "vertical-lr", "direction": "rtl", "gridColumnStart": 2, "gridRowStart": 2}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 86, "height": 64},
+      {"x": 0, "y": 0, "width": 86, "height": 64},
+      {"x": 0, "y": 24, "width": 50, "height": 40},
+      {"x": 0, "y": 0, "width": 50, "height": 20},
+      {"x": 56, "y": 24, "width": 30, "height": 40},
+      {"x": 56, "y": 0, "width": 30, "height": 20}
+    ]
+  }
+}

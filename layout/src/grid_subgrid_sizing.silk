@@ -1,0 +1,456 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.num.i32
+import silk.num.usize
+import axes { Axes }
+import box_tree { BoxTree }
+import context { Input, ResolvedBox, childrenInput, resolve }
+import geometry { OptionalSize, AvailableSpace, AvailableKind, Measure, Size, Point, ResolvedEdges, max }
+import style { Style, Direction, DimensionKind, Align }
+import text { TextMeasure, TextError }
+import fragmentation { FragmentationError }
+import tree { NO_NODE }
+import layout_pass { LayoutPass }
+import engine { shapedBox }
+import grid { AxisSizing, itemInput, trackPolicy, sizeAxis, needsBaselines }
+import grid_lines { GridSpan }
+import grid_placement { GridItem }
+import grid_preparation { prepareTemplate }
+import grid_template { expandedTracks, expandedLines }
+import grid_tracks { TrackState, TrackContribution, initializeTracks, positionTracks, spanSize }
+import grid_baselines as Baselines
+import grid_baselines { GridBaselines }
+import grid_contributions { ItemContribution, measureContributionEdges }
+import grid_subgrid as Subgrid
+import grid_subgrid { GridSource }
+import grid_alignment { alignTracks }
+import grid_style { GridBreadthKind }
+
+pub fn estimate(tracks: &mut [TrackState], sizing: &AxisSizing, parent: &Style) {
+  let mut fixed = true
+  let mut at: usize = 0
+  while at < tracks.length {
+    if tracks[at].maximum == GridBreadthKind.Length { tracks[at].base = tracks[at].cap }
+    else { fixed = false }
+    at = at + 1
+  }
+  let natural = positionTracks(&mut tracks, sizing.usedGap)
+  if fixed && sizing.definite { alignTracks(&mut tracks, natural, sizing.size, parent, sizing.columns) }
+}
+
+fn sizing(columns: bool, count: usize, origin: i32, box: &ResolvedBox, style: &Style) -> AxisSizing {
+  let mut size = box.size.height - box.inset.vertical()
+  let mut definite = box.size.heightDefinite
+  let mut minimum = box.min.height - box.inset.vertical()
+  let mut maximum = box.max.height - box.inset.vertical()
+  let mut gap = style.rowGap
+  let mut align = style.alignContent
+  if columns {
+    size = box.size.width - box.inset.horizontal()
+    definite = box.size.widthDefinite
+    minimum = box.min.width - box.inset.horizontal()
+    maximum = box.max.width - box.inset.horizontal()
+    gap = style.columnGap
+    align = style.justifyContent
+  }
+  size = max(0.0, size)
+  minimum = max(0.0, minimum)
+  maximum = max(minimum, maximum)
+  let mut available = AvailableSpace.maxContent()
+  if definite { available = AvailableSpace.definite(size) }
+  return AxisSizing {
+    columns: columns, origin: origin, count: count, definite: definite,
+    baselineDefinite: definite, size: size, minimum: minimum, maximum: maximum,
+    available: available, gap: gap,
+    usedGap: max(0.0, resolve(gap, size, definite, gap.value)),
+    stretch: align == Align.Normal || align == Align.Stretch,
+    resolveCyclic: false, resolvedCyclic: false, inherited: false,
+  }
+}
+
+pub effect fn store(
+  values: &mut List<TrackContribution>, members: &mut List<GridItem>, cursor: &mut usize,
+  value: TrackContribution, member: GridItem,
+) -> bool ! OutOfMemoryError ? &mut Allocator {
+  let at = cursor.*
+  let mut changed = true
+  if at < values.length() {
+    let old = values.get(at)
+    changed = old.start != value.start || old.end != value.end
+      || old.minimum != value.minimum || old.minContent != value.minContent
+    values.set(at, value)
+  } else { run values.append(value) }
+  if at < members.length() { members.set(at, member) } else { run members.append(member) }
+  cursor.* = at + 1
+  return changed
+}
+
+fn mappedItem(id: usize, columns: bool, start: usize, end: usize) -> GridItem {
+  let mut result = GridItem.make(id)
+  let span = GridSpan { start: usize.toI32(start), end: usize.toI32(end), definite: true }
+  if columns { result.column = span } else { result.row = span }
+  return result
+}
+
+// Traverse only the connected inherited physical axis. The cross axis is
+// initialized at the caller's stage, not laid out by a recursive two-axis probe.
+pub effect fn collect<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M,
+  item: &GridItem, base: &Input, parent: &Style, source: &GridSource,
+  columns: &[TrackState], rows: &[TrackState], columnGap: f32, rowGap: f32,
+  root: &Style, rootTracks: &[TrackState], rootSizing: &AxisSizing,
+  mappedStart: usize, mappedEnd: usize, reverse: bool, extraLow: f32, extraHigh: f32,
+  crossFinal: bool, checkOnly: bool,
+  values: &mut List<TrackContribution>, members: &mut List<GridItem>, cursor: &mut usize,
+  baselines: &mut GridBaselines,
+) -> bool ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  let child = nodes.style(item.id)
+  let childAxis = Axes.make(child.writingMode)
+  let parentAxis = Axes.make(parent.writingMode)
+  let localColumns = Subgrid.childColumns(root, child, rootSizing.columns)
+  let parentColumns = Subgrid.childColumns(root, parent, rootSizing.columns)
+  let mut crossSpan = item.column
+  let mut crossTracks = columns
+  let mut crossGap = columnGap
+  if parentColumns { crossSpan = item.row
+    crossTracks = rows
+    crossGap = rowGap
+  }
+  let crossPolicy = trackPolicy(crossTracks, i32.toUsize(crossSpan.start), i32.toUsize(crossSpan.end), crossGap, AvailableKind.Definite)
+  let mut area = OptionalSize.none()
+  if crossFinal || crossPolicy.fixed {
+    let mut extent = crossPolicy.cap
+    if crossFinal { extent = spanSize(crossTracks, i32.toUsize(crossSpan.start), i32.toUsize(crossSpan.end)) }
+    if parentColumns { area.height = extent
+      area.heightDefinite = true
+    } else { area.width = extent
+      area.widthDefinite = true
+    }
+  }
+  let mut request = itemInput(&output, item.id, base, child, parent, &parentAxis, area)
+  let mut context = output.cache.subgrids.takeBuilder()
+  run Subgrid.makeContext(nodes, item, parent, source, columns, rows, columnGap, rowGap, &mut context)
+  context.stage = 1
+  if rootSizing.columns { context.stage = context.stage + 1 }
+  if crossFinal { context.stage = context.stage + 2 }
+  if checkOnly { context.stage = context.stage + 4 }
+  request.gridContext = run output.cache.subgrids.intern(item.id, move context)
+  let box = shapedBox(&output, child, item.id, &request)
+  let logical = childAxis.box(box)
+  let template = &nodes.grids[child.grid]
+  let mut lease = run output.cache.gridMemos.take(item.id, nodes.boxes.length())
+  let inherited = output.cache.subgrids.get(request.gridContext)
+  run prepareTemplate(nodes, item.id, lease.fresh, &request, &logical, &logical,
+    &childAxis, usize.MAX, usize.MAX, &mut lease.value, inherited)
+  let bounds = lease.value.bounds
+  let prepared = &lease.value.template.asSlice()[0]
+  let localSource = GridSource {
+    columns: expandedLines(&template.columns, &prepared.columns),
+    rows: expandedLines(&template.rows, &prepared.rows), areas: prepared.areas.asSlice(),
+    areaMasks: prepared.areaMasks.asSlice(),
+    columnOrigin: bounds.columnOrigin, rowOrigin: bounds.rowOrigin,
+    subgridChildren: true,
+  }
+  let columnTemplate = expandedTracks(&template.columns, &prepared.columns)
+  let rowTemplate = expandedTracks(&template.rows, &prepared.rows)
+  let mut columnSizing = sizing(true, bounds.columns, bounds.columnOrigin, &logical, child)
+  let mut rowSizing = sizing(false, bounds.rows, bounds.rowOrigin, &logical, child)
+  columnSizing.inherited = inherited.columns.active
+  rowSizing.inherited = inherited.rows.active
+  let mut inlineLow = logical.margin.left + logical.inset.left
+  let mut inlineHigh = logical.margin.right + logical.inset.right
+  if child.usedDirection() == Direction.Rtl {
+    inlineLow = logical.margin.right + logical.inset.right
+    inlineHigh = logical.margin.left + logical.inset.left
+  }
+  let blockLow = logical.margin.top + logical.inset.top
+  let blockHigh = logical.margin.bottom + logical.inset.bottom
+  if columnSizing.inherited {
+    if child.columnGap.kind == DimensionKind.Normal { columnSizing.usedGap = inherited.columns.gap }
+    run Subgrid.installTracks(&inherited.columns, columnSizing.usedGap, child.columnGap.kind == DimensionKind.Normal,
+      inlineLow, inlineHigh, &mut lease.value.columns.inherited)
+    lease.value.columns.tracks.clear()
+    let mut at: usize = 0
+    while at < lease.value.columns.inherited.length() { run lease.value.columns.tracks.append(lease.value.columns.inherited.get(at))
+      at = at + 1 }
+  } else {
+    run initializeTracks(columnTemplate, template.autoColumns.asSlice(), bounds.columnOrigin, bounds.columns,
+      columnSizing.size, columnSizing.definite, &mut lease.value.columns.tracks)
+    estimate(lease.value.columns.tracks.asMutSlice(), &columnSizing, child)
+  }
+  if rowSizing.inherited {
+    if child.rowGap.kind == DimensionKind.Normal { rowSizing.usedGap = inherited.rows.gap }
+    run Subgrid.installTracks(&inherited.rows, rowSizing.usedGap, child.rowGap.kind == DimensionKind.Normal,
+      blockLow, blockHigh, &mut lease.value.rows.inherited)
+    lease.value.rows.tracks.clear()
+    let mut at: usize = 0
+    while at < lease.value.rows.inherited.length() { run lease.value.rows.tracks.append(lease.value.rows.inherited.get(at))
+      at = at + 1 }
+  } else {
+    run initializeTracks(rowTemplate, template.autoRows.asSlice(), bounds.rowOrigin, bounds.rows,
+      rowSizing.size, rowSizing.definite, &mut lease.value.rows.tracks)
+    estimate(lease.value.rows.tracks.asMutSlice(), &rowSizing, child)
+  }
+  let mut localBase = childrenInput(&request, child, &box, OptionalSize.none())
+  localBase.performLayout = false
+  localBase.baselines = false
+  let localItems = lease.value.items.asSlice()
+  let mut emptyBaselines = GridBaselines.make()
+  let mut localBaselines = &mut emptyBaselines
+  if crossFinal && needsBaselines(nodes, localItems, child) {
+    if lease.value.baselines.length() == 0 { run lease.value.baselines.append(GridBaselines.make()) }
+    localBaselines = &mut lease.value.baselines.asMutSlice()[0]
+    run Baselines.prepare(nodes, &mut measurer, localItems, child,
+      lease.value.columns.tracks.asSlice(), lease.value.rows.tracks.asSlice(),
+      columnSizing.baselineDefinite, rowSizing.baselineDefinite, &mut localBaselines)
+  }
+  if crossFinal {
+    if localColumns && !rowSizing.inherited {
+      run sizeAxis(nodes, &mut output, &mut measurer, localItems, &localBase, &localSource,
+        child, &childAxis, &mut lease.value.rows, &lease.value.columns, &mut rowSizing,
+        &columnSizing, rowTemplate, template.autoRows.asSlice(), prepared.collapsedRows.asSlice(),
+        true, &mut lease.value.trackWork, &mut localBaselines, false)
+    } else if !localColumns && !columnSizing.inherited {
+      run sizeAxis(nodes, &mut output, &mut measurer, localItems, &localBase, &localSource,
+        child, &childAxis, &mut lease.value.columns, &lease.value.rows, &mut columnSizing,
+        &rowSizing, columnTemplate, template.autoColumns.asSlice(), prepared.collapsedColumns.asSlice(),
+        true, &mut lease.value.trackWork, &mut localBaselines, false)
+    }
+  }
+  let mut low = blockLow
+  let mut high = blockHigh
+  let mut gap = rowSizing.usedGap
+  let mut localCross = lease.value.columns.tracks.asSlice()
+  let mut localCrossGap = columnSizing.usedGap
+  if localColumns {
+    low = inlineLow
+    high = inlineHigh
+    gap = columnSizing.usedGap
+    localCross = lease.value.rows.tracks.asSlice()
+    localCrossGap = rowSizing.usedGap
+  }
+  if reverse { let swap = low
+    low = high
+    high = swap }
+  low = low + extraLow
+  high = high + extraHigh
+  // Interior adjustments telescope across every inherited ancestor. Estimated
+  // tracks can be floored by edge insets; their apparent spacing is not a gap.
+  // Compare the descendant's used gap to the sizing owner's gap, not merely
+  // its immediate parent's, or nested overrides lose the ancestor adjustment.
+  let delta = (gap - rootSizing.usedGap) * 0.5
+  let firstRecord = cursor.*
+  let mut changed = false
+  let mut at: usize = 0
+  while at < localItems.length {
+    let descendant = &localItems[at]
+    let mut span = descendant.row
+    let mut opposite = descendant.column
+    if localColumns { span = descendant.column
+      opposite = descendant.row }
+    let mut start = mappedStart + i32.toUsize(span.start)
+    let mut end = mappedStart + i32.toUsize(span.end)
+    if reverse { start = mappedEnd - i32.toUsize(span.end)
+      end = mappedEnd - i32.toUsize(span.start) }
+    let mut before = delta
+    let mut after = delta
+    if start == mappedStart { before = low }
+    if end == mappedEnd { after = high }
+    if Subgrid.inherits(nodes, descendant.id, child, localColumns) {
+      let childReverse = reverse != Subgrid.reversed(child, nodes.style(descendant.id), localColumns)
+      let nestedChanged = run collect(nodes, &mut output, &mut measurer, descendant, &localBase,
+        child, &localSource, lease.value.columns.tracks.asSlice(), lease.value.rows.tracks.asSlice(),
+        columnSizing.usedGap, rowSizing.usedGap, root, rootTracks, rootSizing,
+        start, end, childReverse, before, after, crossFinal, checkOnly,
+        &mut values, &mut members, &mut cursor, &mut baselines)
+      changed = changed || nestedChanged
+    } else {
+      let policy = trackPolicy(rootTracks, start, end, rootSizing.usedGap, rootSizing.available.kind)
+      let cross = trackPolicy(localCross, i32.toUsize(opposite.start), i32.toUsize(opposite.end), localCrossGap, AvailableKind.Definite)
+      let mut childArea = OptionalSize.none()
+      if crossFinal || cross.fixed {
+        let mut extent = cross.cap
+        if crossFinal { extent = spanSize(localCross, i32.toUsize(opposite.start), i32.toUsize(opposite.end)) }
+        if localColumns { childArea.height = extent
+          childArea.heightDefinite = true
+        } else { childArea.width = extent
+          childArea.widthDefinite = true }
+      }
+      let mut descendantRequest = itemInput(&output, descendant.id, &localBase, nodes.style(descendant.id), child, &childAxis, childArea)
+      if Subgrid.eligible(nodes, descendant.id) {
+        let mut descendantContext = output.cache.subgrids.takeBuilder()
+        run Subgrid.makeContext(nodes, descendant, child, &localSource,
+          lease.value.columns.tracks.asSlice(), lease.value.rows.tracks.asSlice(),
+          columnSizing.usedGap, rowSizing.usedGap, &mut descendantContext)
+        descendantContext.stage = 1
+        if crossFinal { descendantContext.stage = 3 }
+        descendantRequest.gridContext = run output.cache.subgrids.intern(descendant.id, move descendantContext)
+      }
+      let member = mappedItem(descendant.id, rootSizing.columns, start, end)
+      run Baselines.appendMember(nodes, &mut measurer, &mut baselines, cursor.*, rootSizing.columns,
+        &member, root, child, rootTracks, rootSizing.baselineDefinite, reverse)
+      let aligned = Baselines.active(&baselines, cursor.*, rootSizing.columns)
+      let mut measured = ItemContribution { minimum: 0.0, minContent: 0.0, maxContent: 0.0, usedMinimum: 0.0 }
+      if policy.intrinsic || aligned {
+        measured = run measureContributionEdges(nodes, &mut output, &mut measurer, descendant.id,
+          &descendantRequest, rootSizing.columns != Axes.make(root.writingMode).vertical,
+          policy.automatic, policy.cap, cross.cap, policy.needMin || aligned,
+          policy.needMax && !checkOnly || aligned, before + after, 0.0)
+      }
+      if aligned {
+        run Baselines.captureContributionEdges(nodes, &mut output, &mut measurer, &mut baselines,
+          cursor.*, rootSizing.columns, descendant.id, &descendantRequest, &measured, root, before, after)
+      }
+      let stored = run store(&mut values, &mut members, &mut cursor,
+        TrackContribution.make(start, end, measured.minimum, measured.minContent, measured.maxContent), member)
+      changed = changed || stored
+    }
+    at = at + 1
+  }
+  let realEnd = cursor.*
+  let mut nearestLow = mappedEnd
+  let mut nearestHigh = mappedStart
+  at = firstRecord
+  while at < realEnd {
+    let value = values.get(at)
+    if value.start < nearestLow { nearestLow = value.start }
+    if value.end > nearestHigh { nearestHigh = value.end }
+    at = at + 1
+  }
+  // Each equal-span candidate is harmlessly coalesced by the pure solver's
+  // maximum requirement. Keeping provenance avoids inventing layout children.
+  if nearestLow > mappedStart && nearestLow < mappedEnd {
+    at = firstRecord
+    while at < realEnd {
+      let original = values.get(at)
+      if original.start == nearestLow {
+        let extra = low - delta
+        let stored = run store(&mut values, &mut members, &mut cursor,
+          TrackContribution.make(mappedStart, original.end, original.minimum + extra,
+            original.minContent + extra, original.maxContent + extra),
+          mappedItem(NO_NODE, rootSizing.columns, mappedStart, original.end))
+        changed = changed || stored
+      }
+      at = at + 1
+    }
+  }
+  if nearestHigh < mappedEnd && nearestHigh > mappedStart {
+    at = firstRecord
+    while at < realEnd {
+      let original = values.get(at)
+      if original.end == nearestHigh {
+        let extra = high - delta
+        let stored = run store(&mut values, &mut members, &mut cursor,
+          TrackContribution.make(original.start, mappedEnd, original.minimum + extra,
+            original.minContent + extra, original.maxContent + extra),
+          mappedItem(NO_NODE, rootSizing.columns, original.start, mappedEnd))
+        changed = changed || stored
+      }
+      at = at + 1
+    }
+  }
+  if localItems.length == 0 && (low != 0.0 || high != 0.0) {
+    let stored = run store(&mut values, &mut members, &mut cursor,
+      TrackContribution.make(mappedStart, mappedEnd, low + high, low + high, low + high),
+      mappedItem(NO_NODE, rootSizing.columns, mappedStart, mappedEnd))
+    changed = changed || stored
+  }
+  output.cache.gridMemos.put(move lease)
+  return changed
+}
+
+fn ownerOffset(nodes: &BoxTree, output: &LayoutPass, owner: usize, id: usize) -> Point {
+  let mut result = Point { x: 0.0, y: 0.0 }
+  let mut at = id
+  while at != owner && at != NO_NODE {
+    result.x = result.x + output.boxes[at].location.x
+    result.y = result.y + output.boxes[at].location.y
+    at = nodes.node(at).parent
+  }
+  return result
+}
+
+fn currentFragment(output: &LayoutPass, id: usize) -> bool {
+  if output.frame == NO_NODE { return true }
+  let state = output.resumes.get(id)
+  return state.fragmentainer == output.frame && state.fragment != NO_NODE && !state.skipped
+}
+
+pub fn captureFinal(
+  nodes: &BoxTree, output: &LayoutPass, owner: usize, inset: ResolvedEdges,
+  members: &[GridItem], directCount: usize, tracks: &[TrackState], columns: bool,
+  baselines: &mut GridBaselines,
+) {
+  let parent = nodes.style(owner)
+  let mut at = directCount
+  while at < members.length {
+    let member = &members[at]
+    if member.id != NO_NODE && currentFragment(output, member.id) && Baselines.active(&baselines, at, columns) {
+      let layout = &output.boxes[member.id]
+      let mut span = member.row
+      let mut edge = inset.top
+      if columns {
+        span = member.column
+        edge = inset.left
+        if parent.usedDirection() == Direction.Rtl { edge = inset.right }
+      }
+      let start = edge + tracks[i32.toUsize(span.start)].position
+      let extra = Baselines.extraMargins(&baselines, at, columns)
+      Baselines.captureFinalMember(&mut baselines, at, columns, nodes.style(member.id),
+        parent, layout, start, spanSize(tracks, i32.toUsize(span.start), i32.toUsize(span.end)), extra.width, extra.height)
+    }
+    at = at + 1
+  }
+}
+
+pub effect fn placeFinal(
+  nodes: &BoxTree, output: &mut LayoutPass, owner: usize, size: Size, inset: ResolvedEdges,
+  members: &[GridItem], directCount: usize, tracks: &[TrackState], columns: bool,
+  baselines: &GridBaselines, performLayout: bool,
+) ! OutOfMemoryError ? &mut Allocator {
+  let parent = nodes.style(owner)
+  let axis = Axes.make(parent.writingMode)
+  let mut at = directCount
+  while at < members.length {
+    let member = &members[at]
+    if member.id != NO_NODE && currentFragment(&output, member.id) && Baselines.active(baselines, at, columns) {
+      let layout = &output.boxes[member.id]
+      let physical = ownerOffset(nodes, &output, owner, member.id)
+      let margin = axis.edges(layout.usedMargin)
+      let mut actual = physical.y
+      let mut edge = inset.top
+      let mut leading = margin.top
+      let mut span = member.row
+      if columns {
+        span = member.column
+        actual = physical.x
+        edge = inset.left
+        leading = margin.left
+        if axis.vertical {
+          actual = physical.y
+          if axis.reverseLine { actual = size.height - physical.y - layout.size.height }
+        }
+        if parent.usedDirection() == Direction.Rtl {
+          actual = axis.size(size).width - actual - axis.size(layout.size).width
+          edge = inset.right
+          leading = margin.right
+        }
+      } else if axis.vertical {
+        actual = physical.x
+        if axis.reverseBlock { actual = size.width - physical.x - layout.size.width }
+      }
+      let extra = Baselines.extraMargins(baselines, at, columns)
+      let mut shift = edge + tracks[i32.toUsize(span.start)].position + leading + extra.width
+        + Baselines.shift(baselines, at, columns, 0.0) - actual
+      if columns {
+        if axis.reverseLine != (parent.usedDirection() == Direction.Rtl) { shift = -shift }
+      } else if axis.reverseBlock { shift = -shift }
+      let mut location = output.boxes[member.id].location
+      if columns != axis.vertical { location.x = location.x + shift }
+      else { location.y = location.y + shift }
+      let usedMargin = output.boxes[member.id].usedMargin
+      run output.place(member.id, location, usedMargin, false, performLayout)
+    }
+    at = at + 1
+  }
+}

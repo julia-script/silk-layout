@@ -274,7 +274,12 @@ impl Tree {
       self.touchInner(id.index)
       return
     }
-    let outer = !self.grids.asSlice()[handle].placement.same(&template.placement)
+    let old = &self.grids.asSlice()[handle]
+    // Subgrid metadata affects its parent's placement and descendant track
+    // contributions even when the item's outer dimensions stay unchanged.
+    let outer = !old.placement.same(&template.placement)
+      || old.rows.subgrid || old.columns.subgrid
+      || template.rows.subgrid || template.columns.subgrid
     if handle == 0 {
       let slot = self.grids.length()
       run self.grids.append(move template)

@@ -12,6 +12,7 @@ compute takes for them:
   insets  padding and border alone
   text    text edits, some of them one letter in a word, under inline boxes
   grid    a separate stream with grid templates, placement and flow changes
+  subgrid a separate stream with inherited axes, local names and gap transitions
 
   python3 scripts/fuzz-updates.py --cli build/.../silk_layout_cli [--seeds 200] [--mode inner,text]
 """
@@ -28,6 +29,7 @@ MODES = {
     "insets": {"relative": 0.0, "text": 0.3, "inline": 0.2, "typo": False, "kind": "insets", "repeat": 2},
     "text": {"relative": 0.0, "text": 1.0, "inline": 0.2, "typo": True, "kind": "any", "repeat": 2},
     "grid": {"relative": 0.1, "text": 0.3, "inline": 0.1, "typo": True, "kind": "grid", "repeat": 3},
+    "subgrid": {"relative": 0.1, "text": 0.3, "inline": 0.1, "typo": True, "kind": "grid", "repeat": 3, "subgrid": True},
 }
 WORDS = ["ab", "word", "x", "longer", "q"]
 
@@ -66,6 +68,16 @@ def grid_style(r):
 def grid_line(r):
     return r.choice(["auto", 1, 2, -1, -2, "cell", {"span": r.randint(1, 3)},
                      {"line": r.choice([-2, -1, 1, 2]), "name": "cell"}, {"span": 1, "name": "cell"}])
+
+
+def subgrid_axis(r):
+    if r.random() < .5:
+        return "subgrid"
+    return {"subgrid": [
+        {"names": ["cell"]},
+        {"repeat": {"count": r.choice([2, "auto-fill"]), "tracks": [{"names": []}, {"names": ["cell"]}]}},
+        {"names": ["edge"]},
+    ]}
 
 
 def random_style(r, mode):
@@ -115,6 +127,8 @@ def style_edit(r, mode, nodes, node):
                         "width", "height", "padding", "border", "display"])
         if key in ("gridTemplateColumns", "gridTemplateRows"):
             style[key] = "none" if r.random() < .2 else grid_tracks(r)
+            if mode.get("subgrid") and r.random() < .35:
+                style[key] = subgrid_axis(r)
         elif key in ("gridAutoColumns", "gridAutoRows"):
             style[key] = ["auto", r.randint(10, 60)]
         elif key == "gridTemplateAreas":
@@ -129,6 +143,8 @@ def style_edit(r, mode, nodes, node):
             style[key] = r.randint(-2, 3)
         elif key in ("width", "height"):
             style[key] = r.randint(10, 160)
+        elif key in ("columnGap", "rowGap") and mode.get("subgrid"):
+            style[key] = r.choice(["normal", 0, 3, 9])
         else:
             style[key] = r.randint(0, 9)
     elif mode["kind"] == "insets":
@@ -164,6 +180,23 @@ def case(seed, mode):
         else:
             nodes.append({"parent": parent, "style": random_style(r, mode)})
         depth.append(depth[parent] + 1)
+    if mode.get("subgrid"):
+        candidates = [index for index, node in enumerate(nodes)
+                      if node.get("parent") is not None and "style" in node
+                      and nodes[node["parent"]].get("style", {}).get("display") == "grid"]
+        if not candidates:
+            candidates.append(len(nodes))
+            nodes.append({"parent": 0, "style": {"display": "grid"}})
+        for ordinal, index in enumerate(candidates):
+            if ordinal and r.random() < .5:
+                continue
+            style = nodes[index]["style"]
+            style["display"] = "grid"
+            axes = r.choice([1, 2, 3])
+            if axes & 1:
+                style.update(gridTemplateColumns=subgrid_axis(r), gridColumnStart=1, gridColumnEnd={"span": 2})
+            if axes & 2:
+                style.update(gridTemplateRows=subgrid_axis(r), gridRowStart=1, gridRowEnd={"span": 2})
     document = {"viewport": {"width": 800, "height": 600}, "nodes": nodes}
     texts = [index for index, node in enumerate(nodes) if "text" in node]
     elements = [index for index, node in enumerate(nodes)

@@ -5,6 +5,11 @@ import style { Style, Display, DisplayOutside, DisplayInside, Dimension, BoxSizi
 import tree { Tree, InvalidNode }
 import grid_style {
   GridTemplate,
+  GridAxis,
+  GridNamedLine,
+  GridRepeat,
+  GridRepeatKind,
+  MAX_GRID_TRACKS,
   GridLine,
   GridLineKind,
   GridTrack,
@@ -140,4 +145,51 @@ test effect fn gridItemInsetsThroughContentsRemainOuterChanges()
     tree.outerChangedAt(item.index) > before,
     "grid parent reads item insets through display contents",
   )
+}
+
+// Grid 2 §7.2.3 and §9: empty groups occupy lines; auto-fill does not set span.
+test effect fn subgridNameRepeatsDetermineAutomaticSpan()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut axis = GridAxis.make()
+  axis.subgrid = true
+  run Testing.expect(axis.valid(1) && axis.subgridSpan() == 1, "bare subgrid spans one track")
+  axis.lineCount = 4
+  run axis.repeats.append(GridRepeat { start: 1, length: 2, count: 3, kind: GridRepeatKind.Count })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(axis.valid(1) && axis.subgridSpan() == 7, "empty repeated groups count as separate lines")
+  axis.repeats.set(0, GridRepeat { start: 1, length: 2, count: 1, kind: GridRepeatKind.AutoFill })
+  run Testing.expect(axis.valid(1) && axis.subgridSpan() == 1, "auto-fill contributes zero groups to automatic span")
+  axis.lineCount = MAX_GRID_TRACKS + 1
+  axis.repeats.set(0, GridRepeat { start: 1, length: 2, count: 1, kind: GridRepeatKind.Count })
+  run Testing.expect(axis.valid(1) && axis.subgridSpan() == MAX_GRID_TRACKS, "maximum span includes both boundary lines")
+  axis.repeats.set(0, GridRepeat { start: 1, length: 2, count: 2, kind: GridRepeatKind.Count })
+  run Testing.expect(!axis.valid(1), "expanded local groups cannot exceed the track limit plus one")
+}
+
+test effect fn subgridNativeValidationRejectsMixedGrammar()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut axis = GridAxis.make()
+  axis.subgrid = true
+  axis.lineCount = 2
+  run axis.repeats.append(GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFit })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(!axis.valid(2), "name-repeat rejects auto-fit")
+  axis.repeats.set(0, GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFill })
+  run axis.repeats.append(GridRepeat { start: 1, length: 1, count: 1, kind: GridRepeatKind.AutoFill })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(!axis.valid(2), "only one auto-fill is allowed")
+  axis.repeats.clear()
+  run axis.lines.append(GridNamedLine { line: 2, name: 1, repeat: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(!axis.valid(2), "names must refer to an existing local group")
+  axis.lines.set(0, GridNamedLine { line: 1, name: 1, repeat: 0 })
+  run Testing.expect(axis.valid(2), "a local name on the last group is valid")
+  run axis.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(!axis.valid(2), "subgrid cannot contain track sizes")
+  axis.tracks.clear()
+  axis.subgrid = false
+  run Testing.expect(!axis.valid(2), "standalone axes cannot carry subgrid group counts")
 }

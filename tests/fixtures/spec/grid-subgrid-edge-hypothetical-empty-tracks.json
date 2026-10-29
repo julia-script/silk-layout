@@ -1,0 +1,50 @@
+{
+  "name": "grid-subgrid-edge-hypothetical-empty-tracks",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "intrinsic-tracks"],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-margins",
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing",
+    "https://drafts.csswg.org/css-grid-2/#algo-content"
+  ],
+  "derivation": "Only the middle track is occupied. The 31px leaf creates a 50px hypothetical item spanning tracks 1-2 (31+19 start margin), and a 54px item spanning tracks 2-3 (31+23 end margin). With fixed empty edge tracks 5 and 7, the middle auto track must be max(31,50-5,54-7)=47px; the parent is 59px wide. The subgrid border box begins at x=19 and is 59-19-23=17px wide. Internal grid lines still align to the parent: the leaf starts at root x=5, hence local x=-14, intentionally overflowing the subgrid start edge rather than shifting the inherited line.",
+  "input": {
+    "viewport": {"width": 240, "height": 160},
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [5, "auto", 7],
+          "gridTemplateRows": [17],
+          "columnGap": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [17],
+          "columnGap": "normal",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 4,
+          "gridRowStart": 1,
+          "margin": {"left": 19, "right": 23}
+        }
+      },
+      {
+        "parent": 1,
+        "style": {"gridColumnStart": 2, "gridRowStart": 1, "width": 31, "height": 17}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 59, "height": 17},
+      {"x": 19, "y": 0, "width": 17, "height": 17},
+      {"x": -14, "y": 0, "width": 31, "height": 17}
+    ]
+  }
+}

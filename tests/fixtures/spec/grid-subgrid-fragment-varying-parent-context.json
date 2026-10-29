@@ -1,0 +1,27 @@
+{
+  "name": "grid-subgrid-fragment-varying-parent-context",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "fragmentation", "varying-fragmentainers", "ignored-constraints"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-grid-2/#subgrid-size", "https://drafts.csswg.org/css-grid-2/#subgrid-tracks"],
+  "derivation": "The both-axis subgrid spans two 29/31px parent rows and both flexible columns. Its authored sizes, min/max constraints, and self alignment do not override inherited axes. The first 29px frame leaves 120px after the 3px column gap, giving 40/80px columns. The second frame changes inline space to 93px, so the continuing subgrid must receive a new immutable parent allocation with 30/60px columns, not reuse the first frame's context. Its four children occupy inherited rows once each, and both the root and the subgrid publish 29px then31px fragments. There is no row gap to allocate across the page boundary.",
+  "input": {
+    "viewport": {"width": 123, "height": 110},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 29}, {"x": 0, "y": 47, "width": 93, "height": 31}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [{"fr": 1}, {"fr": 2}], "gridTemplateRows": [29, 31], "columnGap": 3}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 1, "gridRowEnd": 3, "width": 11, "height": 7, "minWidth": 200, "maxWidth": 201, "minHeight": 200, "maxHeight": 201, "justifySelf": "end", "alignSelf": "end"}},
+      {"parent": 1, "style": {}},
+      {"parent": 1, "style": {}},
+      {"parent": 1, "style": {}},
+      {"parent": 1, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 29}, {"x": 0, "y": 47, "width": 93, "height": 31}]},
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 29}, {"x": 0, "y": 47, "width": 93, "height": 31}]},
+    {"rects": [{"x": 0, "y": 0, "width": 40, "height": 29}]},
+    {"rects": [{"x": 43, "y": 0, "width": 80, "height": 29}]},
+    {"rects": [{"x": 0, "y": 47, "width": 30, "height": 31}]},
+    {"rects": [{"x": 33, "y": 47, "width": 60, "height": 31}]}
+  ]}
+}

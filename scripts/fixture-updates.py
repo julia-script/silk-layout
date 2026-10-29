@@ -93,6 +93,37 @@ def scenarios(document):
             forward = {"set": [{"node": child, "style": ordered}]}
             yield "grid-order", [forward]
             yield "grid-order-back", [forward, {"set": [{"node": child, "style": original}]}]
+    subgrids = [index for index in grids
+                if any(document["nodes"][index]["style"].get(axis) == "subgrid"
+                       or isinstance(document["nodes"][index]["style"].get(axis), dict)
+                       and "subgrid" in document["nodes"][index]["style"][axis]
+                       for axis in ("gridTemplateColumns", "gridTemplateRows"))]
+    for child in subgrids:
+        owner = document["nodes"][child].get("parent")
+        if owner is None or owner not in grids:
+            continue
+        original = document["nodes"][owner]["style"]
+        # Equal total extent must not alias different inherited track geometry.
+        for axis in ("gridTemplateColumns", "gridTemplateRows"):
+            before = dict(original, **{axis: [30, 70]})
+            after = dict(original, **{axis: [60, 40]})
+            yield f"subgrid-{child}-{axis}-redistribution", [
+                {"set": [{"node": owner, "style": before}]},
+                {"set": [{"node": owner, "style": after}]}]
+        # Name changes can move descendants without changing a single track size.
+        named = dict(original, gridTemplateColumns=[
+            {"names": ["before"]}, 30, {"names": ["after"]}, 70])
+        renamed = dict(original, gridTemplateColumns=[
+            {"names": ["after"]}, 30, {"names": ["before"]}, 70])
+        yield f"subgrid-{child}-ancestor-names", [
+            {"set": [{"node": owner, "style": named}]},
+            {"set": [{"node": owner, "style": renamed}]}]
+        child_style = document["nodes"][child]["style"]
+        for gap in ("columnGap", "rowGap"):
+            yield f"subgrid-{child}-{gap}-inheritance", [
+                {"set": [{"node": child, "style": dict(child_style, **{gap: 0})}]},
+                {"set": [{"node": owner, "style": dict(original, **{gap: 13})},
+                         {"node": child, "style": dict(child_style, **{gap: "normal"})}]}]
 
 
 def final(document, cycle):
@@ -121,7 +152,7 @@ def main():
         for name, cycle in scenarios(document):
             fresh_code, fresh = run(cli, final(document, cycle))
             if fresh_code != 0:
-                if name.startswith("grid-"):
+                if name.startswith(("grid-", "subgrid-")):
                     checked += 1
                     failures.append(f"{path.stem} {name}: fresh layout failed, exit {fresh_code}")
                 continue

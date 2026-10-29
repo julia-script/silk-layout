@@ -296,9 +296,10 @@ fn sortOccurrences(values: &mut [Occurrence]) {
 
 // Preparation is the only string-using phase. Both sorts are bounded-stack
 // heapsorts; queries below use binary search and integer IDs only.
-pub effect fn prepareLineNames(
+pub effect fn prepareLineNamesMasked(
   lines: &[GridNamedLine],
   areas: &[GridArea],
+  masks: &[usize],
   names: &[String],
   columns: bool,
   result: &mut LineNames,
@@ -345,6 +346,10 @@ pub effect fn prepareLineNames(
   }
   at = 0
   while at < areas.length {
+    if masks.length != 0 && ((columns && masks[at] % 2 == 0) || (!columns && masks[at] < 2)) {
+      at = at + 1
+      continue
+    }
     let area = areas[at]
     let mut first = boundedTracks(area.rowStart)
     let mut last = boundedTracks(area.rowEnd)
@@ -379,6 +384,14 @@ pub effect fn prepareLineNames(
     at = at + 1
   }
   result.occurrences.truncate(kept)
+}
+
+pub effect fn prepareLineNames(
+  lines: &[GridNamedLine], areas: &[GridArea], names: &[String], columns: bool,
+  result: &mut LineNames,
+) ! OutOfMemoryError ? &mut Allocator {
+  let masks: [usize; 0] = []
+  run prepareLineNamesMasked(lines, areas, &masks, names, columns, &mut result)
 }
 
 fn lowerBound(values: &[Occurrence], name: usize, kind: usize, position: i32) -> usize {

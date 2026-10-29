@@ -1,0 +1,29 @@
+{
+  "name": "grid-subgrid-fragment-boundary-probe-context",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "fragmentation", "forced-breaks", "varying-fragmentainers"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-grid-2/#subgrid-tracks", "https://drafts.csswg.org/css-break-3/#break-propagation"],
+  "derivation": "Each both-axis subgrid spans the two parent columns but only one row. A forced break on the second subgrid's leading descendant must propagate through boundary discovery without losing the immutable inherited allocation when the probe is restored. The first row occupies17px; the propagated break consumes the rest of the 73px first frame. The second row starts at y91, discarding the parent5px row gutter. Flexible columns are40/80px with a3px gap in the first frame, and30/60px with the same gap in the narrower second frame. Subgrid self alignment and authored width/height are ignored on both inherited axes.",
+  "input": {
+    "viewport": {"width": 123, "height": 182},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 93, "height": 73}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [{"fr": 1}, {"fr": 2}], "gridTemplateRows": [17, 23], "columnGap": 3, "rowGap": 5}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 1}},
+      {"parent": 1, "style": {}},
+      {"parent": 1, "style": {}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 2, "width": 9, "height": 8, "justifySelf": "center", "alignSelf": "end"}},
+      {"parent": 4, "style": {"breakBefore": "page"}},
+      {"parent": 4, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 93, "height": 23}]},
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 17}]},
+    {"rects": [{"x": 0, "y": 0, "width": 40, "height": 17}]},
+    {"rects": [{"x": 43, "y": 0, "width": 80, "height": 17}]},
+    {"rects": [{"x": 0, "y": 91, "width": 93, "height": 23}]},
+    {"rects": [{"x": 0, "y": 91, "width": 30, "height": 23}]},
+    {"rects": [{"x": 33, "y": 91, "width": 60, "height": 23}]}
+  ]}
+}

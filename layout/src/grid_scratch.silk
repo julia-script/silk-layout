@@ -7,10 +7,14 @@ import grid_lines { LineNames }
 import grid_template { ExpandedAxis }
 import grid_baselines { GridBaselines }
 import grid_fragment_scratch { GridFragmentScratch }
+import grid_style { GridArea }
+import grid_subgrid { SubgridPool }
 
 pub struct GridAxisScratch {
   pub tracks: List<TrackState>,
   pub contributions: List<TrackContribution>,
+  pub inherited: List<TrackState>,
+  pub members: List<GridItem>,
 }
 
 impl GridAxisScratch {
@@ -18,12 +22,16 @@ impl GridAxisScratch {
     return GridAxisScratch {
       tracks: List<TrackState>.make(),
       contributions: List<TrackContribution>.make(),
+      inherited: List<TrackState>.make(),
+      members: List<GridItem>.make(),
     }
   }
 
   pub fn clear(self: &mut Self) {
     self.tracks.clear()
     self.contributions.clear()
+    self.inherited.clear()
+    self.members.clear()
   }
 }
 
@@ -36,6 +44,9 @@ pub struct GridTemplateScratch {
   pub collapsedRows: List<usize>,
   pub columnRepeat: usize,
   pub rowRepeat: usize,
+  pub context: usize,
+  pub areas: List<GridArea>,
+  pub areaMasks: List<usize>,
 }
 
 impl GridTemplateScratch {
@@ -49,6 +60,9 @@ impl GridTemplateScratch {
       collapsedRows: List<usize>.make(),
       columnRepeat: 0,
       rowRepeat: 0,
+      context: 0,
+      areas: List<GridArea>.make(),
+      areaMasks: List<usize>.make(),
     }
   }
 }
@@ -66,6 +80,8 @@ pub struct GridScratch {
   // vectors, and leases do not move all those empty vectors on every probe.
   pub template: List<GridTemplateScratch>,
   pub baselines: List<GridBaselines>,
+  pub columnGap: f32,
+  pub rowGap: f32,
 }
 
 impl GridScratch {
@@ -79,6 +95,8 @@ impl GridScratch {
       trackWork: List<usize>.make(),
       template: List<GridTemplateScratch>.make(),
       baselines: List<GridBaselines>.make(),
+      columnGap: 0.0,
+      rowGap: 0.0,
     }
   }
 }
@@ -121,6 +139,32 @@ impl GridMemos {
   pub fn clear(self: &mut Self) {
     self.index.clear()
     self.used = 0
+    let values = self.fragmentScratch.asMutSlice()
+    let mut at: usize = 0
+    while at < values.length {
+      let items = values[at].items.asMutSlice()
+      let mut item: usize = 0
+      while item < items.length { items[item].gridContext = 0
+        item = item + 1 }
+      at = at + 1
+    }
+  }
+
+  pub fn markContexts(self: &Self, pool: &mut SubgridPool) {
+    let mut at: usize = 0
+    while at < self.used {
+      let template = self.slots.asSlice()[at].value.template.asSlice()
+      if template.length != 0 { pool.mark(template[0].context) }
+      at = at + 1
+    }
+    at = 0
+    while at < self.fragmentScratch.length() {
+      let items = self.fragmentScratch.asSlice()[at].items.asSlice()
+      let mut item: usize = 0
+      while item < items.length { pool.mark(items[item].gridContext)
+        item = item + 1 }
+      at = at + 1
+    }
   }
 
   pub fn dropBox(self: &mut Self, id: usize) {

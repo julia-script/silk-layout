@@ -16,6 +16,7 @@ import grid_template {
   ExpandedAxis,
   RepeatSizing,
   expandAxis,
+  expandSubgridAxis,
   expandedTracks,
   expandedLines,
   repeatCount
@@ -311,4 +312,179 @@ test effect fn gridAutomaticRepeatKeepsExactFractionalBoundaries()
   run Testing.expect(repeatCount(&axis, &request) == 10, "an exact minimum does not add a track")
   request.minimum = 21.0001
   run Testing.expect(repeatCount(&axis, &request) == 11, "a genuinely larger minimum adds a track")
+}
+
+test effect fn gridSubgridLocalNamesUseOnlyInheritedLines()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut axis = GridAxis.make()
+  axis.subgrid = true
+  axis.lineCount = 4
+  let names: [GridNamedLine; 4] = [
+    GridNamedLine { line: 0, name: 1, repeat: 0 },
+    GridNamedLine { line: 2, name: 2, repeat: 0 },
+    GridNamedLine { line: 2, name: 3, repeat: 0 },
+    GridNamedLine { line: 3, name: 4, repeat: 0 },
+  ]
+  run axis.lines.appendSlice(&names) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut expanded = ExpandedAxis.make()
+  run expandSubgridAxis(&axis, 2, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    expanded.explicitTracks == 2 && expandedTracks(&axis, &expanded).length == 0,
+    "inherited track count does not create independent tracks",
+  )
+  run Testing.expect(
+    lines.length == 3 && hasLine(lines, 1, 0) && hasLine(lines, 2, 2) && hasLine(lines, 3, 2),
+    "empty groups retain their slot and excess local names are discarded without repeats",
+  )
+  run expandAxis(&axis, 0, 5, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    expanded.explicitTracks == 0 && expandedLines(&axis, &expanded).length == 0
+      && expandedTracks(&axis, &expanded).length == 0,
+    "without inherited context subgrid behaves as none, not an authored named axis",
+  )
+  axis.lines.clear()
+  axis.lineCount = 0
+  run expandSubgridAxis(&axis, 4, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    expanded.explicitTracks == 4 && expandedLines(&axis, &expanded).length == 0,
+    "bare subgrid inherits its span without inventing local names",
+  )
+}
+
+test effect fn gridSubgridCountRepeatsConsumeLineGroups()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut axis = GridAxis.make()
+  axis.subgrid = true
+  axis.lineCount = 5
+  let repeats: [GridRepeat; 2] = [
+    GridRepeat { start: 1, length: 2, count: 2, kind: GridRepeatKind.Count },
+    GridRepeat { start: 3, length: 1, count: 2, kind: GridRepeatKind.Count },
+  ]
+  let names: [GridNamedLine; 4] = [
+    GridNamedLine { line: 0, name: 1, repeat: 0 },
+    GridNamedLine { line: 1, name: 2, repeat: 1 },
+    GridNamedLine { line: 3, name: 3, repeat: 2 },
+    GridNamedLine { line: 4, name: 4, repeat: 0 },
+  ]
+  run axis.repeats.appendSlice(&repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  run axis.lines.appendSlice(&names) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut expanded = ExpandedAxis.make()
+  run expandSubgridAxis(&axis, 7, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    expanded.explicitTracks == 7 && expanded.tracks.length() == 0 && lines.length == 6,
+    "counted line repeats preserve inherited tracks and expand only names",
+  )
+  run Testing.expect(
+    hasLine(lines, 1, 0) && hasLine(lines, 2, 1) && hasLine(lines, 2, 3)
+      && hasLine(lines, 3, 5) && hasLine(lines, 3, 6) && hasLine(lines, 4, 7),
+    "empty repeated groups consume lines and adjacent name repeats do not merge endpoints",
+  )
+  run expandSubgridAxis(&axis, 2, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let clipped = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    expanded.explicitTracks == 2 && clipped.length == 2
+      && hasLine(clipped, 1, 0) && hasLine(clipped, 2, 1),
+    "count repeats and their suffix names cannot extend the inherited line range",
+  )
+}
+
+test effect fn gridSubgridAutoFillAccountsForFixedRepeatsAndSuffix()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut axis = GridAxis.make()
+  axis.subgrid = true
+  axis.lineCount = 5
+  let repeats: [GridRepeat; 2] = [
+    GridRepeat { start: 1, length: 1, count: 2, kind: GridRepeatKind.Count },
+    GridRepeat { start: 2, length: 2, count: 1, kind: GridRepeatKind.AutoFill },
+  ]
+  let names: [GridNamedLine; 4] = [
+    GridNamedLine { line: 0, name: 1, repeat: 0 },
+    GridNamedLine { line: 1, name: 2, repeat: 1 },
+    GridNamedLine { line: 2, name: 3, repeat: 2 },
+    GridNamedLine { line: 4, name: 4, repeat: 0 },
+  ]
+  run axis.repeats.appendSlice(&repeats) |> Effect.provideMut<Allocator>(&mut allocator)
+  run axis.lines.appendSlice(&names) |> Effect.provideMut<Allocator>(&mut allocator)
+  let request = sizing(100.0)
+  run Testing.expect(
+    repeatCount(&axis, &request) == 0,
+    "subgrid name auto-fill does not enter independent track repetition arithmetic",
+  )
+  let mut expanded = ExpandedAxis.make()
+  run expandSubgridAxis(&axis, 7, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    expanded.explicitTracks == 7 && lines.length == 6
+      && hasLine(lines, 1, 0) && hasLine(lines, 2, 1) && hasLine(lines, 2, 2)
+      && hasLine(lines, 3, 3) && hasLine(lines, 3, 5) && hasLine(lines, 4, 7),
+    "auto-fill subtracts fixed expanded groups and maps trailing names after its empty groups",
+  )
+  run expandAxis(&axis, 9, 3, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    expanded.explicitTracks == 0 && expandedLines(&axis, &expanded).length == 0,
+    "name repeats also disappear when subgrid has no inherited context",
+  )
+}
+
+test effect fn gridSubgridAutoFillCanBeEmptyAndTruncatesExcessGroups()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut axis = GridAxis.make()
+  axis.subgrid = true
+  axis.lineCount = 4
+  let repeat = GridRepeat { start: 1, length: 2, count: 1, kind: GridRepeatKind.AutoFill }
+  run axis.repeats.append(repeat) |> Effect.provideMut<Allocator>(&mut allocator)
+  let names: [GridNamedLine; 4] = [
+    GridNamedLine { line: 0, name: 1, repeat: 0 },
+    GridNamedLine { line: 1, name: 2, repeat: 1 },
+    GridNamedLine { line: 2, name: 3, repeat: 1 },
+    GridNamedLine { line: 3, name: 4, repeat: 0 },
+  ]
+  run axis.lines.appendSlice(&names) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut expanded = ExpandedAxis.make()
+  run expandSubgridAxis(&axis, 1, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let emptyRepeat = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    emptyRepeat.length == 2 && hasLine(emptyRepeat, 1, 0) && hasLine(emptyRepeat, 4, 1),
+    "fixed groups can fill the span, removing every automatic group before the suffix",
+  )
+  run expandSubgridAxis(&axis, 0, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let excessFixed = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    expanded.explicitTracks == 0 && excessFixed.length == 1 && hasLine(excessFixed, 1, 0),
+    "fixed groups exceeding the inherited range still permit zero automatic repetitions",
+  )
+  run expandSubgridAxis(&axis, 4, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let roundedRepeat = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    roundedRepeat.length == 5 && hasLine(roundedRepeat, 1, 0)
+      && hasLine(roundedRepeat, 2, 1) && hasLine(roundedRepeat, 3, 2)
+      && hasLine(roundedRepeat, 2, 3) && hasLine(roundedRepeat, 3, 4),
+    "auto-fill rounds up whole groups and discards a suffix beyond the inherited last line",
+  )
+  run expandSubgridAxis(&axis, 3, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let exactRepeat = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    exactRepeat.length == 4 && hasLine(exactRepeat, 1, 0)
+      && hasLine(exactRepeat, 2, 1) && hasLine(exactRepeat, 3, 2) && hasLine(exactRepeat, 4, 3),
+    "one complete automatic pattern leaves the trailing fixed group on the final line",
+  )
+  axis.lineCount = 3
+  axis.lines.clear()
+  run axis.lines.append(names[0]) |> Effect.provideMut<Allocator>(&mut allocator)
+  run axis.lines.append(names[1]) |> Effect.provideMut<Allocator>(&mut allocator)
+  run axis.lines.append(names[2]) |> Effect.provideMut<Allocator>(&mut allocator)
+  run expandSubgridAxis(&axis, 3, &mut expanded) |> Effect.provideMut<Allocator>(&mut allocator)
+  let clippedPattern = expandedLines(&axis, &expanded)
+  run Testing.expect(
+    clippedPattern.length == 4 && hasLine(clippedPattern, 1, 0)
+      && hasLine(clippedPattern, 2, 1) && hasLine(clippedPattern, 3, 2)
+      && hasLine(clippedPattern, 2, 3),
+    "a final automatic pattern can be clipped between its line-name groups",
+  )
 }

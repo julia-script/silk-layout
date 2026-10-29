@@ -1,0 +1,22 @@
+{
+  "name": "grid-subgrid-name-repeat-zero-fill",
+  "kind": "spec",
+  "features": ["grid", "subgrid"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-span", "https://drafts.csswg.org/css-grid-2/#valdef-repeat-auto-fill"],
+  "derivation": "Automatic span counts [a], [b], and [c] but not auto-fill, giving two tracks and three lines. Those fixed groups already fill the span, so repeat(auto-fill,[unused]) contributes zero groups and c remains line3. The descendant from b to c occupies the37px second track at28. A sibling lands in the47px third parent column at70 rather than being pushed to another row.",
+  "input": {
+    "viewport": {"width": 240, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 117, "gridTemplateColumns": [23, 37, 47], "gridTemplateRows": [13], "columnGap": 5}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": {"subgrid": [{"names": ["a"]}, {"names": ["b"]}, {"repeat": {"count": "auto-fill", "tracks": [{"names": ["unused"]}]}}, {"names": ["c"]}]}, "gridTemplateRows": [13]}},
+      {"parent": 1, "style": {"gridColumnStart": "b", "gridColumnEnd": "c"}},
+      {"parent": 0, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 117, "height": 13},
+    {"x": 0, "y": 0, "width": 65, "height": 13},
+    {"x": 28, "y": 0, "width": 37, "height": 13},
+    {"x": 70, "y": 0, "width": 47, "height": 13}
+  ]}
+}

@@ -1,0 +1,163 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.core.option { Option }
+import silk.testing.testing { Testing, AssertionError }
+import grid_context { GridContext, GridContextStore }
+import grid_tracks { TrackState }
+import grid_style { GridNamedLine, GridArea, GridBreadthKind }
+import context { Input, resolveBox, childrenInput, UNBOUNDED }
+import geometry { OptionalSize, Layout }
+import style { Style, Dimension }
+import engine { normalizeKey }
+import layout_cache { LayoutCache, CacheKind }
+import tree { NO_NODE }
+
+// Grid 2 §9: inherited tracks, names, areas, gaps and definiteness are request
+// dependencies even when the subgrid's available rectangle does not change.
+effect fn descriptor(change: usize) -> GridContext ! OutOfMemoryError ? &mut Allocator {
+  let mut context = GridContext.make(change == 1)
+  context.columns.active = true
+  context.columns.definite = change != 2
+  context.columns.gap = 7.0
+  context.columns.extent = 87.0
+  let mut track = TrackState.fixed(40.0)
+  if change == 3 { track.base = 41.0 }
+  if change == 4 { track.position = 1.0 }
+  if change == 5 { track.growthLimit = 41.0 }
+  if change == 6 { track.factor = 1.0 }
+  if change == 7 { track.cap = 41.0 }
+  if change == 8 { track.minimum = GridBreadthKind.Auto }
+  if change == 9 { track.maximum = GridBreadthKind.Auto }
+  if change == 10 { track.fitContent = true }
+  if change == 11 { track.collapsed = true }
+  run context.columns.tracks.append(track)
+  run context.columns.tracks.append(TrackState.fixed(40.0))
+  run context.columns.lines.append(GridNamedLine { line: 1, name: 4, repeat: 0 })
+  run context.areas.append(GridArea { name: 8, columnStart: 0, columnEnd: 2, rowStart: 0, rowEnd: 1 })
+  if change == 12 { context.columns.gap = 8.0 }
+  if change == 13 { context.columns.extent = 88.0 }
+  if change == 14 { context.columns.lines.asMutSlice()[0].line = 2 }
+  if change == 15 { context.columns.lines.asMutSlice()[0].name = 5 }
+  if change == 16 { context.columns.lines.asMutSlice()[0].repeat = 1 }
+  if change == 17 { context.areas.asMutSlice()[0].columnEnd = 1 }
+  if change == 18 { context.areas.asMutSlice()[0].rowEnd = 2 }
+  if change == 19 { context.areas.asMutSlice()[0].name = 9 }
+  if change == 20 { context.rows.active = true }
+  if change == 21 { context.columns.active = false }
+  if change == 22 { context.columns.tracks.truncate(1) }
+  if change == 23 { context.columns.lines.clear() }
+  if change == 24 { context.areas.clear() }
+  if change == 25 { context.rows.gap = 1.0 }
+  if change == 26 { context.rows.definite = true }
+  if change == 27 { context.rows.extent = 1.0 }
+  if change == 28 { run context.rows.tracks.append(TrackState.fixed(10.0)) }
+  if change == 29 { run context.rows.lines.append(GridNamedLine { line: 0, name: 2, repeat: 0 }) }
+  if change == 30 { context.areas.asMutSlice()[0].rowStart = 1 }
+  if change == 31 { context.areas.asMutSlice()[0].columnStart = 1 }
+  return context
+}
+
+effect fn bind(store: &mut GridContextStore, id: usize, change: usize) -> usize
+  ! OutOfMemoryError ? &mut Allocator {
+  let context = run descriptor(change)
+  return run store.bind(id, move context)
+}
+
+test effect fn inheritedContextKeysCompareCompleteDependencies()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridContextStore.make()
+  let key = run bind(&mut store, 3, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let equal = run bind(&mut store, 3, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(key == equal && key & 3 == 1, "equal horizontal columns retain their width identity")
+  let mut change: usize = 1
+  while change <= 31 {
+    let changed = run bind(&mut store, 3, change) |> Effect.provideMut<Allocator>(&mut allocator)
+    run Testing.expect(changed != key && !store.valid(3, key), "every descriptor dependency invalidates the previous identity")
+    if change == 1 { run Testing.expect(changed & 3 == 2, "vertical columns mark physical height") }
+    if change == 20 { run Testing.expect(changed & 3 == 3, "two inherited axes mark both physical dimensions") }
+    store.commit()
+    change = change + 1
+  }
+  run Testing.expect(!store.valid(4, key), "keys are not transferable between boxes")
+  let absent = match store.get(3, key) {
+    Option<&GridContext>.Some { value } => false
+    Option<&GridContext>.None => true
+  }
+  run Testing.expect(absent, "stale descriptors return None, never another version")
+}
+
+test effect fn inheritedContextNestedRollbackKeepsAcceptedInput()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridContextStore.make()
+  let accepted = run bind(&mut store, 2, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.commit()
+  let outer = store.checkpoint()
+  let first = run bind(&mut store, 2, 3) |> Effect.provideMut<Allocator>(&mut allocator)
+  let inner = store.checkpoint()
+  let second = run bind(&mut store, 2, 4) |> Effect.provideMut<Allocator>(&mut allocator)
+  let child = run bind(&mut store, 9, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.restore(inner)
+  run Testing.expect(store.valid(2, first) && !store.valid(2, second) && !store.valid(9, child), "inner probe bindings roll back")
+  let replacement = run bind(&mut store, 2, 5) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(replacement != second, "recycled slots never recycle request identity")
+  store.restore(outer)
+  run Testing.expect(store.valid(2, accepted) && !store.valid(2, first) && !store.valid(2, replacement), "accepted input survives speculative descendants")
+  let again = run bind(&mut store, 2, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(again == accepted, "rollback restores equality with the accepted version")
+}
+
+test effect fn inheritedContextDropClearCommitAndRemapRejectOldKeys()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridContextStore.make()
+  let old = run bind(&mut store, 0, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  let keep = run bind(&mut store, 2, 3) |> Effect.provideMut<Allocator>(&mut allocator)
+  let dropped = run bind(&mut store, 4, 4) |> Effect.provideMut<Allocator>(&mut allocator)
+  let toOld: [usize; 3] = [2, NO_NODE, 0]
+  let toNew: [usize; 5] = [2, NO_NODE, 0, NO_NODE, NO_NODE]
+  run store.remap(&toOld, &toNew) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(store.valid(0, keep) && store.valid(2, old) && !store.valid(4, dropped), "remap follows matched boxes and removes unmatched boxes")
+  run Testing.expect(!store.valid(0, old) && !store.valid(2, keep), "old box ids cannot read remapped descriptors")
+  store.dropBox(2)
+  let rebound = run bind(&mut store, 2, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(rebound != old && !store.valid(2, old), "drop invalidates even equal later bindings")
+  store.commit()
+  store.clear()
+  let fresh = run bind(&mut store, 2, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(fresh != rebound && fresh != old && !store.valid(0, keep), "clear never resets the identity counter")
+  run Testing.expect(store.valid(100, 0), "ordinary requests need no descriptor")
+}
+
+// Grid 2 §9: a subgridded dimension is sized by its inherited tracks, not the
+// authored size or min/max. Non-inherited dimensions retain ordinary sizing.
+test effect fn inheritedContextRequestSizingAndCacheKeys()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut cache = LayoutCache.make()
+  let mut input = Input.make(OptionalSize.definite(200.0, 150.0))
+  let mut style = Style.make()
+  style.width = Dimension.length(500.0)
+  style.minWidth = Dimension.length(400.0)
+  style.maxWidth = Dimension.length(600.0)
+  style.height = Dimension.length(33.0)
+  input.gridContext = run bind(&mut cache.gridContexts, 2, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  input.known.width = 87.0
+  input.known.widthDefinite = true
+  let box = resolveBox(&style, &input)
+  run Testing.expect(box.size.width == 87.0 && box.min.width == 0.0 && box.max.width == UNBOUNDED && box.size.height == 33.0, "only inherited dimensions ignore authored constraints")
+  let child = childrenInput(&input, &style, &box, OptionalSize.none())
+  run Testing.expect(child.gridContext == 0, "ordinary children never inherit a descriptor implicitly")
+  let mut key = input
+  normalizeKey(0, &mut key, true)
+  run Testing.expect(key.gridContext == input.gridContext, "normalization retains inherited dependencies")
+  run cache.remember(2, &key, CacheKind.IndependentBox, &Layout.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut next = key
+  next.gridContext = run bind(&mut cache.gridContexts, 2, 3) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(!LayoutCache.sameRequest(&key, &next), "final matching retains inherited identity")
+  run Testing.expect(cache.find(2, &next, CacheKind.IndependentBox) == NO_NODE, "equal rectangles cannot reuse a different descriptor's size")
+  input.known.widthDefinite = false
+  let unknown = resolveBox(&style, &input)
+  run Testing.expect(!unknown.size.widthDefinite, "indefinite inherited tracks must not fall back to authored width")
+}

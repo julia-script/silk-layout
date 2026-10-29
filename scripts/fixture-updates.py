@@ -5,7 +5,8 @@ For each unfragmented fixture, the native adapter lays out the input, applies
 a cycle of updates (viewport resizes, restyling an element with its own style or with changed style facts,
 hiding and showing it, editing a text node, scrolling a scroll container), and
 the final geometry must equal a fresh layout of the final document. Fixtures
-only check single computes; this covers what the LayoutTree keeps between them.
+only check single computes; this covers what the LayoutTree keeps between them,
+including inherited-axis and normal-gap transitions in one nested grid per fixture.
 """
 import argparse
 import json
@@ -93,6 +94,28 @@ def scenarios(document):
             forward = {"set": [{"node": child, "style": ordered}]}
             yield "grid-order", [forward]
             yield "grid-order-back", [forward, {"set": [{"node": child, "style": original}]}]
+        # Grid 2 §9 (#subgrid-tracks, #subgrid-gaps): change the inherited
+        # axes and normal/explicit gaps without changing the display type.
+        # Bound the extra work to one nested grid and four cycle prefixes,
+        # rather than an axis/property cross-product over every descendant.
+        nested = [index for index in grids
+                  if document["nodes"][index].get("parent") in grids
+                  and document["nodes"][index]["style"].get("position") not in ("absolute", "fixed")]
+        if nested:
+            child = nested[0]
+            original = document["nodes"][child]["style"]
+            inherited = dict(original, gridTemplateColumns="subgrid", gridTemplateRows="subgrid",
+                             gridColumnStart=1, gridColumnEnd={"span": 2},
+                             gridRowStart=1, gridRowEnd={"span": 2},
+                             columnGap="normal", rowGap="normal")
+            rows_only = dict(inherited, gridTemplateColumns=[23, 31], columnGap=7, rowGap=5)
+            standalone = dict(rows_only, gridTemplateRows=[13, 19],
+                              columnGap="normal", rowGap="normal")
+            cycle = []
+            for name, changed in (("inherit", inherited), ("rows", rows_only),
+                                  ("standalone", standalone), ("back", original)):
+                cycle.append({"set": [{"node": child, "style": changed}]})
+                yield "grid-subgrid-" + name, list(cycle)
 
 
 def final(document, cycle):

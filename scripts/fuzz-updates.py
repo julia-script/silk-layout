@@ -11,7 +11,7 @@ compute takes for them:
   inner   changes only the box itself reads (fixed border-box sizes)
   insets  padding and border alone
   text    text edits, some of them one letter in a word, under inline boxes
-  grid    a separate stream with grid templates, placement and flow changes
+  grid    a separate stream with nested subgrids, templates, placement and flow changes
 
   python3 scripts/fuzz-updates.py --cli build/.../silk_layout_cli [--seeds 200] [--mode inner,text]
 """
@@ -37,7 +37,18 @@ def run(cli, document):
     return completed.returncode, completed.stdout
 
 
-def grid_tracks(r):
+def grid_tracks(r, allow_subgrid=False):
+    # Grid 2 §9: inherited axes have line-name groups, never track sizes.
+    # Only the Grid stream enables this branch, preserving the other seeds.
+    if allow_subgrid and r.random() < .4:
+        if r.random() < .5:
+            return "subgrid"
+        return {"subgrid": [
+            {"names": ["cell"]},
+            {"repeat": {"count": r.choice([2, "auto-fill"]),
+                        "lines": [{"names": []}, {"names": ["cell"]}]}},
+            {"names": ["end"]},
+        ]}
     kind = r.randrange(5)
     if kind == 0:
         return [r.randint(10, 80) for _ in range(r.randint(1, 4))]
@@ -53,11 +64,13 @@ def grid_tracks(r):
             r.randint(20, 80), {"names": ["cell"]}]
 
 
-def grid_style(r):
-    style = {"display": "grid", "gridTemplateColumns": grid_tracks(r), "gridTemplateRows": grid_tracks(r),
+def grid_style(r, parent_grid=False):
+    style = {"display": "grid", "gridTemplateColumns": grid_tracks(r, parent_grid),
+             "gridTemplateRows": grid_tracks(r, parent_grid),
              "gridAutoColumns": [r.randint(10, 40), "auto"], "gridAutoRows": ["auto", r.randint(10, 40)],
              "gridAutoFlow": r.choice(["row", "column", "row dense", "column dense"]),
-             "columnGap": r.randint(0, 8), "rowGap": r.randint(0, 8)}
+             "columnGap": r.choice(["normal", r.randint(0, 8)]),
+             "rowGap": r.choice(["normal", r.randint(0, 8)])}
     if r.random() < .2:
         style["gridTemplateAreas"] = [["a", "a"], ["b", "c"]]
     return style
@@ -68,7 +81,7 @@ def grid_line(r):
                      {"line": r.choice([-2, -1, 1, 2]), "name": "cell"}, {"span": 1, "name": "cell"}])
 
 
-def random_style(r, mode):
+def random_style(r, mode, parent_grid=False):
     if r.random() < mode["inline"]:
         return {"display": "inline"}
     kind = r.choice(["block", "flex", "grid"] if mode["kind"] == "grid" else ["block", "flex"])
@@ -80,7 +93,7 @@ def random_style(r, mode):
         if r.random() < .3: style["justifyContent"] = r.choice(["flex-start", "center", "space-between"])
         if r.random() < .5: style["columnGap"] = r.randint(0, 8)
     elif kind == "grid":
-        style.update(grid_style(r))
+        style.update(grid_style(r, parent_grid))
     if mode["kind"] == "grid":
         for key in ("gridRowStart", "gridRowEnd", "gridColumnStart", "gridColumnEnd"):
             if r.random() < .35: style[key] = grid_line(r)
@@ -114,7 +127,9 @@ def style_edit(r, mode, nodes, node):
                         "gridColumnStart", "gridColumnEnd", "order", "columnGap", "rowGap",
                         "width", "height", "padding", "border", "display"])
         if key in ("gridTemplateColumns", "gridTemplateRows"):
-            style[key] = "none" if r.random() < .2 else grid_tracks(r)
+            # Display edits can remove the grid parent: the resulting standalone
+            # fallback is legal, and a later edit can restore inheritance.
+            style[key] = "none" if r.random() < .2 else grid_tracks(r, allow_subgrid=True)
         elif key in ("gridAutoColumns", "gridAutoRows"):
             style[key] = ["auto", r.randint(10, 60)]
         elif key == "gridTemplateAreas":
@@ -127,6 +142,8 @@ def style_edit(r, mode, nodes, node):
             style[key] = r.choice(["grid", "flex", "block", "none", "contents"])
         elif key == "order":
             style[key] = r.randint(-2, 3)
+        elif key in ("columnGap", "rowGap"):
+            style[key] = r.choice(["normal", r.randint(0, 9)])
         elif key in ("width", "height"):
             style[key] = r.randint(10, 160)
         else:
@@ -162,7 +179,8 @@ def case(seed, mode):
         if r.random() < .15:
             nodes.append({"parent": parent, "text": " ".join(r.choice(WORDS[:4]) for _ in range(r.randint(1, 8)))})
         else:
-            nodes.append({"parent": parent, "style": random_style(r, mode)})
+            parent_grid = nodes[parent].get("style", {}).get("display") == "grid"
+            nodes.append({"parent": parent, "style": random_style(r, mode, parent_grid)})
         depth.append(depth[parent] + 1)
     document = {"viewport": {"width": 800, "height": 600}, "nodes": nodes}
     texts = [index for index, node in enumerate(nodes) if "text" in node]

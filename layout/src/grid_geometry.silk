@@ -15,8 +15,8 @@ struct Slot {
   nextFree: usize,
 }
 
-// Only positioned grids publish records. The box index is lazy; geometry and
-// name buffers stay in their pooled slots even after their versions are freed.
+// Positioned grids publish tracks; static inherited grids publish only keys.
+// The box index is lazy, and released versions retain their pooled buffers.
 pub struct GridGeometryStore {
   heads: List<usize>,
   fragments: List<usize>,
@@ -198,10 +198,21 @@ impl GridGeometryStore {
   pub fn checkpoint(self: &Self) -> usize {
     return self.journal.length()
   }
+  // Static subgrids still need exact request provenance when a positioned
+  // descendant later creates ancestor shells. No track/name values are copied,
+  // and ordinary static grids never call this path.
+  pub effect fn captureContext(self: &mut Self, id: usize, gridContext: usize)
+    ! OutOfMemoryError ? &mut Allocator {
+    let tracks: [TrackState; 0] = []
+    let names = LineNames.make()
+    run self.capture(id, gridContext, &tracks, 0, 0, &names, &tracks, 0, 0, &names)
+  }
+
 
   pub effect fn capture(
     self: &mut Self,
     id: usize,
+    gridContext: usize,
     columns: &[TrackState],
     columnOrigin: i32,
     columnExplicit: usize,
@@ -238,6 +249,7 @@ impl GridGeometryStore {
     run slot.geometry.columns.capture(columns, columnOrigin, columnExplicit, columnNames)
     run slot.geometry.rows.capture(rows, rowOrigin, rowExplicit, rowNames)
     slot.geometry.fragment = NO_NODE
+    slot.geometry.gridContext = gridContext
     slot.geometry.content = Rect.zero()
     slot.geometry.padding = Rect.zero()
     slot.geometry.normalPadding = Rect.zero()

@@ -156,6 +156,13 @@ impl GridContextStore {
     if id >= self.heads.length() { return NO_NODE }
     return self.heads.get(id)
   }
+  // A transaction may inspect its own just-produced binding. This is not an
+  // accepted-layout lookup; positioned reconstruction uses GridGeometry's key.
+  pub fn currentKey(self: &Self, id: usize) -> usize {
+    let index = self.find(id)
+    if index == NO_NODE { return 0 }
+    return self.slots.asSlice()[index].key
+  }
   pub fn valid(self: &Self, id: usize, key: usize) -> bool {
     if key == 0 { return true }
     let index = self.find(id)
@@ -203,6 +210,32 @@ impl GridContextStore {
     return key
   }
   pub fn checkpoint(self: &Self) -> usize { return self.journal.length() }
+  // Detach only a version produced since this probe's marker. An equal
+  // pre-existing input remains owned by its original transaction.
+  pub fn retainSince(self: &mut Self, id: usize, marker: usize) -> usize {
+    let index = self.find(id)
+    if index == NO_NODE { return NO_NODE }
+    let mut at = self.journal.length()
+    while at > marker {
+      at = at - 1
+      if self.journal.get(at) == index {
+        self.journal.set(at, NO_NODE)
+        self.heads.set(id, self.slots.asSlice()[index].previous)
+        self.slots.asMutSlice()[index].previous = NO_NODE
+        return index
+      }
+    }
+    return NO_NODE
+  }
+  pub effect fn publish(self: &mut Self, id: usize, index: usize)
+    ! OutOfMemoryError ? &mut Allocator {
+    run self.journal.append(index)
+    let previous = self.find(id)
+    let slot = &mut self.slots.asMutSlice()[index]
+    slot.id = id
+    slot.previous = previous
+    self.heads.set(id, index)
+  }
   fn release(self: &mut Self, index: usize) {
     let slot = &mut self.slots.asMutSlice()[index]
     slot.id = NO_NODE
@@ -218,6 +251,7 @@ impl GridContextStore {
     while count > marker {
       count = count - 1
       let index = self.journal.get(count)
+      if index == NO_NODE { continue }
       let slot = &self.slots.asSlice()[index]
       self.heads.set(slot.id, slot.previous)
       self.release(index)
@@ -230,6 +264,8 @@ impl GridContextStore {
     let mut at: usize = 0
     while at < self.journal.length() {
       let index = self.journal.get(at)
+      if index == NO_NODE { at = at + 1
+        continue }
       let previous = self.slots.asSlice()[index].previous
       if previous != NO_NODE { self.release(previous) }
       let slots = self.slots.asMutSlice()
@@ -279,13 +315,27 @@ impl GridContextStore {
       if old != NO_NODE {
         let mut next = NO_NODE
         if old < toNew.length { next = toNew[old] }
-        // Member ids are local to the old box tree. Rebinding reconstructs the
-        // ancestor group rather than retaining a descriptor with stale members.
-        if next == NO_NODE || self.slots.asSlice()[at].context.baselineOffsets.length() != 0 {
+        // Renumbering preserves logical member identity just as it preserves
+        // the owner. A removed member instead invalidates the whole group.
+        let offsets = self.slots.asSlice()[at].context.baselineOffsets.asSlice()
+        let mut member: usize = 0
+        while next != NO_NODE && member < offsets.length {
+          let oldMember = offsets[member].id
+          if oldMember >= toNew.length { next = NO_NODE }
+          else if toNew[oldMember] == NO_NODE { next = NO_NODE }
+          member = member + 1
+        }
+        if next == NO_NODE {
           self.release(at)
         }
         else { let slots = self.slots.asMutSlice()
           slots[at].id = next
+          let offsets = slots[at].context.baselineOffsets.asMutSlice()
+          let mut member: usize = 0
+          while member < offsets.length {
+            offsets[member].id = toNew[offsets[member].id]
+            member = member + 1
+          }
           self.heads.set(next, at) }
       }
       at = at + 1

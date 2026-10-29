@@ -69,6 +69,9 @@ pub struct GridGeometry {
   pub rows: GridAxisGeometry,
   pub normalPadding: Rect,
   pub fragment: usize,
+  // Exact request identity of this accepted publication, never a current
+  // sizing-probe binding. It travels with the existing geometry journal.
+  pub gridContext: usize,
   pub content: Rect,
   pub padding: Rect,
 }
@@ -80,6 +83,7 @@ impl GridGeometry {
       rows: GridAxisGeometry.make(),
       normalPadding: Rect.zero(),
       fragment: NO_NODE,
+      gridContext: 0,
       content: Rect.zero(),
       padding: Rect.zero(),
     }

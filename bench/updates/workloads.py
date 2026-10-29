@@ -127,11 +127,48 @@ def rows(count=200):
     }
 
 
+def grid(count=200):
+    """Nested grid cards: kept text, intrinsic rows, placement and repeat-count changes."""
+    columns = [{"repeat": {"count": "auto-fit", "tracks": [{"minmax": [160, {"fr": 1}]}]}}]
+    narrower = [{"repeat": {"count": "auto-fit", "tracks": [{"minmax": [120, {"fr": 1}]}]}}]
+    doc = Doc({"width": 720, "height": 4000},
+              {"display": "grid", "gridTemplateColumns": columns, "gridAutoFlow": "row dense",
+               "columnGap": 12, "rowGap": 12, "padding": 20, "boxSizing": "border-box",
+               "lineHeight": 1.4, "fontKey": 1})
+    cells = []
+    texts = []
+    for index in range(count):
+        cell = doc.element(0, {"display": "grid", "gridTemplateColumns": [{"fr": 1}],
+                               "rowGap": 4, "padding": 8, "border": 1, "boxSizing": "border-box",
+                               "lineHeight": 1.4, "fontKey": 1})
+        heading = doc.element(cell, {"lineHeight": 1.4, "fontKey": 2})
+        doc.text(heading, f"Cell {index}")
+        body = doc.element(cell, {"lineHeight": 1.4, "fontKey": 1})
+        cells.append(cell)
+        texts.append(doc.text(body, sentence(index, 8)))
+    target, text_node = cells[count // 2], texts[count // 2]
+    text = doc.nodes[text_node]["text"]
+    return doc.document(), {
+        "unchanged": toggle([]),
+        "text-edit": toggle([{"node": text_node, "text": "x" + text[1:]}],
+                            [{"node": text_node, "text": text}]),
+        "text-grow": toggle([{"node": text_node, "text": text + " " + sentence(count, 40)}],
+                            [{"node": text_node, "text": text}]),
+        "item-order": toggle([doc.style(target, order=-1)], [doc.style(target)]),
+        "placement": toggle([doc.style(target, gridColumnStart=2, gridColumnEnd={"span": 2},
+                                       gridRowStart=1, gridRowEnd={"span": 1})], [doc.style(target)]),
+        "flow": toggle([doc.style(0, gridAutoFlow="column dense")], [doc.style(0)]),
+        "template": toggle([doc.style(0, gridTemplateColumns=narrower)], [doc.style(0)]),
+        "hide": toggle([doc.style(target, display="none")], [doc.style(target)]),
+        "resize": resize(720, 4000),
+    }
+
+
 def all(small=False):
     """`small` scenes keep every scenario but lay out quickly in debug builds."""
     if small:
-        return {"cards": cards(6), "article": article(4), "rows": rows(20)}
-    return {"cards": cards(), "article": article(), "rows": rows()}
+        return {"cards": cards(6), "article": article(4), "rows": rows(20), "grid": grid(12)}
+    return {"cards": cards(), "article": article(), "rows": rows(), "grid": grid()}
 
 
 if __name__ == "__main__":

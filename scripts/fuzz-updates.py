@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check kept layout results against fresh layouts on random documents.
 
-Each seed builds a random tree of block, flex and inline boxes with text,
+Each seed builds a random tree of block, flex, grid and inline boxes with text,
 applies a random cycle of updates (restyles, text edits, viewport resizes)
 through the native adapter's update mode, and the final geometry must equal a
 fresh layout of the final document. Modes bias the updates towards the paths
@@ -11,6 +11,7 @@ compute takes for them:
   inner   changes only the box itself reads (fixed border-box sizes)
   insets  padding and border alone
   text    text edits, some of them one letter in a word, under inline boxes
+  grid    a separate stream with grid templates, placement and flow changes
 
   python3 scripts/fuzz-updates.py --cli build/.../silk_layout_cli [--seeds 200] [--mode inner,text]
 """
@@ -26,6 +27,7 @@ MODES = {
     "inner": {"relative": 0.0, "text": 0.3, "inline": 0.0, "typo": True, "kind": "inner", "repeat": 3},
     "insets": {"relative": 0.0, "text": 0.3, "inline": 0.2, "typo": False, "kind": "insets", "repeat": 2},
     "text": {"relative": 0.0, "text": 1.0, "inline": 0.2, "typo": True, "kind": "any", "repeat": 2},
+    "grid": {"relative": 0.1, "text": 0.3, "inline": 0.1, "typo": True, "kind": "grid", "repeat": 3},
 }
 WORDS = ["ab", "word", "x", "longer", "q"]
 
@@ -35,10 +37,41 @@ def run(cli, document):
     return completed.returncode, completed.stdout
 
 
+def grid_tracks(r):
+    kind = r.randrange(5)
+    if kind == 0:
+        return [r.randint(10, 80) for _ in range(r.randint(1, 4))]
+    if kind == 1:
+        return [r.choice(["auto", "min-content", "max-content", {"fitContent": 60}])
+                for _ in range(r.randint(1, 4))]
+    if kind == 2:
+        return [{"minmax": [0, {"fr": r.choice([0.5, 1, 2])}]} for _ in range(r.randint(1, 4))]
+    if kind == 3:
+        return [{"repeat": {"count": r.choice([2, 3, "auto-fill", "auto-fit"]),
+                            "tracks": [r.randint(20, 70), {"names": ["cell"]}]}}]
+    return [{"names": ["cell"]}, r.randint(20, 80), {"names": ["cell"]},
+            r.randint(20, 80), {"names": ["cell"]}]
+
+
+def grid_style(r):
+    style = {"display": "grid", "gridTemplateColumns": grid_tracks(r), "gridTemplateRows": grid_tracks(r),
+             "gridAutoColumns": [r.randint(10, 40), "auto"], "gridAutoRows": ["auto", r.randint(10, 40)],
+             "gridAutoFlow": r.choice(["row", "column", "row dense", "column dense"]),
+             "columnGap": r.randint(0, 8), "rowGap": r.randint(0, 8)}
+    if r.random() < .2:
+        style["gridTemplateAreas"] = [["a", "a"], ["b", "c"]]
+    return style
+
+
+def grid_line(r):
+    return r.choice(["auto", 1, 2, -1, -2, "cell", {"span": r.randint(1, 3)},
+                     {"line": r.choice([-2, -1, 1, 2]), "name": "cell"}, {"span": 1, "name": "cell"}])
+
+
 def random_style(r, mode):
     if r.random() < mode["inline"]:
         return {"display": "inline"}
-    kind = r.choice(["block", "flex"])
+    kind = r.choice(["block", "flex", "grid"] if mode["kind"] == "grid" else ["block", "flex"])
     style = {"display": kind, "boxSizing": "border-box"}
     if kind == "flex":
         style["flexDirection"] = r.choice(["row", "column"])
@@ -46,6 +79,11 @@ def random_style(r, mode):
         style["alignItems"] = r.choice(["stretch", "flex-start", "center", "baseline"])
         if r.random() < .3: style["justifyContent"] = r.choice(["flex-start", "center", "space-between"])
         if r.random() < .5: style["columnGap"] = r.randint(0, 8)
+    elif kind == "grid":
+        style.update(grid_style(r))
+    if mode["kind"] == "grid":
+        for key in ("gridRowStart", "gridRowEnd", "gridColumnStart", "gridColumnEnd"):
+            if r.random() < .35: style[key] = grid_line(r)
     if r.random() < .5: style["padding"] = r.randint(0, 6)
     if r.random() < .3: style["marginTop"] = r.randint(0, 6)
     if r.random() < .3: style["width"] = r.randint(10, 200)
@@ -70,7 +108,30 @@ def text_edit(r, mode, nodes, node):
 
 def style_edit(r, mode, nodes, node):
     style = dict(nodes[node]["style"])
-    if mode["kind"] == "insets":
+    if mode["kind"] == "grid":
+        key = r.choice(["gridTemplateColumns", "gridTemplateRows", "gridAutoColumns", "gridAutoRows",
+                        "gridTemplateAreas", "gridAutoFlow", "gridRowStart", "gridRowEnd",
+                        "gridColumnStart", "gridColumnEnd", "order", "columnGap", "rowGap",
+                        "width", "height", "padding", "border", "display"])
+        if key in ("gridTemplateColumns", "gridTemplateRows"):
+            style[key] = "none" if r.random() < .2 else grid_tracks(r)
+        elif key in ("gridAutoColumns", "gridAutoRows"):
+            style[key] = ["auto", r.randint(10, 60)]
+        elif key == "gridTemplateAreas":
+            style[key] = r.choice([[], [["cell"]], [["a", "a"], ["b", "c"]]])
+        elif key == "gridAutoFlow":
+            style[key] = r.choice(["row", "column", "row dense", "column dense"])
+        elif key in ("gridRowStart", "gridRowEnd", "gridColumnStart", "gridColumnEnd"):
+            style[key] = grid_line(r)
+        elif key == "display":
+            style[key] = r.choice(["grid", "flex", "block", "none", "contents"])
+        elif key == "order":
+            style[key] = r.randint(-2, 3)
+        elif key in ("width", "height"):
+            style[key] = r.randint(10, 160)
+        else:
+            style[key] = r.randint(0, 9)
+    elif mode["kind"] == "insets":
         style[r.choice(["padding", "paddingLeft", "paddingTop", "paddingBottom", "border", "borderTop"])] = r.choice([0, 0, 1, 3, 9])
     elif mode["kind"] == "inner":
         # A fixed border-box size from the start, so padding stays inside it.
@@ -91,6 +152,7 @@ def style_edit(r, mode, nodes, node):
 def case(seed, mode):
     r = random.Random(seed)
     root = {"display": r.choice(["block", "flex"]), "boxSizing": "border-box", "padding": 4}
+    if mode["kind"] == "grid": root.update(grid_style(r))
     # A fixed root width hides viewport resizes from everything below it.
     if r.random() < .5: root["width"] = 800
     nodes = [{"parent": None, "style": root}]
@@ -104,7 +166,8 @@ def case(seed, mode):
         depth.append(depth[parent] + 1)
     document = {"viewport": {"width": 800, "height": 600}, "nodes": nodes}
     texts = [index for index, node in enumerate(nodes) if "text" in node]
-    elements = [index for index, node in enumerate(nodes) if "style" in node and index > 0]
+    elements = [index for index, node in enumerate(nodes)
+                if "style" in node and (index > 0 or mode["kind"] == "grid")]
     cycle = []
     for _ in range(r.randint(1, 4)):
         changes = []
@@ -142,9 +205,12 @@ def main():
         mode = MODES[name]
         for seed in range(args.first, args.first + args.seeds):
             document, cycle = case(seed, mode)
-            fresh_code, fresh = run(args.cli, final(document, cycle))
-            if fresh_code != 0: continue
             total += 1
+            fresh_code, fresh = run(args.cli, final(document, cycle))
+            if fresh_code != 0:
+                failures += 1
+                print(f"fresh layout failed: mode {name} seed {seed}, exit {fresh_code}", file=sys.stderr)
+                continue
             # Repeating the cycle ends on the same document.
             updates = {"iterations": len(cycle) * mode["repeat"], "cycle": cycle}
             code, kept = run(args.cli, dict(document, updates=updates))

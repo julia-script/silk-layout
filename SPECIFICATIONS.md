@@ -24,9 +24,23 @@ Use [CSS 2.1](https://www.w3.org/TR/2011/REC-CSS2-20110607/) and its errata for 
 
 These references define the target, not a claim that every feature of the referenced modules is implemented. The identified block/flex audits cover host-supplied fragmentation, outer float break boundaries, margin adjacency, phantom-line geometry, scrolling, orthogonal/baseline interactions, and bidi static-position/source geometry. Reproduced defects have regression coverage; underspecified or approximation-permitting cases use the explicit policies below. Composable source-text breaking/shaping and justification measurement use a separate replaceable service; the CLI exercises only a bounded ASCII/Bidi_Control horizontal profile, not a complete Unicode/font backend. Full conformance must not be inferred from the focused regression corpus.
 
-### Grid phase 7 boundary
+### Grid phase 8 boundary
 
 Grid 2 was added by the explicit standards-baseline command `python3 scripts/fetch-specs.py --update --only css-grid-2`, without refreshing any existing snapshot. Its pinned document identifies source revision `700ba7b5e6ea39623b68a2a0575c2bb89c640d54`; the lock records SHA-256 `f5ce236d797b15a39e884376402c395f39cee2a8a452f1f03613e1a28711b7bd`.
+
+The integrated phase-8 regression gates pass the following focused corpus. These counts are not a claim of complete CSS conformance.
+
+| Coverage | Passing cases |
+|---|---:|
+| Native layout tests | 258 |
+| Malformed adapter requests | 241 |
+| Adapter bidi cases | 9 |
+| Normative specification fixtures | 646 |
+| Fixed Chrome-agreement fixtures | 281 |
+| Retained-versus-fresh update scenarios | 10,273 |
+| Random update cycles, 200 seeds in each of five modes | 1,000 |
+
+Grid accounts for 195 specification fixtures and 170 fixed Chrome agreements. The separate 200-case Grid and 200-case legacy Chrome fuzz streams retain the explicitly documented differences below; their nonzero diagnostic result is not counted as passing conformance.
 
 The engine accepts `grid`, `block grid`, `inline-grid`, and `inline grid`, builds grid containers and blockified items, and retains Tree-owned structured track templates, interned names, areas and placement values. [Grid §6](https://drafts.csswg.org/css-grid-2/#grid-items) supplies anonymous items for contiguous non-whitespace text; whitespace-only sequences generate no item. `contents` is flattened, `none` suppresses its subtree, floats on items do not float, and item margins remain separate under [§6.4](https://drafts.csswg.org/css-grid-2/#item-margins). Unlike flex collapse struts, `visibility:collapse` leaves grid occupancy intact.
 
@@ -72,6 +86,10 @@ Empty grid containers retain distinct min-content and max-content probe constrai
 
 A reused final subtree may still depend on intrinsic probes older than the previous compute. Early-cutoff validation rejects candidates with such probes instead of silently omitting those dependencies. Otherwise, a retained viewport-only compute followed by a text edit can leave content-sized grid tracks stale even when the item's previous final box still fits the edited text.
 
+Grid-specific update coverage changes templates, areas, implicit tracks, auto-flow, gaps, placement and order, including restoration of the original styles. A separate native fuzz mode mixes nested grids, parsed track/name/repeat forms, text, geometry and display changes without altering the four legacy modes' seed-to-input mapping. Invalid newly generated requests fail rather than disappearing from the tested count.
+
+Native text-edit regressions distinguish a fitting edit inside a kept grid area from a contribution change that must enlarge an auto row. The fitting case updates the text rectangle with zero full layouts and size probes; the growing case changes the hand-derived row and item heights. The 1,001-node nested-grid update benchmark exercises both cases, order, placement, flow, visibility, template changes and viewport resizes across an automatic-repeat count boundary, checking every scenario against fresh layout.
+
 Original `grid-*.json` fixtures include hand-derived geometry and normative anchors. The fifteen phase-2 cases cover explicit tracks, numeric placement, area-relative descendants, self-alignment, empty grids and logical axes. Twenty-six phase-3 cases add intrinsic keywords and spanning, flexible minima, cyclic percentages, orthogonal flow, nested empty grids and cross-axis ratios. Twenty-four agree with Chrome 155.0.8059.85; the two intrinsic block-size/ratio diagnostics are recorded in the differences table below, not excluded or substituted for the normative expectations. Native tests cover track-distribution invariants and contribution constraints. The retained-fixture runner also checks a viewport reuse followed by a text edit that changes auto-column contributions without changing the previous item height. The Chrome adapter retains requested, specified, computed and `CSS.supports` evidence, including used-value track-list serialization. A full Grid performance/conformance headline remains deferred.
 
 Twenty-one phase-4 fixtures cover implicit lists in both directions, cyclic auto percentages, row/column sparse/dense packing, locked-axis precedence, cursor backtracking, stable order, collapsed visibility, negative origins, empty grids and vertical RTL placement. Twenty agree with Chrome 155.0.8059.85. The remaining spanning-search case is a normative diagnostic, not a Chrome-agreement fixture. Thirteen native cases cover both flows, retained scratch, bitmap growth and the track limit.
@@ -96,7 +114,7 @@ Fourteen controls making physical fallbacks (and finite inline size where releva
 
 Precision remains a distinct diagnostic: in 129, the aligned grid rectangle [−52.5,132.5] permits 52.5px scroll, while Chrome observes 53px and shifts eight coordinates by 0.5px; its three other differences come from quantized 314/7 distribution intervals. In 189, the sole differing coordinate is 525.818181…px versus 525.765625px after distributing 103px among eleven tracks. Neither is classified as a baseline or placement error.
 
-### Existing block and flex coverage
+### Pre-Grid block and flex coverage
 
 Before fragmented-layout integration, the generated-box/fragment implementation passed 136 native tests, 87 malformed-request smoke cases, nine native bidi source-level cases, 252 spec fixtures, and 111 Chrome fixtures. That 363-fixture fixed corpus had no mismatches or unsupported cases, with every authored rectangle assertion enforced. Source-text coverage exercises cross-inline words, segment-break ownership at inline/contents boundaries, whitespace collapsing through bidi controls, non-phantom control-only lines, text/atomic wrapping, anonymous flex text sequences, shared float fitting, justification, forced-break last-line alignment, provider replacement, analysis-boundary rejection and recovery, and degenerate source rectangles. Bidi geometry regressions cover level-two digit order, discontiguous slice/clone fragments, stable fragment identity after wrapping, clone-aware line fitting, empty versus atomic inline participation, and out-of-flow transparency. A native replacement provider verifies that an X9-removed soft hyphen retains its discretionary advance without splitting semantic runs. Replaceable-font fixtures cover line-height struts, mixed vertical/sideways baseline propagation, x-middle alignment, content-derived text-under baselines, and tab stops that change independently with measured space/zero advances. The post-transactional-publication 200-case fuzz replay with seed `7351` retained exactly the same 28 failures and 235 mismatched fields documented below, with no fuzz errors or unsupported cases. Later audit findings and current coverage are recorded below.
 

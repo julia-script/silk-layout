@@ -114,11 +114,21 @@ test effect fn gridGeometryShellRetentionDoesNotPublishProbeRows()
   let mut store = GridGeometryStore.make()
   run captureBox(&mut store, 4, 43.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
   store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  let accepted = store.findFragment(4, 7)
   let checkpoint = store.checkpoint()
   run captureBox(&mut store, 4, 53.0, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 7, Rect.zero(), Rect.zero())
   let retained = store.retain(4)
+  run Testing.expect(
+    store.findFragment(4, 7) == accepted,
+    "detaching a probe restores the accepted geometry at its temporary fragment index",
+  )
   store.restore(checkpoint)
   run store.publish(4, retained) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    store.findFragment(4, 7) == accepted,
+    "publishing a retained shell cannot re-publish its discarded probe fragment identity",
+  )
   store.setFragment(4, 31, Rect.zero(), Rect.zero())
   run Testing.expect(
     store.get(store.findFragment(4, 7)).columns.tracks.get(0).start == 43.0
@@ -129,6 +139,86 @@ test effect fn gridGeometryShellRetentionDoesNotPublishProbeRows()
   run Testing.expect(
     store.findFragment(4, 31) == NO_NODE,
     "shell publication participates in outer rollback",
+  )
+}
+
+test effect fn gridGeometrySameFragmentReplacementRestoresBothIndices()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridGeometryStore.make()
+  run captureBox(&mut store, 4, 43.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  let accepted = store.findFragment(4, 7)
+  let outer = store.checkpoint()
+  run captureBox(&mut store, 4, 33.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  let replacement = store.findFragment(4, 7)
+  let inner = store.checkpoint()
+  run captureBox(&mut store, 4, 53.0, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  run Testing.expect(
+    store.get(store.findFragment(4, 7)).columns.tracks.get(0).start == 53.0,
+    "Grid 10.1 consumers see the newest accepted candidate for a reused fragment index",
+  )
+  store.restore(inner)
+  run Testing.expect(
+    store.findFragment(4, 7) == replacement && store.find(4) == replacement,
+    "inner rollback restores both the fragment and box heads",
+  )
+  run captureBox(&mut store, 4, 63.0, 120.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(4, 19, Rect.zero(), Rect.zero())
+  store.restore(outer)
+  run Testing.expect(
+    store.findFragment(4, 7) == accepted && store.findFragment(4, 19) == NO_NODE,
+    "outer rollback removes later pages without losing an earlier same-fragment version",
+  )
+}
+
+test effect fn gridGeometryFragmentIndexSurvivesCommitRemapAndSlotReuse()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridGeometryStore.make()
+  run captureBox(&mut store, 0, 13.0, 20.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(0, 3, Rect.zero(), Rect.zero())
+  run captureBox(&mut store, 2, 23.0, 30.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(2, 7, Rect.zero(), Rect.zero())
+  run captureBox(&mut store, 2, 33.0, 40.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(2, 11, Rect.zero(), Rect.zero())
+  store.commit()
+  run Testing.expect(
+    store.findFragment(2, 7) == NO_NODE && store.findFragment(2, 11) == store.find(2),
+    "commit releases historical fragment mappings while preserving the latest geometry",
+  )
+  let marker = store.checkpoint()
+  run captureBox(&mut store, 2, 43.0, 50.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(2, 11, Rect.zero(), Rect.zero())
+  store.restore(marker)
+  run Testing.expect(
+    store.get(store.findFragment(2, 11)).columns.tracks.get(0).start == 33.0,
+    "rollback after commit never restores a freed same-fragment predecessor",
+  )
+  let toOld: [usize; 3] = [2, NO_NODE, 0]
+  let toNew: [usize; 3] = [2, NO_NODE, 0]
+  run store.remap(&toOld, &toNew) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    store.findFragment(0, 11) == store.find(0) && store.findFragment(2, 3) == store.find(2)
+      && store.findFragment(2, 11) == NO_NODE,
+    "fragment lookup checks the remapped box owner rather than a stale source id",
+  )
+  store.dropBox(0)
+  run captureBox(&mut store, 1, 53.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(1, 19, Rect.zero(), Rect.zero())
+  run Testing.expect(
+    store.findFragment(0, 11) == NO_NODE && store.findFragment(1, 11) == NO_NODE,
+    "reusing a released slot does not resurrect the old fragment identity",
+  )
+  store.clear()
+  run captureBox(&mut store, 1, 63.0, 70.0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.setFragment(1, 19, Rect.zero(), Rect.zero())
+  run Testing.expect(
+    store.findFragment(2, 3) == NO_NODE
+      && store.get(store.findFragment(1, 19)).columns.tracks.get(0).start == 63.0,
+    "clear resets fragment heads before their pooled slots are reused",
   )
 }
 

@@ -11,6 +11,7 @@ import silk.collections.slice { Slice }
 import inline_prepared { KeptText }
 import flex { FlexMemos }
 import grid_geometry { GridGeometryStore }
+import grid_scratch { GridMemos }
 
 const ABSENT: usize = usize.MAX
 // Reuse levels of a subtree's kept layout; see Incremental.markSubtrees.
@@ -207,15 +208,17 @@ pub struct LayoutCache {
   pub flexMemos: FlexMemos,
   // Final content-relative tracks and names survive reuse without sizing scratch.
   pub gridGeometry: GridGeometryStore,
+  pub gridMemos: GridMemos,
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, skipping: false, rangesReset: false, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make(), gridGeometry: GridGeometryStore.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, skipping: false, rangesReset: false, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make(), gridGeometry: GridGeometryStore.make(), gridMemos: GridMemos.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
     self.flexMemos.clear()
     self.gridGeometry.clear()
+    self.gridMemos.clear()
     self.heads.clear()
     self.entries.clear()
     self.inputs.clear()
@@ -410,6 +413,7 @@ impl LayoutCache {
   pub fn clearBox(self: &mut Self, id: usize) {
     self.flexMemos.dropBox(id)
     self.gridGeometry.dropBox(id)
+    self.gridMemos.dropBox(id)
     if id < self.texts.length() { self.texts.asMutSlice()[id].clear() }
     if id < self.ranges.length() {
       let ranges = self.ranges.asMutSlice()
@@ -520,6 +524,7 @@ impl LayoutCache {
   // Results of previous boxes with no match become unreachable.
   pub effect fn remap(self: &mut Self, toOld: &[usize], toNew: &[usize]) ! OutOfMemoryError ? &mut Allocator {
     self.flexMemos.clear()
+    self.gridMemos.clear()
     run self.gridGeometry.remap(toOld, toNew)
     let mut old: usize = 0
     while old < self.heads.length() {

@@ -2,7 +2,17 @@ import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.core.effect { Effect }
 import silk.text.string { String }
 import silk.testing.testing { Testing, AssertionError }
-import style { Style, Display, DisplayOutside, DisplayInside, Direction, WritingMode, Float, Dimension, Align }
+import style {
+  Style,
+  Display,
+  DisplayOutside,
+  DisplayInside,
+  Direction,
+  WritingMode,
+  Float,
+  Dimension,
+  Align
+}
 import tree { Tree, LayoutTree, InvalidNode, NO_NODE }
 import box_tree as Boxes
 import box_tree { BoxKind }
@@ -11,10 +21,28 @@ import grid_lines { numericSpan }
 import grid_tracks { TrackState, resolveFlexible }
 import silk.collections.list { List }
 import geometry {
-  Measure, MeasureRequest, Measured, NaturalDimensions, FontRequest, FontMetrics,
-  ScrollbarRequest, ScrollbarMetrics, Size, Rect, BaselineSet, OptionalSize
+  Measure,
+  MeasureRequest,
+  Measured,
+  NaturalDimensions,
+  FontRequest,
+  FontMetrics,
+  ScrollbarRequest,
+  ScrollbarMetrics,
+  Size,
+  Rect,
+  BaselineSet,
+  OptionalSize
 }
-import text { TextMeasure, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun, TextError }
+import text {
+  TextMeasure,
+  TextContext,
+  TextBreak,
+  TextAnalysis,
+  TextShapeRequest,
+  TextRun,
+  TextError
+}
 import fragmentation { FragmentationError }
 import engine { compute }
 
@@ -246,7 +274,12 @@ impl TextMeasure for FixedMinimumFlexMeasure {
 // cyclic gap. Resolving its 14px gap then leaves 106px for 1fr, not 120px;
 // the container stays 140px and the item's 120px minimum still overflows.
 effect fn checkFixedMinimumFlexPercentageGap()
-  ! OutOfMemoryError | InvalidNode | GridError | TextError | FragmentationError | AssertionError<'static>
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static>
   ? &mut Allocator {
   let heights: [f32; 2] = [100.0, 140.0]
   let markerOffsets: [f32; 2] = [80.0, 120.0]
@@ -281,11 +314,14 @@ effect fn checkFixedMinimumFlexPercentageGap()
     let itemBounds = run output.sourceBounds(item)
     let markerBounds = run output.sourceBounds(marker)
     run Testing.expect(
-      rootBounds.width == 40.0 && rootBounds.height == heights[index]
-        && itemBounds.x == 0.0 && itemBounds.y == 0.0
-        && itemBounds.width == 40.0 && itemBounds.height == 120.0
-        && markerBounds.x == 0.0 && markerBounds.y == markerOffsets[index]
-        && markerBounds.width == 40.0 && markerBounds.height == 20.0,
+      rootBounds.width == 40.0 && rootBounds.height == heights[index] && itemBounds.x == 0.0
+        && itemBounds.y == 0.0
+        && itemBounds.width == 40.0
+        && itemBounds.height == 120.0
+        && markerBounds.x == 0.0
+        && markerBounds.y == markerOffsets[index]
+        && markerBounds.width == 40.0
+        && markerBounds.height == 20.0,
       "fixed-minimum fr uses definite space only after intrinsic height and cyclic gap resolution",
     )
     index = index + 1
@@ -293,7 +329,12 @@ effect fn checkFixedMinimumFlexPercentageGap()
 }
 
 test effect fn gridFixedMinimumFlexPreservesOverflowAcrossPercentageGapResolution()
-  ! OutOfMemoryError | InvalidNode | GridError | TextError | FragmentationError | AssertionError<'static> {
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run checkFixedMinimumFlexPercentageGap() |> Effect.provideMut<Allocator>(&mut allocator)
 }

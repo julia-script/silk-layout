@@ -711,8 +711,10 @@ fn emptyBoxPlain(nodes: &BoxTree, id: usize, input: &Input) -> bool with Intrins
 
 // emptyBoxPlain's conditions on the box alone: plainSizing's style checks.
 fn plainEmptyShape(style: &Style, node: &BoxNode) -> bool {
-  return (node.kind == BoxKind.Block || node.kind == BoxKind.Flex) && !isGrid(style) && node.measurement == Measurement.None
-    && !style.replaced && style.aspectRatio <= 0.0 && style.writingMode == WritingMode.HorizontalTb && style.float == Float.None
+  return (node.kind == BoxKind.Block || node.kind == BoxKind.Flex) && node.measurement == Measurement.None && plainLeafStyle(style)
+}
+fn plainLeafStyle(style: &Style) -> bool with Intrinsic.inlineAlways() {
+  return !isGrid(style) && !style.replaced && style.aspectRatio <= 0.0 && style.writingMode == WritingMode.HorizontalTb && style.float == Float.None
     && style.overflowX == Overflow.Visible && style.overflowY == Overflow.Visible
     && !keywordSize(style.width.kind) && !keywordSize(style.height.kind) && !keywordSize(style.minWidth.kind)
     && !keywordSize(style.minHeight.kind) && !keywordSize(style.maxWidth.kind) && !keywordSize(style.maxHeight.kind)
@@ -736,10 +738,11 @@ fn emptyBoxApplies(nodes: &BoxTree, id: usize, input: &Input) -> bool {
   return emptyBoxPlain(nodes, id, &input)
 }
 
-// layoutAdjustedBox's sizing and result for a box emptyBoxApplies to, before
-// overflow geometry: `box` starts as resolveBox's and `result` as Layout.zero().
-fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut ResolvedBox, result: &mut Layout) {
-  // prepareSizing's plain branch.
+// prepareSizing's plain branch for a childless box: `box` starts as
+// resolveBox's. Shrink-to-fit widths need the content's min- and max-content
+// widths, which for an empty box are its inset (see emptyContentWidth); for
+// any other box this returns false, leaving `box` untouched.
+fn plainLeafWidth(style: &Style, input: &Input, box: &mut ResolvedBox, empty: bool) -> bool with Intrinsic.inlineAlways() {
   let justification = blockJustification(style, &input)
   let autoInlineMargin = style.margin.left.kind == DimensionKind.Auto || style.margin.right.kind == DimensionKind.Auto
   let stretchInline = justification == Align.Stretch && !autoInlineMargin
@@ -748,13 +751,34 @@ fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut Resolv
     box.size.width = max(box.inset.horizontal(), input.availableWidth.value - box.margin.horizontal())
     box.size.widthDefinite = true
   } else if !box.size.widthDefinite && !input.intrinsicWidth && input.availableWidth.kind == AvailableKind.Definite && (input.shrinkToFit || fitInline || outOfFlow(style)) {
-    // prepareSizing's fit-content width: an empty box's min- and max-content
-    // widths are both its inset (see emptyContentWidth).
+    if !empty { return false }
     box.size.width = box.inset.horizontal()
     box.size.widthDefinite = true
   }
   if box.size.widthDefinite { box.size.width = clamp(box.size.width, box.min.width, box.max.width) }
   if box.size.heightDefinite { box.size.height = clamp(box.size.height, box.min.height, box.max.height) }
+  return true
+}
+
+// layoutAdjustedBox's result fields after a plain childless box's contents.
+fn plainLeafTail(style: &Style, input: &Input, box: &ResolvedBox, result: &mut Layout) with Intrinsic.inlineAlways() {
+  result.contentSize = Size { width: max(0.0, result.size.width - box.inset.horizontal()), height: max(0.0, result.size.height - box.inset.vertical()) }
+  result.scrollbarGutter = box.gutter
+  if scrollbarApplies(style, &input) { result.setScrollbarMetrics(box.scrollbarMetrics) }
+  // plainSizing implies a horizontal parent: block margins are top and bottom.
+  result.usedMargin = box.margin
+  result.marginTopPositive = max(result.marginTopPositive, box.margin.top)
+  result.marginTopNegative = min(result.marginTopNegative, box.margin.top)
+  result.marginBottomPositive = max(result.marginBottomPositive, box.margin.bottom)
+  result.marginBottomNegative = min(result.marginBottomNegative, box.margin.bottom)
+  result.widthDefinite = box.size.widthDefinite && !input.indefiniteWidth
+  result.heightDefinite = box.size.heightDefinite && !input.indefiniteHeight
+}
+
+// layoutAdjustedBox's sizing and result for a box emptyBoxApplies to, before
+// overflow geometry: `box` starts as resolveBox's and `result` as Layout.zero().
+fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut ResolvedBox, result: &mut Layout) {
+  drop plainLeafWidth(style, &input, &mut box, true)
   // firstContents, then the min/max relayout.
   let flex = isFlex(style)
   if flex && !input.performLayout && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && box.size.widthDefinite && box.size.heightDefinite {
@@ -772,17 +796,7 @@ fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut Resolv
     result.* = Layout.zero()
     emptyContents(style, &input, &box, &bfc, flex, &mut result)
   }
-  result.contentSize = Size { width: max(0.0, result.size.width - box.inset.horizontal()), height: max(0.0, result.size.height - box.inset.vertical()) }
-  result.scrollbarGutter = box.gutter
-  if scrollbarApplies(style, &input) { result.setScrollbarMetrics(box.scrollbarMetrics) }
-  // plainSizing implies a horizontal parent: block margins are top and bottom.
-  result.usedMargin = box.margin
-  result.marginTopPositive = max(result.marginTopPositive, box.margin.top)
-  result.marginTopNegative = min(result.marginTopNegative, box.margin.top)
-  result.marginBottomPositive = max(result.marginBottomPositive, box.margin.bottom)
-  result.marginBottomNegative = min(result.marginBottomNegative, box.margin.bottom)
-  result.widthDefinite = box.size.widthDefinite && !input.indefiniteWidth
-  result.heightDefinite = box.size.heightDefinite && !input.indefiniteHeight
+  plainLeafTail(style, &input, &box, &mut result)
 }
 
 // probeFresh for a box emptyBoxApplies to: stores and caches the same result.
@@ -829,6 +843,62 @@ effect fn layoutEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut 
   emptyBoxLayout(style, &input, &bfc, &mut box, &mut result)
   emptyOverflowGeometry(&box, &mut result)
   run output.store(id, &result, true)
+  output.fragmentParent = previousParent
+  return result
+}
+// Whether layoutBox reduces to one measure call between plainLeafWidth and
+// plainLeafTail: a childless block or flex container with measured content,
+// under emptyBoxPlain's other conditions.
+fn plainMeasuredBox(nodes: &BoxTree, id: usize, input: &Input) -> bool with Intrinsic.inlineAlways() {
+  let node = nodes.node(id)
+  if node.measurement != Measurement.Content || (node.kind != BoxKind.Block && node.kind != BoxKind.Flex) { return false }
+  if input.parentWritingMode != WritingMode.HorizontalTb || input.fragmentation.active || input.fragmentation.boundaryProbe != BoundaryProbe.None { return false }
+  let style = nodes.style(id)
+  if !plainLeafStyle(style) || !noInFlowChildren(nodes, id) || boxInputChanges(nodes, id, &input) { return false }
+  return effectiveDisplay(style, &input).outsideIs(DisplayOutside.Block)
+}
+
+// layoutBox for a box plainMeasuredBox holds for, outside fragmentation,
+// once plainLeafWidth has sized `box`.
+effect fn layoutMeasuredBox<'pass, 'source, M: Measure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, bfc: &BfcState, box: &mut ResolvedBox) -> Layout ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineNever() {
+  let style = nodes.style(id)
+  let previousParent = output.fragmentParent
+  if input.performLayout {
+    output.stats.fullLayouts = output.stats.fullLayouts + 1
+    let node = nodes.node(id)
+    run output.preserveLayout(id)
+    run output.relayout(id)
+    output.boxes[id].location = Point { x: 0.0, y: 0.0 }
+    let mut first = true
+    let mut last = true
+    if node.source != NO_NODE {
+      first = node.firstForSource
+      last = node.lastForSource
+    }
+    let emitted = run output.fragments.appendBox(id, node.source, FragmentKind.Box, previousParent, 0, first, last)
+    output.fragmentParent = emitted.index
+  } else {
+    output.stats.sizeProbes = output.stats.sizeProbes + 1
+  }
+  // firstContents, then the min/max relayout.
+  let mut result = Layout.zero()
+  if isFlex(style) && !input.performLayout && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && box.size.widthDefinite && box.size.heightDefinite {
+    result.size = Size { width: box.size.width, height: box.size.height }
+  } else {
+    result = measureLeaf(nodes, &mut measurer, id, &input, &box, &bfc)
+  }
+  let width = clamp(result.size.width, box.min.width, box.max.width)
+  let height = clamp(result.size.height, box.min.height, box.max.height)
+  if width != result.size.width || height != result.size.height {
+    if width != result.size.width { box.size.width = width
+      box.size.widthDefinite = true }
+    if height != result.size.height { box.size.height = height
+      box.size.heightDefinite = true }
+    result = measureLeaf(nodes, &mut measurer, id, &input, &box, &bfc)
+  }
+  plainLeafTail(style, &input, &box, &mut result)
+  if input.performLayout { overflowGeometry(nodes, &output, id, &box, &mut result) }
+  run output.store(id, &result, input.performLayout)
   output.fragmentParent = previousParent
   return result
 }
@@ -1150,6 +1220,10 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   // places its absolutely positioned children, static positions included.
   if incoming.performLayout && output.frame == NO_NODE && keptEmptyBox(nodes, &output, id, &incoming) {
     return run layoutEmptyBox(nodes, &mut output, id, &incoming, &bfc)
+  }
+  if output.frame == NO_NODE && plainMeasuredBox(nodes, id, &incoming) {
+    let mut box = shapedBox(&output, nodes.style(id), id, &incoming)
+    if plainLeafWidth(nodes.style(id), &incoming, &mut box, false) { return run layoutMeasuredBox(nodes, &mut output, &mut measurer, id, &incoming, &bfc, &mut box) }
   }
   // Most requests already carry what adjustBoxInput would set: lay those
   // out from the caller's input instead of a copy.

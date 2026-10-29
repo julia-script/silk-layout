@@ -40,8 +40,8 @@
           "columnGap": 10,
           "rowGap": 20,
           "gridTemplateAreas": [
-            "header header",
-            "left body"
+            ["header", "header"],
+            ["left", "body"]
           ]
         }
       },

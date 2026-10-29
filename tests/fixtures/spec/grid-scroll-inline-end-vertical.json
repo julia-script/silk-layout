@@ -8,10 +8,11 @@
   ],
   "spec": [
     "https://drafts.csswg.org/css-grid-2/#overflow",
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
     "https://drafts.csswg.org/css-grid-2/#grid-align",
     "https://drafts.csswg.org/css-align-3/#overflow-scroll-position"
   ],
-  "derivation": "End distribution shifts a 120px track by -70px in the logical inline axis of a 50px scrollport. Align \u00a75.3 opens the normally unreachable origin only to the grid subject, not the farther absolute box. Physical-axis conversion and clamped scroll yield the authored visual positions.",
+  "derivation": "End distribution shifts a 120px track by -70px in the vertical inline axis of a 50px scrollport. Align §5.3 opens the origin only to the grid subject. Grid §10.1 makes the absolute auto boundary the scrollable padding start -70px: inset-top -100px gives normal y=-170px, then scroll -70px gives visual y=-100px. The farther absolute box does not enlarge the opened origin.",
   "input": {
     "viewport": {
       "width": 800,
@@ -81,7 +82,7 @@
       },
       {
         "x": 0,
-        "y": -30,
+        "y": -100,
         "width": 10,
         "height": 10
       }

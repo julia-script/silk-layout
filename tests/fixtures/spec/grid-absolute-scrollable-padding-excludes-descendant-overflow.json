@@ -72,8 +72,8 @@
         "height": 60,
         "scrollableOverflowWidth": 200
       },
-      {},
-      {},
+      { "x": 0, "y": 0, "width": 100, "height": 40 },
+      { "x": 0, "y": 0, "width": 200, "height": 20 },
       {
         "x": 0,
         "y": 0,

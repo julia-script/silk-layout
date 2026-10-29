@@ -140,16 +140,8 @@ impl Copy for Line {}
 // Whether any collected item has a nonzero order, so that sort can move it.
 // Reads the items' styles only without facts' itemFlags.
 effect fn collect(nodes: &BoxTree, flags: &[u8], id: usize, items: &mut List<Item>) -> bool ! OutOfMemoryError ? &mut Allocator {
-  // Size the list once instead of regrowing it for every large container.
-  let mut count: usize = 0
-  let mut child = nodes.node(id).firstChild
-  while child != NO_NODE {
-    count = count + 1
-    child = nodes.node(child).nextSibling
-  }
-  run items.reserveExact(count)
   let mut ordered = false
-  child = nodes.node(id).firstChild
+  let mut child = nodes.node(id).firstChild
   if flags.length == nodes.boxes.length() {
     while child != NO_NODE {
       let item = flags[child]

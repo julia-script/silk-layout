@@ -215,6 +215,8 @@ fn cyclicTracks(tracks: &[GridTrack]) -> bool {
 
 // Contributions stay in item order. Only the pure track solver groups spans.
 // This also lets §12.1 compare the new min-content contributions in one walk.
+// Checks need only minimum/min-content; a triggered sizing pass collects maxima.
+// Baseline groups retain all three contribution kinds during either pass.
 effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   nodes: &BoxTree<'source>,
   output: &mut LayoutPass<'pass, 'source>,
@@ -228,6 +230,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   sizing: &AxisSizing,
   crossSizing: &AxisSizing,
   crossFinal: bool,
+  checkOnly: bool,
   baselines: &mut GridBaselines,
 ) -> bool
   ! OutOfMemoryError | TextError | FragmentationError
@@ -306,7 +309,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
           policy.cap,
           crossPolicy.cap,
           policy.needMin,
-          policy.needMax,
+          policy.needMax && (!checkOnly || aligned),
         )
         contribution.minimum = measured.minimum
         contribution.minContent = measured.minContent
@@ -437,6 +440,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     &sizing,
     crossSizing,
     crossFinal,
+    false,
     &mut baselines,
   )
   let mut natural = run finishTracks(&mut own, &sizing, &mut work)
@@ -471,6 +475,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
       &sizing,
       crossSizing,
       crossFinal,
+      false,
       &mut baselines,
     )
     natural = run finishTracks(&mut own, &sizing, &mut work)
@@ -694,6 +699,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &columnSizing,
     &rowSizing,
     true,
+    true,
     &mut baselines,
   )
   if columnsChanged {
@@ -729,6 +735,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       &lease.value.columns,
       &rowSizing,
       &columnSizing,
+      true,
       true,
       &mut baselines,
     )

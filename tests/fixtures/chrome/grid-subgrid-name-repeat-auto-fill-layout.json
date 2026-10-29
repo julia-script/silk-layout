@@ -1,0 +1,94 @@
+{
+  "name": "grid-subgrid-name-repeat-auto-fill-layout",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "subgrid",
+    "named-lines",
+    "auto-repeat"
+  ],
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 112,
+          "gridTemplateColumns": [
+            17,
+            23,
+            31,
+            41
+          ],
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 5,
+          "gridTemplateColumns": {
+            "subgrid": [
+              {
+                "names": [
+                  "lead"
+                ]
+              },
+              {
+                "repeat": {
+                  "count": "auto-fill",
+                  "lines": [
+                    {
+                      "names": [
+                        "tick"
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "names": [
+                  "tail"
+                ]
+              }
+            ]
+          },
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": {
+            "line": 2,
+            "name": "tick"
+          },
+          "gridColumnEnd": {
+            "span": 1
+          },
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": {
+            "span": 1
+          },
+          "gridColumnEnd": "tail",
+          "gridRowStart": 1
+        }
+      }
+    ]
+  }
+}

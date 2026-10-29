@@ -1,0 +1,101 @@
+{
+  "name": "grid-subgrid-name-repeat-truncated-layout",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "subgrid",
+    "named-lines",
+    "repeat"
+  ],
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 71,
+          "gridTemplateColumns": [
+            17,
+            23,
+            31
+          ],
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 4,
+          "gridTemplateColumns": {
+            "subgrid": [
+              {
+                "repeat": {
+                  "count": 3,
+                  "lines": [
+                    {
+                      "names": [
+                        "a"
+                      ]
+                    },
+                    {
+                      "names": [
+                        "b"
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "repeat": {
+                  "count": "auto-fill",
+                  "lines": [
+                    {
+                      "names": [
+                        "unused"
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": {
+            "line": -2,
+            "name": "a"
+          },
+          "gridColumnEnd": {
+            "span": 1
+          },
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": "b",
+          "gridColumnEnd": {
+            "line": -1,
+            "name": "b"
+          },
+          "gridRowStart": 1
+        }
+      }
+    ]
+  }
+}

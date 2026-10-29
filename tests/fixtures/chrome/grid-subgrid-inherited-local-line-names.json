@@ -1,0 +1,100 @@
+{
+  "name": "grid-subgrid-inherited-local-line-names",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "subgrid",
+    "named-lines"
+  ],
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 89,
+          "gridTemplateColumns": [
+            {
+              "names": [
+                "west"
+              ]
+            },
+            17,
+            {
+              "names": [
+                "shared",
+                "inherited"
+              ]
+            },
+            29,
+            {
+              "names": [
+                "east"
+              ]
+            },
+            43,
+            {
+              "names": [
+                "outer-end"
+              ]
+            }
+          ],
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 2,
+          "gridColumnEnd": 4,
+          "gridTemplateColumns": {
+            "subgrid": [
+              {
+                "names": [
+                  "local-start",
+                  "shared"
+                ]
+              },
+              {
+                "names": [
+                  "local-middle"
+                ]
+              },
+              {
+                "names": [
+                  "local-end"
+                ]
+              }
+            ]
+          },
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": "inherited",
+          "gridColumnEnd": "local-middle",
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": "local-middle",
+          "gridColumnEnd": "outer-end",
+          "gridRowStart": 1
+        }
+      }
+    ]
+  }
+}

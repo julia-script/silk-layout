@@ -432,6 +432,16 @@ effect fn baselinePeerTransitions()
     run expectFresh(&tree, &mut output, &mut host, &sources)
     stage = stage + 1
   }
+  // Removing inheritance keeps the same 50x40 area, but ends the parent's
+  // sharing group. Retained template capacity is not an active descriptor.
+  let mut standalone = GridTemplate.make()
+  run standalone.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(50.0)))
+  run standalone.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(40.0)))
+  run tree.setGrid(subgrid, move standalone)
+  run layout(&tree, &mut output, &mut host)
+  run expectBounds(&mut output, item, 0.0, 0.0, 50.0, 10.0)
+  run expectBounds(&mut output, text, 0.0, 0.0, 10.0, 10.0)
+  run expectFresh(&tree, &mut output, &mut host, &sources)
 }
 
 test effect fn subgridRetainedCrossBoundaryBaselinePeerEdit()

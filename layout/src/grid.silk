@@ -74,7 +74,7 @@ fn itemInput(
   parent: &Style,
   axis: &Axes,
   area: OptionalSize,
-) -> Input {
+) -> Input with Intrinsic.inlineAlways() {
   let mut request = base.*
   request.blockify = true
   request.blockRoot = true

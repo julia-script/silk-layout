@@ -14,7 +14,7 @@ import geometry {
 }
 import style { Style, Dimension, DimensionKind, BoxSizing, WritingMode, FlexWrap, FlexDirection }
 import box_tree { BoxTree }
-import context { Input, resolve, resolves, isFlex, isGrid, scrollable, overflowForAxis, UNBOUNDED }
+import context { Input, resolves, isFlex, isGrid, scrollable, overflowForAxis, UNBOUNDED }
 import engine { normalizeKey, probeFresh, shapedBox }
 import layout_pass { LayoutPass, CacheKind }
 import text { TextMeasure, TextError }
@@ -237,7 +237,7 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(
   constraint: AvailableSpace,
 ) -> Probe
   ! OutOfMemoryError | TextError | FragmentationError
-  ? &mut Allocator {
+  ? &mut Allocator with Intrinsic.inlineAlways() {
   // Match the engine's axis-only probe contract: ratios and natural dimensions
   // can still require the opposite size, even when the contribution is scalar.
   let fullSize = !horizontal || nodes.style(id).aspectRatio > 0.0
@@ -288,12 +288,9 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
   let sizeDimension = preferred(style, horizontal)
   let minDimension = minimum(style, horizontal)
   let maxDimension = maximum(style, horizontal)
-  let crossDimension = preferred(style, !horizontal)
   let crossMinDimension = minimum(style, !horizontal)
   let crossMaxDimension = maximum(style, !horizontal)
-  let basis = optionalSize(input.parent, horizontal)
   let basisDefinite = definite(input.parent, horizontal)
-  let crossBasis = optionalSize(input.parent, !horizontal)
   let crossBasisDefinite = definite(input.parent, !horizontal)
 
   // Author constraints must survive an incoming intrinsic or stretched request.
@@ -313,13 +310,10 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
     add = 0.0
     crossAdd = 0.0
   }
-  let preferredDefinite = resolves(sizeDimension, basisDefinite)
-  let preferredSize = max(inset, resolve(sizeDimension, basis, basisDefinite, 0.0) + add)
-  let crossPreferredDefinite = resolves(crossDimension, crossBasisDefinite)
-  let crossPreferred = max(
-    crossInset,
-    resolve(crossDimension, crossBasis, crossBasisDefinite, 0.0) + crossAdd,
-  )
+  let preferredDefinite = definite(box.size, horizontal)
+  let preferredSize = optionalSize(box.size, horizontal)
+  let crossPreferredDefinite = definite(box.size, !horizontal)
+  let crossPreferred = optionalSize(box.size, !horizontal)
   let autoMinimum = autoMinimumAllowed && minDimension.kind == DimensionKind.Auto
     && !scrollable(overflowForAxis(style, horizontal))
   let cyclicPreferred = percentage(sizeDimension) && !basisDefinite

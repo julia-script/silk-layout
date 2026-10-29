@@ -1,0 +1,22 @@
+{
+  "name": "grid-subgrid-inherited-local-line-names",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "named-lines"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-line-name-inheritance", "https://drafts.csswg.org/css-grid-2/#subgrid-indexing"],
+  "derivation": "The subgrid starts at parent line2, x17, and spans 29+43=72px. Its local lines inherit [shared,inherited], [east], and [outer-end], merged with [local-start,shared], [local-middle], and [local-end]. The first child uses an inherited start and local end to occupy the 29px column; the second uses a local start and inherited end to occupy the 43px column. Source x values 0 and29 are relative to the subgrid, not world x17 and46.",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 89, "gridTemplateColumns": [{"names":["west"]},17,{"names":["shared","inherited"]},29,{"names":["east"]},43,{"names":["outer-end"]}], "gridTemplateRows": [19]}},
+      {"parent": 0, "style": {"display": "grid", "gridColumnStart": 2, "gridColumnEnd": 4, "gridTemplateColumns": {"subgrid":[{"names":["local-start","shared"]},{"names":["local-middle"]},{"names":["local-end"]}]}, "gridTemplateRows": [19]}},
+      {"parent": 1, "style": {"gridColumnStart": "inherited", "gridColumnEnd": "local-middle", "gridRowStart": 1}},
+      {"parent": 1, "style": {"gridColumnStart": "local-middle", "gridColumnEnd": "outer-end", "gridRowStart": 1}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 89, "height": 19},
+    {"x": 17, "y": 0, "width": 72, "height": 19},
+    {"x": 0, "y": 0, "width": 29, "height": 19},
+    {"x": 29, "y": 0, "width": 43, "height": 19}
+  ]}
+}

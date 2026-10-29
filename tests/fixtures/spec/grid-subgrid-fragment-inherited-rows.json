@@ -1,0 +1,23 @@
+{
+  "name": "grid-subgrid-fragment-inherited-rows",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "fragmentation"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-tracks", "https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-break-3/#unforced-breaks"],
+  "derivation": "The subgrid spans the parent's23px and31px rows, with one local47px column. The first frame holds exactly the first row. Indivisible row items require the next row on the second frame; the inherited row allocation must continue, not restart at23px. Root and subgrid each publish23px and31px fragments. Rectangles are world coordinates at frame origins(5,7) and(11,43), unlike parent-relative source x/y. This uses the existing minimal-distortion fragmentation policy; Grid2 section13 does not uniquely prescribe every fragmented layout.",
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "fragmentation": {"kind": "page", "frames": [{"x":5,"y":7,"width":47,"height":23},{"x":11,"y":43,"width":47,"height":31}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [47], "gridTemplateRows": [23,31]}},
+      {"parent": 0, "style": {"display": "grid", "gridRowStart": 1, "gridRowEnd": 3, "gridTemplateColumns": [47], "gridTemplateRows": "subgrid"}},
+      {"parent": 1, "style": {"gridRowStart": 1, "height": 23, "breakInside": "avoid"}},
+      {"parent": 1, "style": {"gridRowStart": 2, "height": 31, "breakInside": "avoid"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x":5,"y":7,"width":47,"height":23},{"x":11,"y":43,"width":47,"height":31}]},
+    {"rects": [{"x":5,"y":7,"width":47,"height":23},{"x":11,"y":43,"width":47,"height":31}]},
+    {"rects": [{"x":5,"y":7,"width":47,"height":23}]},
+    {"rects": [{"x":11,"y":43,"width":47,"height":31}]}
+  ]}
+}

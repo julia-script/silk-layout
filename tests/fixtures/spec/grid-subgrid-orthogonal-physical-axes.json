@@ -1,0 +1,22 @@
+{
+  "name": "grid-subgrid-orthogonal-physical-axes",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "writing-modes"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-indexing", "https://drafts.csswg.org/css-grid-2/#subgrid-tracks"],
+  "derivation": "The horizontal parent is60x50 with physical columns23/37 and rows19/31. A vertical-rl subgrid spans all four cells. Its inline columns map to the parent's physical rows (19,31 downward), while its block rows map to the physical columns in reverse order (37,23 leftward). Local column2,row1 is therefore physical (23,19),37x31; local column1,row2 is(0,0),23x19. Inheritance follows physical axes, not matching row/column property names.",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 60, "gridTemplateColumns": [23,37], "gridTemplateRows": [19,31]}},
+      {"parent": 0, "style": {"display": "grid", "writingMode": "vertical-rl", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 1, "gridRowEnd": 3, "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid"}},
+      {"parent": 1, "style": {"writingMode": "vertical-rl", "gridColumnStart": 2, "gridRowStart": 1}},
+      {"parent": 1, "style": {"writingMode": "vertical-rl", "gridColumnStart": 1, "gridRowStart": 2}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 60, "height": 50},
+    {"x": 0, "y": 0, "width": 60, "height": 50},
+    {"x": 23, "y": 19, "width": 37, "height": 31},
+    {"x": 0, "y": 0, "width": 23, "height": 19}
+  ]}
+}

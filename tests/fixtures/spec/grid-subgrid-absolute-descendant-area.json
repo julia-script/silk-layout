@@ -1,0 +1,20 @@
+{
+  "name": "grid-subgrid-absolute-descendant-area",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "position"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-indexing", "https://drafts.csswg.org/css-grid-2/#subgrid-tracks", "https://drafts.csswg.org/css-grid-2/#abspos-items"],
+  "derivation": "The relative-positioned subgrid covers parent columns2-3 and both rows. Parent columns17/29/47 with5px gaps put it at x22 with width29+5+47=81. Parent rows19/31 with7px gap give height57. Its absolute child's local lines2/3 in both axes establish a47x31 containing block at local(29+5,19+7)=(34,26). Zero insets fill that area. The child's source position is(34,26), while its world rectangle starts at(56,26); the absolute child contributes no track sizes.",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 103, "gridTemplateColumns": [17,29,47], "gridTemplateRows": [19,31], "columnGap": 5, "rowGap": 7}},
+      {"parent": 0, "style": {"display": "grid", "position": "relative", "gridColumnStart": 2, "gridColumnEnd": 4, "gridRowStart": 1, "gridRowEnd": 3, "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid"}},
+      {"parent": 1, "style": {"position": "absolute", "gridColumnStart": 2, "gridColumnEnd": 3, "gridRowStart": 2, "gridRowEnd": 3, "inset": {"left":0,"right":0,"top":0,"bottom":0}}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 103, "height": 57},
+    {"x": 22, "y": 0, "width": 81, "height": 57},
+    {"x": 34, "y": 26, "width": 47, "height": 31, "rects": [{"x":56,"y":26,"width":47,"height":31}]}
+  ]}
+}

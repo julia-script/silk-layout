@@ -1,0 +1,20 @@
+{
+  "name": "grid-subgrid-empty-edge-placeholder",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "intrinsic-sizing"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-edge-placeholders", "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution"],
+  "derivation": "Only the middle track contains an item, width19. The subgrid has13px left padding and an empty fixed5px first track. Its left-edge hypothetical item spans tracks1-2 with contribution19+13=32, requiring the auto middle track to be32-5=27. The right-edge placeholder adds no padding and does not enlarge it. Root width is5+27+7=39. The real child still starts at inherited line2, local x5, because it is not on the subgrid edge; the hypothetical item affects sizing, not the real child's placement. Its fixed19px width leaves8px unused in the middle track.",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": "max-content", "gridTemplateColumns": [5,"auto",7], "gridTemplateRows": [17]}},
+      {"parent": 0, "style": {"display": "grid", "gridColumnStart": 1, "gridColumnEnd": 4, "gridTemplateColumns": "subgrid", "gridTemplateRows": [17], "paddingLeft": 13}},
+      {"parent": 1, "style": {"gridColumnStart": 2, "width": 19}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 39, "height": 17},
+    {"x": 0, "y": 0, "width": 39, "height": 17},
+    {"x": 5, "y": 0, "width": 19, "height": 17}
+  ]}
+}

@@ -1,0 +1,27 @@
+{
+  "name": "grid-subgrid-fragment-inherited-columns",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "fragmentation"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-tracks", "https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-break-3/#unforced-breaks"],
+  "derivation": "The subgrid inherits19px and29px columns while its local rows are23px and31px. It contributes54px to the parent's single auto row. With23px then31px frames, the two indivisible local rows split at their boundary. Inherited column widths remain19/29 in both continuations. Frame origins are(7,5) and(13,47), so second-column world x coordinates are26 and32. Root and subgrid each have two fragments; each leaf has exactly one. This chooses the existing minimal-distortion policy within Grid2 section13's expressly incomplete fragmentation definition.",
+  "input": {
+    "viewport": {"width": 100, "height": 100},
+    "fragmentation": {"kind": "page", "frames": [{"x":7,"y":5,"width":48,"height":23},{"x":13,"y":47,"width":48,"height":31}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [19,29], "gridTemplateRows": ["auto"]}},
+      {"parent": 0, "style": {"display": "grid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridTemplateColumns": "subgrid", "gridTemplateRows": [23,31]}},
+      {"parent": 1, "style": {"height": 23, "breakInside": "avoid"}},
+      {"parent": 1, "style": {"height": 23, "breakInside": "avoid"}},
+      {"parent": 1, "style": {"height": 31, "breakInside": "avoid"}},
+      {"parent": 1, "style": {"height": 31, "breakInside": "avoid"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x":7,"y":5,"width":48,"height":23},{"x":13,"y":47,"width":48,"height":31}]},
+    {"rects": [{"x":7,"y":5,"width":48,"height":23},{"x":13,"y":47,"width":48,"height":31}]},
+    {"rects": [{"x":7,"y":5,"width":19,"height":23}]},
+    {"rects": [{"x":26,"y":5,"width":29,"height":23}]},
+    {"rects": [{"x":13,"y":47,"width":19,"height":31}]},
+    {"rects": [{"x":32,"y":47,"width":29,"height":31}]}
+  ]}
+}

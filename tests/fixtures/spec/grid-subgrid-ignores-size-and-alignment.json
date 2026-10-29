@@ -1,0 +1,20 @@
+{
+  "name": "grid-subgrid-ignores-size-and-alignment",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "alignment"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-box-alignment", "https://drafts.csswg.org/css-grid-2/#subgrid-grid-alignment"],
+  "derivation": "The subgrid spans the parent's70x40 grid and must stretch in both inherited axes. Its width9/min-width7/max-width11 and height5/min-height3/max-height8 constraints are ignored, as are end/center self-alignment and end content alignment. The shared columns remain23/47 and rows13/27. Its descendant in column2,row2 therefore starts at(23,13) and fills47x27.",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 70, "gridTemplateColumns": [23,47], "gridTemplateRows": [13,27]}},
+      {"parent": 0, "style": {"display": "grid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 1, "gridRowEnd": 3, "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "width": 9, "minWidth": 7, "maxWidth": 11, "height": 5, "minHeight": 3, "maxHeight": 8, "justifySelf": "end", "alignSelf": "center", "justifyContent": "end", "alignContent": "end"}},
+      {"parent": 1, "style": {"gridColumnStart": 2, "gridRowStart": 2}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 70, "height": 40},
+    {"x": 0, "y": 0, "width": 70, "height": 40},
+    {"x": 23, "y": 13, "width": 47, "height": 27}
+  ]}
+}

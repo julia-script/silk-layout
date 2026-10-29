@@ -1,0 +1,22 @@
+{
+  "name": "grid-subgrid-automatic-span-empty-name-groups",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "named-lines", "auto-placement"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-span", "https://drafts.csswg.org/css-grid-2/#subgrid-listing"],
+  "derivation": "Four local line groups, including two empty groups, specify three explicit tracks. With both column placements auto the subgrid therefore spans parent columns1-3, width13+19+29=61. The following sibling takes column4 at x61. Local mid is line2 and end is line4, so the descendant starts at x13 and spans19+29=48px. Empty name groups count as lines rather than disappearing.",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 98, "gridTemplateColumns": [13,19,29,37], "gridTemplateRows": [17]}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": {"subgrid":[{"names":[]},{"names":["mid"]},{"names":[]},{"names":["end"]}]}, "gridTemplateRows": [17]}},
+      {"parent": 1, "style": {"gridColumnStart": "mid", "gridColumnEnd": "end"}},
+      {"parent": 0, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 98, "height": 17},
+    {"x": 0, "y": 0, "width": 61, "height": 17},
+    {"x": 13, "y": 0, "width": 48, "height": 17},
+    {"x": 61, "y": 0, "width": 37, "height": 17}
+  ]}
+}

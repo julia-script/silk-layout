@@ -1,0 +1,22 @@
+{
+  "name": "grid-subgrid-absolute-fallback-area",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "position"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-listing", "https://drafts.csswg.org/css-grid-2/#abspos-items"],
+  "derivation": "The absolute grid's containing block is the parent's second column and first row: x31+5=36, width47, height29. Zero insets fill that area. Absolute positioning forces an independent formatting context, so both subgrid declarations use none rather than inheriting tracks. Its children generate one11px implicit column and two13px implicit rows, aligned at the start. Their parent-relative positions are(0,0) and(0,13), not world x36, and their widths are11 rather than the containing area's47.",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "position": "relative", "width": 83, "gridTemplateColumns": [31,47], "gridTemplateRows": [29], "columnGap": 5}},
+      {"parent": 0, "style": {"display": "grid", "position": "absolute", "gridColumnStart": 2, "gridColumnEnd": 3, "gridRowStart": 1, "gridRowEnd": 2, "inset": {"left":0,"right":0,"top":0,"bottom":0}, "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "gridAutoColumns": [11], "gridAutoRows": [13], "justifyContent": "start", "alignContent": "start"}},
+      {"parent": 1, "style": {}},
+      {"parent": 1, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 83, "height": 29},
+    {"x": 36, "y": 0, "width": 47, "height": 29},
+    {"x": 0, "y": 0, "width": 11, "height": 13},
+    {"x": 0, "y": 13, "width": 11, "height": 13}
+  ]}
+}

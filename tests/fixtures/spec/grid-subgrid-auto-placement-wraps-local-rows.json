@@ -1,0 +1,24 @@
+{
+  "name": "grid-subgrid-auto-placement-wraps-local-rows",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "auto-placement"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-implicit", "https://drafts.csswg.org/css-grid-2/#auto-placement-algo"],
+  "derivation": "The inherited columns are23px and37px. Ordinary row-flow fills both cells of the local11px first row, then wraps into a generated17px second row using grid-auto-rows. grid-auto-columns:99px cannot add an inherited-axis track. The subgrid and its parent's auto row become11+17=28px high; the third child starts at local (0,11).",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 60, "gridTemplateColumns": [23,37], "gridTemplateRows": ["auto"]}},
+      {"parent": 0, "style": {"display": "grid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridTemplateColumns": "subgrid", "gridTemplateRows": [11], "gridAutoRows": [17], "gridAutoColumns": [99]}},
+      {"parent": 1, "style": {}},
+      {"parent": 1, "style": {}},
+      {"parent": 1, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 60, "height": 28},
+    {"x": 0, "y": 0, "width": 60, "height": 28},
+    {"x": 0, "y": 0, "width": 23, "height": 11},
+    {"x": 23, "y": 0, "width": 37, "height": 11},
+    {"x": 0, "y": 11, "width": 23, "height": 17}
+  ]}
+}

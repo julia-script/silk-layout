@@ -1,0 +1,22 @@
+{
+  "name": "grid-subgrid-nested-clipped-area",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "areas"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-area-inheritance", "https://drafts.csswg.org/css-grid-2/#subgrid-indexing"],
+  "derivation": "Parent area zone covers columns1-3, x0..67. The middle subgrid covers columns2-4, x13..108, so zone is clipped to its local x0..54. The inner subgrid covers the middle's columns2-3, world x36..108, clipping zone again to local x0..31. Thus zone-start/zone-end on the innermost child select only the 31px column, not all72px of its containing subgrid. Local source positions are middle x13, inner x23, leaf x0; world positions are13,36,36.",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 108, "gridTemplateColumns": [13,23,31,41], "gridTemplateRows": [17], "gridTemplateAreas": [["zone","zone","zone","tail"]]}},
+      {"parent": 0, "style": {"display": "grid", "gridColumnStart": 2, "gridColumnEnd": 5, "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid"}},
+      {"parent": 1, "style": {"display": "grid", "gridColumnStart": 2, "gridColumnEnd": 4, "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid"}},
+      {"parent": 2, "style": {"gridColumnStart": "zone-start", "gridColumnEnd": "zone-end", "gridRowStart": "zone-start", "gridRowEnd": "zone-end"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 108, "height": 17},
+    {"x": 13, "y": 0, "width": 95, "height": 17},
+    {"x": 23, "y": 0, "width": 72, "height": 17},
+    {"x": 0, "y": 0, "width": 31, "height": 17}
+  ]}
+}

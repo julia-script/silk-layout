@@ -1,8 +1,8 @@
 import silk.mem.allocator { Allocator, OutOfMemoryError }
-import silk.format { Debug, Format, Formatter }
+import silk.text.format { Debug, Format, Formatter }
 import silk.io.writer { Writer, WriterError }
 import silk.collections.list { List }
-import silk.option { Option }
+import silk.core.option { Option }
 import silk.core.ownership { Copy }
 import silk.num.usize
 import geometry { Layout, Point, Rect, MarginStrut, max }

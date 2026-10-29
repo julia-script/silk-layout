@@ -10,7 +10,7 @@ import flex { layoutFlex, emptyFlexSize, FlexScratch }
 import grid { layoutGrid }
 import positioned { positionTree, positionVisits, reachableLimits, addOverflow, propagatedOverflow, subtreeOverflow }
 import bfc { BfcState }
-import silk.option { Option }
+import silk.core.option { Option }
 import layout_pass { LayoutPass, CacheKind, FullBoxGeometry, REUSE_INDEPENDENT, REUSE_IN_FLOW }
 import layout_cache { LayoutCache, Snapshot, BoxFacts, BoxWrites, CachedProbe, FinalRange, AGES_NONE, AGES_OLDER }
 import incremental as Incremental

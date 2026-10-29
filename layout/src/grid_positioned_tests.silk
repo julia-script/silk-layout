@@ -4,7 +4,7 @@ import silk.num.usize
 import silk.core.effect { Effect }
 import silk.testing.testing { Testing, AssertionError }
 import fragmentation { FragmentationError, Fragmentainers, FragmentAncestor }
-import silk.option { Option }
+import silk.core.option { Option }
 import breaks { FragmentainerKind }
 import fragment_flow { computeFragmented }
 import text {

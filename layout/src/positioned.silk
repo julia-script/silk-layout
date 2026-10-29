@@ -15,7 +15,7 @@ import text { TextMeasure, TextError }
 import fragmentation { FragmentationError, FragmentInput, FragmentAncestor }
 import breaks { FragmentainerKind, BreakRelaxation }
 import fragment_position { instance, physicalPosition, flowPosition, flowTranslation, blockStart }
-import silk.option { Option }
+import silk.core.option { Option }
 import fragment_box as FragmentBox
 import silk.collections.list { List }
 import fragment_fit { WidowCheck, WidowDecision, collectWidows, validateWidows }

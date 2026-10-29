@@ -899,3 +899,24 @@ test effect fn gridExcludesBlockProbeHeightNormalization() ! OutOfMemoryError | 
   run compute(&tree, &mut fresh, &mut content, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(fresh.facts.keyShapes.get(fresh.firstBySource.get(root.index)) & 16 == 0, "fresh grid excludes block probe normalization")
 }
+
+// KEY_WIDTH_FREE_TREE lets width-only probes ignore height, so a descendant
+// whose width can read height clears it on every ancestor, also on restyle.
+test effect fn widthFreeTreeClearsAncestors() ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let child = run tree.append(root, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let leaf = run tree.append(child, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 0.0, maximum: 0.0, height: 0.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(root.index)) & 2048 != 0, "plain blocks are width free")
+  let mut ratio = Style.make()
+  ratio.aspectRatio = 1.0
+  run tree.setStyle(leaf, move ratio)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(root.index)) & 2048 == 0, "restyled aspect ratio clears the root")
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(child.index)) & 2048 == 0, "restyled aspect ratio clears the parent")
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(child.index)) & 1024 != 0, "the parent itself stays width free")
+}

@@ -94,15 +94,18 @@ impl GridFragmentScratch {
       run self.items.append(FragmentItem.make())
       index = index + 1
     }
-    run self.rows.appendRepeated(FragmentRow {
-      firstStart: NO_NODE,
-      firstEnd: NO_NODE,
-      consumedStart: 0.0,
-      consumedEnd: 0.0,
-      accepted: false,
-      starts: false,
-      ends: false,
-    }, rowCount)
+    run self.rows.appendRepeated(
+      FragmentRow {
+        firstStart: NO_NODE,
+        firstEnd: NO_NODE,
+        consumedStart: 0.0,
+        consumedEnd: 0.0,
+        accepted: false,
+        starts: false,
+        ends: false,
+      },
+      rowCount,
+    )
 
     // Prepending in reverse preserves order-modified document order at each
     // boundary, including the precedence of competing page-side requirements.

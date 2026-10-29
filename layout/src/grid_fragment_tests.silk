@@ -235,6 +235,7 @@ effect fn repeatedRowBoundaries()
       )
       row = row + 1
     }
+
     // Grid §11.6: each fragment exports baselines from its own first/last
     // occupied rows, not from an item published on an earlier page.
     let rootBox = output.firstBySource.get(root.index)
@@ -280,7 +281,11 @@ test effect fn gridRowBreaksResetAcrossFragmentedComputes()
 // Pinned Grid §13 consumes space in the fragmentation context's block flow;
 // §13.1 is nonnormative. Unequal rows distinguish identity from traversal.
 effect fn oppositeRowDirections()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
     | AssertionError<'static>
   ? &mut Allocator {
   let mut pass: usize = 0
@@ -306,10 +311,10 @@ effect fn oppositeRowDirections()
     child.writingMode = frameMode
     child.breakInside = BreakInside.Avoid
     let first = run tree.append(root, move child)
-    let mut child = Style.make()
-    child.writingMode = frameMode
-    child.breakInside = BreakInside.Avoid
-    let second = run tree.append(root, move child)
+    let mut secondStyle = Style.make()
+    secondStyle.writingMode = frameMode
+    secondStyle.breakInside = BreakInside.Avoid
+    let second = run tree.append(root, move secondStyle)
     let pages = [
       Rect { x: 10.0, y: 20.0, width: 23.0, height: 41.0 },
       Rect { x: 100.0, y: 90.0, width: 17.0, height: 41.0 },
@@ -319,20 +324,18 @@ effect fn oppositeRowDirections()
     let mut output = LayoutTree.make()
     let mut measure = EmptyMeasure {}
     run computeFragmented(&tree, &mut output, &mut measure, OptionalSize.none(), move frames)
-    run expectItem(
-      &mut output, second, 0,
-      Rect { x: 10.0, y: 20.0, width: 23.0, height: 41.0 },
-    )
-    run expectItem(
-      &mut output, first, 1,
-      Rect { x: 100.0, y: 90.0, width: 17.0, height: 41.0 },
-    )
+    run expectItem(&mut output, second, 0, Rect { x: 10.0, y: 20.0, width: 23.0, height: 41.0 })
+    run expectItem(&mut output, first, 1, Rect { x: 100.0, y: 90.0, width: 17.0, height: 41.0 })
     pass = pass + 1
   }
 }
 
 test effect fn gridOppositeBlockDirectionsKeepLogicalRowIdentity()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
     | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run oppositeRowDirections() |> Effect.provideMut<Allocator>(&mut allocator)

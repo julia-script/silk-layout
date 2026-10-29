@@ -39,7 +39,14 @@ fn area(store: &GridGeometryStore, id: usize) -> Rect {
   let content = Rect { x: 10.0, y: 20.0, width: 300.0, height: 200.0 }
   let padding = Rect { x: 0.0, y: 0.0, width: 330.0, height: 240.0 }
   let geometry = store.get(store.find(id))
-  return containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding)
+  return containingArea(
+    &Style.make(),
+    &placement,
+    &geometry.columns,
+    &geometry.rows,
+    content,
+    padding,
+  )
 }
 
 test effect fn gridGeometryNestedRollbackRestoresRepeatedVersions()
@@ -91,8 +98,14 @@ test effect fn gridGeometryAcceptedFragmentsRemainImmutableAcrossRollback()
     "Grid 10.1 areas retain each accepted frame's own flexible columns",
   )
   store.restore(checkpoint)
-  run Testing.expect(store.findFragment(4, 19) == NO_NODE, "rollback removes rejected frame geometry")
-  run Testing.expect(store.findFragment(4, 7) == first, "rollback preserves earlier published geometry")
+  run Testing.expect(
+    store.findFragment(4, 19) == NO_NODE,
+    "rollback removes rejected frame geometry",
+  )
+  run Testing.expect(
+    store.findFragment(4, 7) == first,
+    "rollback preserves earlier published geometry",
+  )
 }
 
 test effect fn gridGeometryShellRetentionDoesNotPublishProbeRows()
@@ -113,7 +126,10 @@ test effect fn gridGeometryShellRetentionDoesNotPublishProbeRows()
     "positioning-only shell retains its allocation without replacing an accepted frame",
   )
   store.restore(checkpoint)
-  run Testing.expect(store.findFragment(4, 31) == NO_NODE, "shell publication participates in outer rollback")
+  run Testing.expect(
+    store.findFragment(4, 31) == NO_NODE,
+    "shell publication participates in outer rollback",
+  )
 }
 
 test effect fn gridGeometryCommitKeepsLatestAndUntouchedFinals()
@@ -238,7 +254,14 @@ test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
   let content = Rect { x: 10.0, y: 20.0, width: 300.0, height: 200.0 }
   let padding = Rect { x: 0.0, y: 0.0, width: 330.0, height: 240.0 }
   let geometry = store.get(store.find(0))
-  let kept = containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding)
+  let kept = containingArea(
+    &Style.make(),
+    &placement,
+    &geometry.columns,
+    &geometry.rows,
+    content,
+    padding,
+  )
   run Testing.expect(
     kept.x == 10.0 && kept.width == 45.0,
     "clearing source names does not change the retained named area",

@@ -27,7 +27,9 @@ pub effect fn captureShell<'pass, 'source, M: Measure + TextMeasure>(
   id: usize,
   fragment: usize,
   input: &Input,
-) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+)
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
   let checkpoint = output.checkpoint()
   let mut request = input.*
   request.performLayout = true
@@ -59,7 +61,9 @@ pub fn containingRect(
   let mut slot = latest
   if fragment != NO_NODE {
     let found = output.cache.gridGeometry.findFragment(container, fragment)
-    if found != NO_NODE { slot = found }
+    if found != NO_NODE {
+      slot = found
+    }
   }
   let geometry = output.cache.gridGeometry.get(slot)
   let mut localPadding = geometry.padding
@@ -70,6 +74,7 @@ pub fn containingRect(
   }
   let origin = Point { x: padding.x - localPadding.x, y: padding.y - localPadding.y }
   let mut content = localContent.translated(origin)
+
   // Joined normal-flow padding supplies the continuous block extent, while
   // the selected fragment supplies its own inline track allocation.
   if style.writingMode == WritingMode.HorizontalTb {

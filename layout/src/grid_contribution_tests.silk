@@ -820,3 +820,30 @@ test effect fn gridItemMinimumBoundsPreserveNaturalAndRatioSizing()
   let mut allocator = Allocator.systemAllocatorProvider()
   run checkGridItemMinimumBounds() |> Effect.provideMut<Allocator>(&mut allocator)
 }
+
+// Grid §12.5 / Sizing §5.1: the queried intrinsic width ignores its own
+// request floor, then the contribution's effective minimum clamps it.
+// Insets add 8px to 23/91px content widths; -2px net margins are added once.
+// Neither a known stretch width nor an inapplicable automatic-minimum cap
+// replaces the independent 40px border-box lower bound.
+test effect fn gridAutoContributionsKeepExplicitBoundsAndNegativeMargins()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut style = Style.make()
+  style.padding.left = Dimension.px(6.0)
+  style.border.right = Dimension.px(2.0)
+  style.margin.left = Dimension.px(-5.0)
+  style.margin.right = Dimension.px(3.0)
+  let mut input = Input.make(OptionalSize.none())
+  input.known = OptionalSize.definite(200.0, 60.0)
+  input.minimum = Size { width: 40.0, height: 0.0 }
+  run check(
+    move style,
+    input,
+    true,
+    false,
+    19.0,
+    ItemContribution { minimum: 38.0, minContent: 38.0, maxContent: 97.0, usedMinimum: 40.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}

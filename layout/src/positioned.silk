@@ -357,7 +357,7 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
   return input
 }
 fn usedBox(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize) -> ResolvedBox {
-  return withGutter(&resolveBox(nodes.style(id), &usedInput(nodes, output, id, viewport)), output.boxes[id].scrollbarGutter)
+  return withGutter(&shapedBox(output, nodes.style(id), id, &usedInput(nodes, output, id, viewport)), output.boxes[id].scrollbarGutter)
 }
 // The used box of an absolutely positioned box's generated parent, or of the
 // initial containing block without one; positionTree keeps the containing
@@ -369,7 +369,7 @@ fn staticParentBox(nodes: &BoxTree, output: &LayoutPass, parent: usize, viewport
 }
 fn usedChildrenInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize, parent: OptionalSize) -> Input {
   let input = usedInput(nodes, output, id, viewport)
-  return usedChildrenInputOf(nodes, output, id, &input, &withGutter(&resolveBox(nodes.style(id), &input), output.boxes[id].scrollbarGutter), parent)
+  return usedChildrenInputOf(nodes, output, id, &input, &withGutter(&shapedBox(output, nodes.style(id), id, &input), output.boxes[id].scrollbarGutter), parent)
 }
 // usedChildrenInput from the box's usedInput and usedBox.
 fn usedChildrenInputOf(nodes: &BoxTree, output: &LayoutPass, id: usize, input: &Input, used: &ResolvedBox, parent: OptionalSize) -> Input {
@@ -636,7 +636,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
     input = Input.make(containing)
     if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
       let cbInput = usedInput(nodes, &output, cb, viewport)
-      let cbBox = withGutter(&resolveBox(cbStyle, &cbInput), output.boxes[cb].scrollbarGutter)
+      let cbBox = withGutter(&shapedBox(&output, cbStyle, cb, &cbInput), output.boxes[cb].scrollbarGutter)
       input = usedChildrenInputOf(nodes, &output, cb, &cbInput, &cbBox, containing)
       if !fragmented {
         output.absoluteInputOwner = cb
@@ -1922,7 +1922,9 @@ fn sourceRelative(nodes: &BoxTree, output: &LayoutPass, source: usize, viewport:
 // Each source's accumulated relative offset (sourceRelative) outside
 // fragmentation, computed once top-down instead of walking every fragment's
 // ancestors. A fixed box restarts the sum, as sourceRelative stops there.
-effect fn relativeOffsets(nodes: &BoxTree, output: &mut LayoutPass, viewport: OptionalSize) ! OutOfMemoryError ? &mut Allocator {
+// Reports whether any source moves.
+effect fn relativeOffsets(nodes: &BoxTree, output: &mut LayoutPass, viewport: OptionalSize) -> bool ! OutOfMemoryError ? &mut Allocator {
+  let mut moved = false
   output.relativeOffsets.clear()
   run output.relativeOffsets.appendRepeated(Point { x: 0.0, y: 0.0 }, nodes.sources.length)
   let viewportStyle = Style.make()
@@ -1949,6 +1951,7 @@ effect fn relativeOffsets(nodes: &BoxTree, output: &mut LayoutPass, viewport: Op
           containingStyle = nodes.style(parent)
         }
         let own = relativeOffset(style, containingStyle, containing)
+        moved = moved || own.x != 0.0 || own.y != 0.0
         offset = Point { x: own.x + offset.x, y: own.y + offset.y }
       }
     }
@@ -1960,10 +1963,16 @@ effect fn relativeOffsets(nodes: &BoxTree, output: &mut LayoutPass, viewport: Op
       if source != NO_NODE { source = nodes.sources[source].nextSibling }
     }
   }
+  return moved
 }
-effect fn positionRelative(nodes: &BoxTree, output: &mut LayoutPass, viewport: OptionalSize) ! OutOfMemoryError ? &mut Allocator {
+// Reports whether any fragment may have moved. Visual offsets are all zero
+// on entry, so when no source moves there is nothing to write.
+effect fn positionRelative(nodes: &BoxTree, output: &mut LayoutPass, viewport: OptionalSize) -> bool ! OutOfMemoryError ? &mut Allocator {
   let memo = output.frame == NO_NODE
-  if memo { run relativeOffsets(nodes, &mut output, viewport) }
+  if memo {
+    let moved = run relativeOffsets(nodes, &mut output, viewport)
+    if !moved { return false }
+  }
   let mut index: usize = 0
   while index < output.fragments.values.length() {
     let fragment = output.fragments.values.get(index)
@@ -1987,6 +1996,7 @@ effect fn positionRelative(nodes: &BoxTree, output: &mut LayoutPass, viewport: O
     }
     index = index + 1
   }
+  return true
 }
 
 // The boxes positionTree visits, in source preorder: those starting an inline
@@ -2060,17 +2070,20 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
       let rect = Rect { x: position.x - left, y: position.y - top, width: layout.size.width + left + right, height: layout.size.height + top + bottom }
       normalViewport = addOverflow(normalViewport, rect, viewportLimits)
     }
-    relative = relative || style.position == Position.Relative
+    // Relative boxes with every inset auto stay where flow put them.
+    relative = relative || (style.position == Position.Relative && (style.inset.left.kind != DimensionKind.Auto
+      || style.inset.right.kind != DimensionKind.Auto || style.inset.top.kind != DimensionKind.Auto || style.inset.bottom.kind != DimensionKind.Auto))
     let scroll = requestedScrollOffset(nodes, id, viewportScroll)
     visual = visual || style.position == Position.Sticky || scroll.x != 0.0 || scroll.y != 0.0
     at = at + 1
   }
-  if relative || visual { output.fragments.offsetting() }
-  if relative { run positionRelative(nodes, &mut output, viewport) }
+  let mut moved = false
+  if relative { moved = run positionRelative(nodes, &mut output, viewport) }
+  if moved || visual { output.fragments.offsetting() }
   // Every box is an unmoved in-flow box fragment under the root, and every
   // parent's overflow is visible and so already covers its children's
   // border and margin boxes (see overflowGeometry).
-  let plain = plainParents && !relative && !visual && output.fragments.plain
+  let plain = plainParents && !moved && !visual && output.fragments.plain
     && output.frame == NO_NODE && output.fragments.settled.length() == 0 && output.stats.reusedLayouts == 0
   if plain { run markOverflowEscapes(&mut output) }
   let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport, true, plain)
@@ -2229,7 +2242,7 @@ pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(n
   }
   output.frame = savedFrame
   output.fragments.offsetting()
-  run positionRelative(nodes, &mut output, viewport)
+  drop run positionRelative(nodes, &mut output, viewport)
   let overflow = treeOverflow(nodes, &mut output, viewportRect, viewportRect, false, false)
   run output.selectScrollbars(nodes)
   if output.needsRelayout { return overflow }

@@ -23,7 +23,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache/silk
-          key: silk-dev26-430d979004dc-x86_64-linux
+          key: silk-${{ env.SILK_VERSION }}-x86_64-linux
       - uses: actions/cache@v4
         with:
           path: .cache/llvm-22.1.8
@@ -38,11 +38,11 @@ jobs:
           if [[ ! -f "$toolchain/bin/silkc" ]]; then
             asset="silk-$SILK_VERSION-x86_64-unknown-linux-gnu.tar.gz"
             curl --fail --location --silent --show-error "https://github.com/silk-lang/silk/releases/download/v${SILK_VERSION/+/%2B}/${asset/+/%2B}" -o "$RUNNER_TEMP/silk.tar.gz"
-            echo "75fe93848a539c4f32ef6df87cc292a72a879d761d68d92c848cf23fa7c91fbe  $RUNNER_TEMP/silk.tar.gz" | sha256sum -c -
+            echo "dac075a43711daa419641c74bd1f543d542f4d52ab0514a23c63ae934c5470bf  $RUNNER_TEMP/silk.tar.gz" | sha256sum -c -
             mkdir -p "$toolchain"
             tar -xzf "$RUNNER_TEMP/silk.tar.gz" --strip-components=1 -C "$toolchain"
           fi
-          echo "7a7c49563252f364dc9aa4b036c7fd5c979d9ee40f24cc8e4279261e8c2a16bf  $toolchain/bin/silkc" | sha256sum -c -
+          echo "91069efd281daa2275fcf44ed45c169a229cfed62ea84a03d74884ed9bc9edda  $toolchain/bin/silkc" | sha256sum -c -
           echo "$toolchain/bin" >> "$GITHUB_PATH"
       - name: Native checks, tests and adapter scenarios
         run: scripts/check

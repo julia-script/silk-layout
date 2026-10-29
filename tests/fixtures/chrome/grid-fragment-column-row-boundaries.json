@@ -1,0 +1,97 @@
+{
+  "name": "grid-fragment-column-row-boundaries",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "fragmentation",
+    "columns"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#pagination",
+    "https://drafts.csswg.org/css-align-3/#gaps",
+    "https://drafts.csswg.org/css-break-3/#unforced-breaks"
+  ],
+  "input": {
+    "viewport": {
+      "width": 300,
+      "height": 65
+    },
+    "fragmentation": {
+      "kind": "column",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 123,
+          "height": 65
+        },
+        {
+          "x": 141,
+          "y": 0,
+          "width": 123,
+          "height": 65
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            41,
+            82
+          ],
+          "gridTemplateRows": [
+            27,
+            31,
+            19
+          ],
+          "rowGap": 7
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 27,
+          "breakInside": "avoid"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 27,
+          "breakInside": "avoid"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 31,
+          "breakInside": "avoid"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 31,
+          "breakInside": "avoid"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 19,
+          "breakInside": "avoid"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 19,
+          "breakInside": "avoid"
+        }
+      }
+    ]
+  }
+}

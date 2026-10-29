@@ -1,0 +1,29 @@
+{
+  "name": "grid-fragment-auto-repeat-stable-placement",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "repeat", "auto-placement", "varying-fragmentainers"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-grid-2/#auto-repeat", "https://drafts.csswg.org/css-grid-2/#auto-placement-algo"],
+  "derivation": "Stable-placement policy assumption, not a uniquely required Grid section 13 layout: accept automatic repetition and item placement once, then retain them across frame-width changes. Section 13 asks to minimize distortion but leaves exact fragmented layout undefined. On width123, repeat(auto-fill,40px) with gap1 accepts floor((123+1)/(40+1))=3 columns: 3*40+2*1=122px, with starts x0/41/82 and 1px unused. Six items occupy two rows of three. The first item in row 2 forces its entire row onto width83 at y91. Its three accepted columns still start x0/41/82, not a newly placed two-column layout. The third item ends at x122, overflowing the narrower frame by 122-83=39px. The interrupted 5px row gap is suppressed. Root fragments are 123x73 and 83x23; item rows are 17px and 23px tall.",
+  "input": {
+    "viewport": {"width": 123, "height": 182},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 83, "height": 73}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [{"repeat": {"count": "auto-fill", "tracks": [40]}}], "gridTemplateRows": [17, 23], "columnGap": 1, "rowGap": 5}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {"breakBefore": "page"}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 83, "height": 23}]},
+    {"rects": [{"x": 0, "y": 0, "width": 40, "height": 17}]},
+    {"rects": [{"x": 41, "y": 0, "width": 40, "height": 17}]},
+    {"rects": [{"x": 82, "y": 0, "width": 40, "height": 17}]},
+    {"rects": [{"x": 0, "y": 91, "width": 40, "height": 23}]},
+    {"rects": [{"x": 41, "y": 91, "width": 40, "height": 23}]},
+    {"rects": [{"x": 82, "y": 91, "width": 40, "height": 23}]}
+  ]}
+}

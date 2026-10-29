@@ -1,0 +1,23 @@
+{
+  "name": "grid-fragment-avoid-boundary-backtrack",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "avoid-breaks", "row-gaps"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-break-3/#unforced-breaks", "https://drafts.csswg.org/css-align-3/#gaps"],
+  "derivation": "The 17px and 23px rows plus their 3px gap initially fit in 55px (43px), but all three rows require 17+3+23+3+29=75px. Each item avoids internal breaks; row 2's break-after:avoid propagates to its boundary with row 3. The allowed earlier boundary is between rows 1 and 2. Backtracking puts rows 2 and 3 together on page 2, where 23+3+29=55 exactly. The gap across the break is suppressed; the retained gap puts row 3 at y73+23+3=99. The first grid fragment fills its 55px frame, and the second is also 55px. No avoidance rule needs relaxing.",
+  "input": {
+    "viewport": {"width": 123, "height": 146},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 55}, {"x": 0, "y": 73, "width": 123, "height": 55}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [123], "gridTemplateRows": [17, 23, 29], "rowGap": 3}},
+      {"parent": 0, "style": {"height": 17, "breakInside": "avoid"}},
+      {"parent": 0, "style": {"height": 23, "breakInside": "avoid", "breakAfter": "avoid"}},
+      {"parent": 0, "style": {"height": 29, "breakInside": "avoid"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 55}, {"x": 0, "y": 73, "width": 123, "height": 55}]},
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 17}]},
+    {"rects": [{"x": 0, "y": 73, "width": 123, "height": 23}]},
+    {"rects": [{"x": 0, "y": 99, "width": 123, "height": 29}]}
+  ]}
+}

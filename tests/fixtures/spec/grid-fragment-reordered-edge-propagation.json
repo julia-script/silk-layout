@@ -1,0 +1,27 @@
+{
+  "name": "grid-fragment-reordered-edge-propagation",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "forced-breaks", "explicit-placement"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-grid-2/#line-placement", "https://drafts.csswg.org/css-break-3/#break-propagation"],
+  "derivation": "Grid section 13 propagates first-row break-before and last-row break-after to the grid, by placed row rather than source order. A 17px sibling occupies page 1. The source-first item is explicitly in row 2 and forces a break after the grid; the source-last item is in row 1 and forces a break before the grid. The whole grid is on page 2: 19+3+23=45px, at y91, with row 2 at 91+19+3=113. The following 11px sibling starts page 3 at y182. Each nonfinal outer fragment consumes its 73px frame; the final outer fragment is 11px.",
+  "input": {
+    "viewport": {"width": 123, "height": 273},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 123, "height": 73}, {"x": 0, "y": 182, "width": 123, "height": 73}]},
+    "nodes": [
+      {"parent": null, "style": {}},
+      {"parent": 0, "style": {"height": 17}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": [123], "gridTemplateRows": [19, 23], "rowGap": 3}},
+      {"parent": 2, "style": {"gridColumnStart": 1, "gridRowStart": 2, "breakAfter": "page"}},
+      {"parent": 2, "style": {"gridColumnStart": 1, "gridRowStart": 1, "breakBefore": "page"}},
+      {"parent": 0, "style": {"height": 11}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 123, "height": 73}, {"x": 0, "y": 182, "width": 123, "height": 11}]},
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 17}]},
+    {"rects": [{"x": 0, "y": 91, "width": 123, "height": 45}]},
+    {"rects": [{"x": 0, "y": 113, "width": 123, "height": 23}]},
+    {"rects": [{"x": 0, "y": 91, "width": 123, "height": 19}]},
+    {"rects": [{"x": 0, "y": 182, "width": 123, "height": 11}]}
+  ]}
+}

@@ -1,0 +1,25 @@
+{
+  "name": "grid-fragment-varying-inline-fr-columns",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "flexible-tracks", "varying-fragmentainers"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-grid-2/#algo-flex-tracks", "https://drafts.csswg.org/css-grid-2/#algo-find-fr-size"],
+  "derivation": "Continuation policy: retain accepted row/column placements but resolve flexible column sizes against each fragment's inline space. Grid section 13 does not prescribe an exact fragmented layout. With a 3px column gap, width123 leaves 120px for 1fr+2fr: widths40/80 at x0/43. Width93 on page 2 leaves 90px: widths30/60 at x0/33. The second 23px row is forced onto page 2 at y91, so the 5px row gap at the break is suppressed. The root fragments use their respective frame widths123/93; their block extents are the consumed first frame's 73px and final row's 23px. No item's intrinsic minimum constrains the fr calculation.",
+  "input": {
+    "viewport": {"width": 123, "height": 182},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 93, "height": 73}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [{"fr": 1}, {"fr": 2}], "gridTemplateRows": [17, 23], "columnGap": 3, "rowGap": 5}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {"breakBefore": "page"}},
+      {"parent": 0, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 93, "height": 23}]},
+    {"rects": [{"x": 0, "y": 0, "width": 40, "height": 17}]},
+    {"rects": [{"x": 43, "y": 0, "width": 80, "height": 17}]},
+    {"rects": [{"x": 0, "y": 91, "width": 30, "height": 23}]},
+    {"rects": [{"x": 33, "y": 91, "width": 60, "height": 23}]}
+  ]}
+}

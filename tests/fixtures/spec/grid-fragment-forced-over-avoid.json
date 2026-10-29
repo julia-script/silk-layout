@@ -1,0 +1,25 @@
+{
+  "name": "grid-fragment-forced-over-avoid",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "forced-breaks", "avoid-breaks"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-break-3/#forced-breaks", "https://drafts.csswg.org/css-align-3/#gaps"],
+  "derivation": "The entire 17+5+23=45px grid would fit in a 73px frame. Row 1 column 1 requests break-after:avoid, while row 2 column 2 requests break-before:page. Both propagate to the same row boundary; the forced break overrides that avoidance and the grid's break-inside:avoid. Both second-row items therefore start at y91, without the 5px interrupted gap. Fixed columns are 41px and 82px, starting at x0 and x41. The first grid fragment consumes 73px and the final fragment contains the 23px second row.",
+  "input": {
+    "viewport": {"width": 123, "height": 182},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 123, "height": 73}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [41, 82], "gridTemplateRows": [17, 23], "rowGap": 5, "breakInside": "avoid"}},
+      {"parent": 0, "style": {"breakAfter": "avoid"}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {"breakBefore": "page"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 123, "height": 23}]},
+    {"rects": [{"x": 0, "y": 0, "width": 41, "height": 17}]},
+    {"rects": [{"x": 41, "y": 0, "width": 82, "height": 17}]},
+    {"rects": [{"x": 0, "y": 91, "width": 41, "height": 23}]},
+    {"rects": [{"x": 41, "y": 91, "width": 82, "height": 23}]}
+  ]}
+}

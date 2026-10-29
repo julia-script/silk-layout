@@ -1033,11 +1033,11 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   let mut gridHeight: f32 = 0.0
   if columns.length > 0 {
     gridInline = columns[0].position
-    gridWidth = columns[columns.length - 1].position + columns[columns.length - 1].base - gridInline
+    gridWidth = spanSize(columns, 0, columns.length)
   }
   if rows.length > 0 {
     gridBlock = rows[0].position
-    gridHeight = rows[rows.length - 1].position + rows[rows.length - 1].base - gridBlock
+    gridHeight = spanSize(rows, 0, rows.length)
   }
   if rtl {
     gridInline = columnSizing.size - gridInline - gridWidth

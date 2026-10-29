@@ -722,14 +722,14 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
     let mut spacing = grid.rows[track].position
     if scratch.reversed {
       let extent = grid.axis.size(result.size).height - logical.inset.top - logical.inset.bottom
-      spacing = extent - grid.rows[track].position - grid.rows[track].base
+      spacing = extent - grid.rows[track].endPosition()
     }
     let mut gutter: f32 = 0.0
     if row > 0 {
       let previous = logicalRow(row - 1, grid.rows.length, scratch.reversed)
-      spacing = grid.rows[track].position - grid.rows[previous].position - grid.rows[previous].base
+      spacing = grid.rows[track].position - grid.rows[previous].endPosition()
       if scratch.reversed {
-        spacing = grid.rows[previous].position - grid.rows[track].position - grid.rows[track].base
+        spacing = grid.rows[previous].position - grid.rows[track].endPosition()
       }
       gutter = min(grid.rowGap, max(0.0, spacing))
       spacing = spacing - gutter

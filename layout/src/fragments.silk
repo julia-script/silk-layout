@@ -222,6 +222,9 @@ pub struct FragmentArena {
   adopted: List<usize>, previousAdopted: List<usize>,
   // How many times this compute moved the previous output.
   shifts: usize,
+  // Whether this compute appended only box fragments of boxes, all under the
+  // first one, and kept nothing of the previous output (see treeOverflow).
+  pub plain: bool,
 }
 impl FragmentArena {
   pub fn make() -> FragmentArena {
@@ -243,7 +246,7 @@ impl FragmentArena {
       offsets: false,
       resolveAll: true, edited: List<usize>.make(),
       stale: false,
-      afterFlow: false, flowEnd: 0,
+      afterFlow: false, flowEnd: 0, plain: true,
       adopted: List<usize>.make(), previousAdopted: List<usize>.make(),
       shifts: 0,
     }
@@ -268,6 +271,7 @@ impl FragmentArena {
     self.textMarks.clear()
     self.count = 0
     self.textCount = 0
+    self.plain = true
     self.inPlace = false
     self.viewing = false
     self.previousCount = 0
@@ -287,6 +291,7 @@ impl FragmentArena {
       run self.prepare(boxCount)
       return
     }
+    self.plain = false
     // Positioning applies visual offsets afresh.
     if self.offsets {
       let values = self.values.asMutSlice()
@@ -569,6 +574,7 @@ impl FragmentArena {
   // The parent must already exist; box must be prepared or NO_NODE.
   // Arena-owned links replace incoming links. Geometry and content remain authored values.
   pub effect fn append(self: &mut Self, fragment: Fragment) -> FragmentId ! OutOfMemoryError ? &mut Allocator {
+    self.plain = false
     let mut value = move fragment
     let parent = value.parent
     let box = value.box
@@ -594,6 +600,7 @@ impl FragmentArena {
   }
   // append for a new box fragment, built in its slot instead of moved there.
   pub effect fn appendBox(self: &mut Self, box: usize, source: usize, kind: FragmentKind, parent: usize, fragmentainer: usize, first: bool, last: bool) -> FragmentId ! OutOfMemoryError ? &mut Allocator {
+    if kind != FragmentKind.Box || box == NO_NODE || (parent == NO_NODE && self.count != 0) { self.plain = false }
     if !self.inPlace && !self.viewing && !self.afterFlow { return run self.appendFresh(box, source, kind, parent, fragmentainer, first, last) }
     let next = self.count
     if box != NO_NODE { run self.claimBox(box, next) }

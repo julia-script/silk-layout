@@ -1,0 +1,276 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.effect { Effect }
+import silk.num.usize
+import silk.text.string { String }
+import silk.testing.testing { Testing, AssertionError }
+import fragmentation { FragmentationError }
+import style { Style, Dimension, Display, DisplayOutside, DisplayInside }
+import geometry {
+  Measure,
+  MeasureRequest,
+  Measured,
+  BaselineSet,
+  NaturalDimensions,
+  ScrollbarRequest,
+  ScrollbarMetrics,
+  FontRequest,
+  FontMetrics,
+  Size,
+  Rect,
+  OptionalSize
+}
+import text {
+  TextMeasure,
+  TextError,
+  TextContext,
+  TextTokenKind,
+  TextCursor,
+  TextBreak,
+  TextBreakKind,
+  TextAnalysis,
+  TextShapeRequest,
+  TextRun
+}
+import grid_style { GridTemplate, GridTrack, GridBreadth, GridError }
+import tree { Tree, LayoutTree, NodeId, InvalidNode }
+import engine { compute }
+
+struct TextHost {}
+
+impl Measure for TextHost {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    let mut result = FontMetrics.zero()
+    result.fontSize = 10.0
+    result.ascent = 8.0
+    result.descent = 2.0
+    result.baselines = BaselineSet.uniform(8.0)
+    return result
+  }
+
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop provider
+    drop request
+    return ScrollbarMetrics.zero()
+  }
+
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop provider
+    drop key
+    let mut size = Size { width: 0.0, height: 0.0 }
+    if request.known.widthDefinite {
+      size.width = request.known.width
+    }
+    if request.known.heightDefinite {
+      size.height = request.known.height
+    }
+    return Measured {
+      size: size,
+      scrollableOverflow: Rect.zero(),
+      contentBlockSize: 0.0,
+      firstBaselines: BaselineSet.zero(),
+      lastBaselines: BaselineSet.zero(),
+      hasBaseline: false,
+      hasLineBoxes: false,
+    }
+  }
+}
+
+impl TextMeasure for TextHost {
+  fn beginTextLayout(provider: &mut Self) {
+    drop provider
+  }
+
+  effect fn analyze(
+    provider: &mut Self,
+    context: TextContext,
+    output: &mut List<TextBreak>,
+  ) -> TextAnalysis
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    let mut unit: usize = 0
+    while unit < context.tokens.length {
+      if context.tokens[unit].kind == TextTokenKind.Space && unit + 1 < context.tokens.length {
+        run output.append(
+          TextBreak { at: TextCursor { unit: unit + 1, offset: 0 }, kind: TextBreakKind.Soft },
+        )
+      }
+      unit = unit + 1
+    }
+    run output.append(
+      TextBreak {
+        at: TextCursor { unit: context.tokens.length, offset: 0 },
+        kind: TextBreakKind.Soft,
+      },
+    )
+    return TextAnalysis.uniform(context.tokens.length, 0, 0, true)
+  }
+
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>)
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    let mut unit = request.start.unit
+    while unit < request.end.unit || (unit == request.end.unit && request.end.offset != 0) {
+      let token = request.context.tokens[unit]
+      if token.kind == TextTokenKind.Text || token.kind == TextTokenKind.Space {
+        let mut start: usize = 0
+        let mut end = String.byteLength(token.text)
+        if token.kind == TextTokenKind.Space {
+          end = 1
+        }
+        if unit == request.start.unit {
+          start = request.start.offset
+        }
+        if unit == request.end.unit {
+          end = request.end.offset
+        }
+        run output.append(
+          TextRun.Text {
+            unit: unit,
+            start: start,
+            end: end,
+            advance: usize.toF64(end - start) * 5.0,
+            fontKey: token.fontKey,
+            bidiLevel: request.analysis.level,
+            shapeKey: 0,
+          },
+        )
+      }
+      unit = unit + 1
+    }
+  }
+}
+
+fn gridStyle() -> Style {
+  let mut result = Style.make()
+  result.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  return move result
+}
+
+effect fn expectBounds(
+  output: &mut LayoutTree,
+  source: NodeId,
+  x: f64,
+  y: f64,
+  width: f64,
+  height: f64,
+)
+  ! InvalidNode | AssertionError<'static> {
+  let actual = run output.sourceBounds(source)
+  run Testing.expect(
+    actual.x == x && actual.y == y && actual.width == width && actual.height == height,
+    "updated Grid and text rectangles match the hand-derived constraints",
+  )
+}
+
+// Grid 2 §6.2: an item's containing block remains its grid area after a text edit.
+// Two 80px columns and a 40px row do not change when 20px of text becomes 10px.
+effect fn fixedAreaTextEdit()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(gridStyle())
+  let root = tree.root()
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(80.0)))
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(80.0)))
+  run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(40.0)))
+  run tree.setGrid(root, move template)
+  let mut itemStyle = Style.make()
+  itemStyle.width = Dimension.px(70.0)
+  itemStyle.height = Dimension.px(30.0)
+  let item = run tree.append(root, move itemStyle)
+  let text = run tree.appendText(item, run String.copy("abcd"))
+  let mut siblingStyle = Style.make()
+  siblingStyle.width = Dimension.px(70.0)
+  siblingStyle.height = Dimension.px(30.0)
+  let sibling = run tree.append(root, move siblingStyle)
+  let mut output = LayoutTree.make()
+  let mut host = TextHost {}
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(300.0, 200.0))
+  run expectBounds(&mut output, text, 0.0, 0.0, 20.0, 10.0)
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(300.0, 200.0))
+  run Testing.expect(
+    output.stats.fullLayouts == 0 && output.stats.sizeProbes == 0,
+    "an unchanged Grid keeps its layout and intrinsic results",
+  )
+  run tree.setText(text, run String.copy("ab"))
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(300.0, 200.0))
+  run Testing.expect(
+    output.stats.fullLayouts == 0 && output.stats.sizeProbes == 0,
+    "a fitting one-line text edit must not lay out the Grid or probe its items",
+  )
+  run expectBounds(&mut output, root, 0.0, 0.0, 300.0, 40.0)
+  run expectBounds(&mut output, item, 0.0, 0.0, 70.0, 30.0)
+  run expectBounds(&mut output, text, 0.0, 0.0, 10.0, 10.0)
+  run expectBounds(&mut output, sibling, 80.0, 0.0, 70.0, 30.0)
+}
+
+test effect fn gridTextEditKeepsUnchangedAreaAndAncestors()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run fixedAreaTextEdit() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 2 §12.5: auto rows read updated item contributions, not a kept row size.
+// At 5px per character, "ab cd" cannot fit a 20px column on one 10px line.
+effect fn autoRowTextEdit()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(gridStyle())
+  let root = tree.root()
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+  run tree.setGrid(root, move template)
+  let item = run tree.append(root, Style.make())
+  let text = run tree.appendText(item, run String.copy("ab"))
+  let mut siblingStyle = Style.make()
+  siblingStyle.height = Dimension.px(10.0)
+  let sibling = run tree.append(root, move siblingStyle)
+  let mut output = LayoutTree.make()
+  let mut host = TextHost {}
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(300.0, 200.0))
+  run expectBounds(&mut output, root, 0.0, 0.0, 300.0, 10.0)
+  run tree.setText(text, run String.copy("ab cd"))
+  run compute(&tree, &mut output, &mut host, OptionalSize.definite(300.0, 200.0))
+  run expectBounds(&mut output, root, 0.0, 0.0, 300.0, 20.0)
+  run expectBounds(&mut output, item, 0.0, 0.0, 20.0, 20.0)
+  run expectBounds(&mut output, text, 0.0, 0.0, 10.0, 20.0)
+  run expectBounds(&mut output, sibling, 20.0, 0.0, 20.0, 10.0)
+}
+
+test effect fn gridTextGrowthInvalidatesIntrinsicRowSize()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run autoRowTextEdit() |> Effect.provideMut<Allocator>(&mut allocator)
+}

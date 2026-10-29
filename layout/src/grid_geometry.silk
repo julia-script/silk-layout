@@ -48,13 +48,23 @@ impl GridGeometryStore {
   }
 
   pub fn findFragment(self: &Self, id: usize, fragment: usize) -> usize {
-    if fragment >= self.fragments.length() { return NO_NODE }
+    if fragment >= self.fragments.length() {
+      return NO_NODE
+    }
     let index = self.fragments.get(fragment)
-    if index == NO_NODE || self.slots.asSlice()[index].id != id { return NO_NODE }
+    if index == NO_NODE || self.slots.asSlice()[index].id != id {
+      return NO_NODE
+    }
     return index
   }
 
-  pub effect fn setFragment(self: &mut Self, id: usize, fragment: usize, content: Rect, padding: Rect)
+  pub effect fn setFragment(
+    self: &mut Self,
+    id: usize,
+    fragment: usize,
+    content: Rect,
+    padding: Rect,
+  )
     ! OutOfMemoryError
     ? &mut Allocator {
     // Continuous layout never grows the fragment index. Reserve before changing
@@ -210,7 +220,13 @@ impl GridGeometryStore {
     if self.free == NO_NODE {
       let slot = self.slots.length()
       run self.slots.append(
-        Slot { geometry: GridGeometry.make(), id: NO_NODE, previous: NO_NODE, previousFragment: NO_NODE, nextFree: NO_NODE },
+        Slot {
+          geometry: GridGeometry.make(),
+          id: NO_NODE,
+          previous: NO_NODE,
+          previousFragment: NO_NODE,
+          nextFree: NO_NODE,
+        },
       )
       self.free = slot
     }

@@ -98,14 +98,14 @@ pub fn containingRect(
       let value = &output.fragments.values.asSlice()[last]
       if output.frames.writingMode == WritingMode.HorizontalTb {
         let top = localContent.y - localPadding.y
-        let bottom = value.paddingRect.y + value.paddingRect.height
-          - value.contentRect.y - value.contentRect.height
+        let bottom = value.paddingRect.y + value.paddingRect.height - value.contentRect.y
+          - value.contentRect.height
         content.y = padding.y + top
         content.height = max(0.0, padding.height - top - bottom)
       } else {
         let mut left = localContent.x - localPadding.x
-        let mut right = value.paddingRect.x + value.paddingRect.width
-          - value.contentRect.x - value.contentRect.width
+        let mut right = value.paddingRect.x + value.paddingRect.width - value.contentRect.x
+          - value.contentRect.width
         if output.frames.writingMode == WritingMode.VerticalRl
           || output.frames.writingMode == WritingMode.SidewaysRl {
           left = value.contentRect.x - value.paddingRect.x

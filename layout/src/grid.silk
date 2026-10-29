@@ -1128,7 +1128,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     )
     if output.frame != NO_NODE {
       let fragment = output.publication(id)
-      output.cache.gridGeometry.setFragment(
+      run output.cache.gridGeometry.setFragment(
         id,
         fragment,
         result.contentRect(),

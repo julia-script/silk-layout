@@ -4,6 +4,8 @@ import silk.collections.list { List }
 import silk.core.option { Option }
 import silk.core.ownership { Copy }
 import silk.num.usize
+import silk.num.f32
+import silk.num.f64
 import geometry { Measure, Layout, BaselineSet, FontRequest, Size, Point, OptionalSize, AvailableSpace, AvailableKind, ResolvedEdges, max, min, clamp, abs }
 import style { Style, Dimension, DimensionKind, Direction, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, BoxSizing, Visibility, MarginBreak, BoxDecorationBreak }
 import tree { NO_NODE, Measurement }
@@ -495,11 +497,13 @@ effect fn deferredMinimums<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   }
 }
 fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collapsed: bool) {
-  let space = main - gaps(line.count, gap)
-  let mut hypothetical: f32 = 0.0
+  // Sums over a line run in f64: f32 sums of thousands of item sizes drift by
+  // whole pixels, and shrinking divides that error across every item.
+  let space = f32.toF64(main - gaps(line.count, gap))
+  let mut hypothetical: f64 = 0.0
   let mut index = line.start
   while index < line.end { let item = &items[index]
-    if active(item, collapsed) { hypothetical = hypothetical + item.hypothetical + item.marginStart + item.marginEnd }
+    if active(item, collapsed) { hypothetical = hypothetical + f32.toF64(item.hypothetical + item.marginStart + item.marginEnd) }
     index = index + 1 }
   let grow = hypothetical < space
   let mut initial = space
@@ -514,33 +518,33 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collaps
       item.frozen = true
       item.target = item.hypothetical
     }
-    if !collapsed || !item.collapsed { initial = initial - item.target - item.marginStart - item.marginEnd }
+    if !collapsed || !item.collapsed { initial = initial - f32.toF64(item.target + item.marginStart + item.marginEnd) }
     index = index + 1
   }
   while true {
     let mut remaining = space
-    let mut factors: f32 = 0.0
-    let mut weights: f32 = 0.0
+    let mut factors: f64 = 0.0
+    let mut weights: f64 = 0.0
     let mut unfrozen: usize = 0
     index = line.start
     while index < line.end {
       let item = &items[index]
       if active(item, collapsed) {
-        remaining = remaining - item.marginStart - item.marginEnd
-        if item.frozen { remaining = remaining - item.target }
+        remaining = remaining - f32.toF64(item.marginStart + item.marginEnd)
+        if item.frozen { remaining = remaining - f32.toF64(item.target) }
         else {
-          remaining = remaining - item.base
+          remaining = remaining - f32.toF64(item.base)
           unfrozen = unfrozen + 1
-          if grow { factors = factors + item.grow
-            weights = weights + item.grow }
-          else { factors = factors + item.shrink
-            weights = weights + item.shrink * max(0.0, item.base - item.inset) }
+          if grow { factors = factors + f32.toF64(item.grow)
+            weights = weights + f32.toF64(item.grow) }
+          else { factors = factors + f32.toF64(item.shrink)
+            weights = weights + f32.toF64(item.shrink * max(0.0, item.base - item.inset)) }
         }
       }
       index = index + 1
     }
     if unfrozen == 0 { break }
-    if factors < 1.0 && abs(initial * factors) < abs(remaining) { remaining = initial * factors }
+    if factors < 1.0 && f64.abs(initial * factors) < f64.abs(remaining) { remaining = initial * factors }
     let mut violation: f32 = 0.0
     index = line.start
     while index < line.end {
@@ -548,8 +552,8 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collaps
       if !item.frozen {
         let mut target = item.base
         if weights > 0.0 {
-          if grow { target = target + remaining * item.grow / weights }
-          else { target = target - abs(remaining) * item.shrink * max(0.0, item.base - item.inset) / weights }
+          if grow { target = target + f64.toF32(remaining * f32.toF64(item.grow) / weights) }
+          else { target = target - f64.toF32(f64.abs(remaining) * f32.toF64(item.shrink * max(0.0, item.base - item.inset)) / weights) }
         }
         item.target = clamp(target, item.minimum, item.maximum)
         item.violation = item.target - target

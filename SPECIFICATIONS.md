@@ -32,7 +32,7 @@ The integrated regression gates pass the following focused corpus. These counts 
 
 | Coverage | Passing cases |
 |---|---:|
-| Native layout tests | 269 |
+| Native layout tests | 270 |
 | Malformed adapter requests | 241 |
 | Adapter bidi cases | 9 |
 | Normative specification fixtures | 646 |
@@ -87,6 +87,8 @@ Original native regressions exercise viewport changes within and across an autom
 Grid contribution probes reuse their scalar result when the block-axis min-content and max-content requests are identical; they do not rebuild and search an identical size-cache key. Width probes use the engine's axis-only request contract, retaining full-size requests for aspect ratios and natural dimensions. Contribution and item-area constraints use the existing zero-edge resolution shortcut rather than resolving known-zero edges repeatedly. The hot track-policy scan is inlined to expose unused policy fields to the compiler at each caller.
 
 Cross-axis change checks defer otherwise-unused maximum contributions until a changed minimum or min-content contribution triggers track re-sizing. Intrinsic authored constraints and baseline groups still obtain the maxima they require. Native cases distinguish a changed min-content contribution, which must re-size using the new maximum, from a maximum-only change, which must not trigger another sizing pass.
+
+Fixed-minimum tracks with fixed maxima, or flexible maxima under definite used space, omit unused item contributions ([§12.5](https://drafts.csswg.org/css-grid-2/#algo-content), [§12.7](https://drafts.csswg.org/css-grid-2/#algo-flex-tracks)). Indefinite flexible tracks and intrinsic minima retain collection; item minimum overflow and final baseline alignment remain independent.
 
 Internal sizing requests carry border-box minimum bounds separately from known sizes. A bound preserves larger natural sizes, wins over a smaller maximum, does not inherit to children, and does not establish percentage definiteness. Intrinsic queries ignore the bound in their queried axis; cross-axis bounds remain live, including for opaque measurement and shrink-to-fit queries. Cache keys distinguish effective bounds, and fragmented containing-block reconstruction retains them without adding fields to `Layout`. Authored intrinsic minimum keywords cannot overwrite a stronger request bound.
 

@@ -18,7 +18,8 @@ fn line(number: i32, name: usize) -> GridLine {
 
 // Local track buffers must not be borrowed by the retained version.
 effect fn captureBox(store: &mut GridGeometryStore, id: usize, x: f64, width: f64)
-  ! OutOfMemoryError ? &mut Allocator {
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let mut column = TrackState.fixed(width)
   column.position = x
   let mut row = TrackState.fixed(30.0)
@@ -53,19 +54,24 @@ test effect fn gridGeometryNestedRollbackRestoresRepeatedVersions()
   run captureBox(&mut store, 9, 33.0, 70.0) |> Effect.provideMut<Allocator>(&mut allocator)
   run captureBox(&mut store, 4, 43.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
   let speculative = area(&store, 4)
-  run Testing.expect(speculative.x == 53.0 && speculative.width == 80.0,
-    "latest speculative layout supplies the containing area")
+  run Testing.expect(
+    speculative.x == 53.0 && speculative.width == 80.0,
+    "latest speculative layout supplies the containing area",
+  )
   store.restore(inner)
   let intermediate = area(&store, 4)
-  run Testing.expect(intermediate.x == 23.0 && intermediate.width == 50.0,
-    "inner rollback recovers the enclosing geometry version")
+  run Testing.expect(
+    intermediate.x == 23.0 && intermediate.width == 50.0,
+    "inner rollback recovers the enclosing geometry version",
+  )
   run Testing.expect(store.find(9) == NO_NODE, "inner rollback removes newly captured boxes")
   run captureBox(&mut store, 4, 53.0, 90.0) |> Effect.provideMut<Allocator>(&mut allocator)
   store.restore(outer)
   let original = area(&store, 4)
-  run Testing.expect(original.x == 13.0 && original.width == 40.0
-    && original.y == 27.0 && original.height == 30.0,
-    "outer rollback survives replacement after an inner rollback")
+  run Testing.expect(
+    original.x == 13.0 && original.width == 40.0 && original.y == 27.0 && original.height == 30.0,
+    "outer rollback survives replacement after an inner rollback",
+  )
 }
 
 test effect fn gridGeometryCommitKeepsLatestAndUntouchedFinals()
@@ -85,10 +91,14 @@ test effect fn gridGeometryCommitKeepsLatestAndUntouchedFinals()
   store.restore(marker)
   let latest = area(&store, 1)
   let kept = area(&store, 8)
-  run Testing.expect(latest.x == 31.0 && latest.width == 40.0,
-    "a later rollback restores the committed latest version, not its predecessor")
-  run Testing.expect(kept.x == 18.0 && kept.width == 28.0,
-    "an untouched final remains available across commits and later rollback")
+  run Testing.expect(
+    latest.x == 31.0 && latest.width == 40.0,
+    "a later rollback restores the committed latest version, not its predecessor",
+  )
+  run Testing.expect(
+    kept.x == 18.0 && kept.width == 28.0,
+    "an untouched final remains available across commits and later rollback",
+  )
 }
 
 test effect fn gridGeometryRemapPreservesSwappedBoxesAndDropsVanishedOnes()
@@ -104,21 +114,28 @@ test effect fn gridGeometryRemapPreservesSwappedBoxesAndDropsVanishedOnes()
   run store.remap(&toOld, &toNew) |> Effect.provideMut<Allocator>(&mut allocator)
   let first = area(&store, 0)
   let second = area(&store, 2)
-  run Testing.expect(first.x == 22.0 && first.width == 50.0
-    && second.x == 11.0 && second.width == 20.0,
-    "renumbering preserves the latest geometry even when box indices swap")
-  run Testing.expect(store.find(1) == NO_NODE && store.find(3) == NO_NODE
-    && store.find(4) == NO_NODE, "new and vanished boxes have no retained area")
+  run Testing.expect(
+    first.x == 22.0 && first.width == 50.0 && second.x == 11.0 && second.width == 20.0,
+    "renumbering preserves the latest geometry even when box indices swap",
+  )
+  run Testing.expect(
+    store.find(1) == NO_NODE && store.find(3) == NO_NODE && store.find(4) == NO_NODE,
+    "new and vanished boxes have no retained area",
+  )
   store.dropBox(0)
   store.dropBox(0)
   store.dropBox(100)
-  run Testing.expect(store.find(0) == NO_NODE && area(&store, 2).width == 20.0,
-    "invalidating one remapped box leaves its surviving neighbor intact")
+  run Testing.expect(
+    store.find(0) == NO_NODE && area(&store, 2).width == 20.0,
+    "invalidating one remapped box leaves its surviving neighbor intact",
+  )
   let marker = store.checkpoint()
   run captureBox(&mut store, 1, 9.0, 90.0) |> Effect.provideMut<Allocator>(&mut allocator)
   store.restore(marker)
-  run Testing.expect(store.find(1) == NO_NODE && area(&store, 2).x == 11.0,
-    "reusing released slots cannot resurrect vanished or invalidated geometry")
+  run Testing.expect(
+    store.find(1) == NO_NODE && area(&store, 2).x == 11.0,
+    "reusing released slots cannot resurrect vanished or invalidated geometry",
+  )
 }
 
 test effect fn gridGeometryClearReusesStorageWithoutResurrectingHeads()
@@ -127,22 +144,25 @@ test effect fn gridGeometryClearReusesStorageWithoutResurrectingHeads()
   let mut store = GridGeometryStore.make()
   store.clear()
   store.commit()
-  store.restore(store.checkpoint())
   run captureBox(&mut store, 20, 2.0, 20.0) |> Effect.provideMut<Allocator>(&mut allocator)
   run captureBox(&mut store, 20, 4.0, 40.0) |> Effect.provideMut<Allocator>(&mut allocator)
   run captureBox(&mut store, 3, 6.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
   store.clear()
   store.clear()
-  run Testing.expect(store.find(20) == NO_NODE && store.find(3) == NO_NODE,
-    "clear discards both current and speculative versions")
+  run Testing.expect(
+    store.find(20) == NO_NODE && store.find(3) == NO_NODE,
+    "clear discards both current and speculative versions",
+  )
   run captureBox(&mut store, 3, 8.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
   store.commit()
   let marker = store.checkpoint()
   run captureBox(&mut store, 3, 10.0, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
   store.restore(marker)
   let reused = area(&store, 3)
-  run Testing.expect(reused.x == 18.0 && reused.width == 80.0 && store.find(20) == NO_NODE,
-    "rollback after clear restores only the newly captured lifetime")
+  run Testing.expect(
+    reused.x == 18.0 && reused.width == 80.0 && store.find(20) == NO_NODE,
+    "rollback after clear restores only the newly captured lifetime",
+  )
 }
 
 test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
@@ -150,8 +170,10 @@ test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut store = GridGeometryStore.make()
   let mut labels = List<String>.make()
-  run labels.append(run String.copy("")) |> Effect.provideMut<Allocator>(&mut allocator)
-  run labels.append(run String.copy("edge")) |> Effect.provideMut<Allocator>(&mut allocator)
+  let emptyName = run String.copy("") |> Effect.provideMut<Allocator>(&mut allocator)
+  let edgeName = run String.copy("edge") |> Effect.provideMut<Allocator>(&mut allocator)
+  run labels.append(move emptyName) |> Effect.provideMut<Allocator>(&mut allocator)
+  run labels.append(move edgeName) |> Effect.provideMut<Allocator>(&mut allocator)
   let areas: [GridArea; 0] = []
   let lines: [GridNamedLine; 2] = [
     GridNamedLine { line: 0, name: 1, repeat: 0 },
@@ -174,12 +196,22 @@ test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
   let content = Rect { x: 10.0, y: 20.0, width: 300.0, height: 200.0 }
   let padding = Rect { x: 0.0, y: 0.0, width: 330.0, height: 240.0 }
   let kept = containingArea(&Style.make(), &placement, store.get(store.find(0)), content, padding)
-  run Testing.expect(kept.x == 10.0 && kept.width == 45.0,
-    "clearing source names does not change the retained named area")
+  run Testing.expect(
+    kept.x == 10.0 && kept.width == 45.0,
+    "clearing source names does not change the retained named area",
+  )
   store.clear()
   run store.capture(0, &columns, 0, 1, &names, &rows, 0, 1, &names)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let replaced = containingArea(&Style.make(), &placement, store.get(store.find(0)), content, padding)
-  run Testing.expect(replaced.x == 0.0 && replaced.width == 330.0,
-    "reused axis buffers discard removed names instead of exposing stale lines")
+  let replaced = containingArea(
+    &Style.make(),
+    &placement,
+    store.get(store.find(0)),
+    content,
+    padding,
+  )
+  run Testing.expect(
+    replaced.x == 0.0 && replaced.width == 330.0,
+    "reused axis buffers discard removed names instead of exposing stale lines",
+  )
 }

@@ -271,10 +271,27 @@ test effect fn absoluteLinesPreserveAutoAndApplyLineConflicts()
   let end = resolveAbsoluteSpan(&GridLine.auto(), &line(-1, 0), 3, &names, 0, 3)
   let equal = resolveAbsoluteSpan(&line(2, 0), &line(2, 0), 3, &names, 0, 3)
   let reversed = resolveAbsoluteSpan(&line(4, 0), &line(2, 0), 3, &names, 0, 3)
-  run Testing.expect(start.hasStart && start.start == 1 && !start.hasEnd, "auto end remains a padding edge")
-  run Testing.expect(!end.hasStart && end.hasEnd && end.end == 3, "auto start remains a padding edge")
-  run Testing.expect(equal.hasStart && equal.start == 1 && !equal.hasEnd, "equal endpoints discard the end, not create a one-track area")
-  run Testing.expect(reversed.hasStart && reversed.hasEnd && reversed.start == 1 && reversed.end == 3, "reversed lines swap before resolving the containing area")
+  let outsideReversed = resolveAbsoluteSpan(&line(99, 0), &line(2, 0), 3, &names, 0, 3)
+  run Testing.expect(
+    start.hasStart && start.start == 1 && !start.hasEnd,
+    "auto end remains a padding edge",
+  )
+  run Testing.expect(
+    !end.hasStart && end.hasEnd && end.end == 3,
+    "auto start remains a padding edge",
+  )
+  run Testing.expect(
+    equal.hasStart && equal.start == 1 && !equal.hasEnd,
+    "equal endpoints discard the end, not create a one-track area",
+  )
+  run Testing.expect(
+    reversed.hasStart && reversed.hasEnd && reversed.start == 1 && reversed.end == 3,
+    "reversed lines swap before resolving the containing area",
+  )
+  run Testing.expect(
+    outsideReversed.hasStart && outsideReversed.start == 1 && !outsideReversed.hasEnd,
+    "conflict swapping precedes nonexistent-line conversion",
+  )
 }
 
 test effect fn absoluteSpansNeverGenerateTracks()
@@ -284,10 +301,32 @@ test effect fn absoluteSpansNeverGenerateTracks()
   let after = resolveAbsoluteSpan(&line(3, 0), &span(2, 0), 3, &names, 0, 3)
   let before = resolveAbsoluteSpan(&span(2, 0), &line(2, 0), 3, &names, 0, 3)
   let unanchored = resolveAbsoluteSpan(&span(3, 0), &span(2, 0), 3, &names, 0, 3)
-  run Testing.expect(inside.hasStart && inside.start == 1 && inside.hasEnd && inside.end == 3, "a span ending at the existing last line is definite")
-  run Testing.expect(after.hasStart && after.start == 2 && !after.hasEnd, "an overflowing end span becomes auto")
-  run Testing.expect(!before.hasStart && before.hasEnd && before.end == 1, "an overflowing start span becomes auto")
-  run Testing.expect(!unanchored.hasStart && !unanchored.hasEnd, "two spans leave an unanchored placement and two auto edges")
+  let outsideAnchor = resolveAbsoluteSpan(&line(-5, 0), &span(2, 0), 3, &names, 0, 3)
+  let outsideEnd = resolveAbsoluteSpan(&span(2, 0), &line(5, 0), 3, &names, 0, 3)
+  run Testing.expect(
+    inside.hasStart && inside.start == 1 && inside.hasEnd && inside.end == 3,
+    "a span ending at the existing last line is definite",
+  )
+  run Testing.expect(
+    after.hasStart && after.start == 2 && !after.hasEnd,
+    "an overflowing end span becomes auto",
+  )
+  run Testing.expect(
+    !before.hasStart && before.hasEnd && before.end == 1,
+    "an overflowing start span becomes auto",
+  )
+  run Testing.expect(
+    !unanchored.hasStart && !unanchored.hasEnd,
+    "two spans leave an unanchored placement and two auto edges",
+  )
+  run Testing.expect(
+    !outsideAnchor.hasStart && outsideAnchor.hasEnd && outsideAnchor.end == 1,
+    "a span's existing endpoint survives an absent opposite line",
+  )
+  run Testing.expect(
+    outsideEnd.hasStart && outsideEnd.start == 2 && !outsideEnd.hasEnd,
+    "start spans resolve before an absent end becomes auto",
+  )
 }
 
 test effect fn absoluteNumericLinesUseExistingImplicitBounds()
@@ -297,10 +336,22 @@ test effect fn absoluteNumericLinesUseExistingImplicitBounds()
   let outside = resolveAbsoluteSpan(&line(-6, 0), &line(6, 0), 2, &names, -2, 6)
   let explicitEnd = resolveAbsoluteSpan(&line(-1, 0), &line(5, 0), 2, &names, -2, 6)
   let empty = resolveAbsoluteSpan(&line(1, 0), &line(-1, 0), 0, &names, 0, 0)
-  run Testing.expect(boundary.hasStart && boundary.start == -2 && boundary.hasEnd && boundary.end == 4, "the actual implicit boundary lines both exist")
-  run Testing.expect(!outside.hasStart && !outside.hasEnd, "one line beyond either implicit boundary becomes auto")
-  run Testing.expect(explicitEnd.hasStart && explicitEnd.start == 2 && explicitEnd.hasEnd && explicitEnd.end == 4, "negative numbering still counts from the explicit end")
-  run Testing.expect(empty.hasStart && empty.start == 0 && !empty.hasEnd, "an empty grid has one explicit line, with equal-end conflict handling")
+  run Testing.expect(
+    boundary.hasStart && boundary.start == -2 && boundary.hasEnd && boundary.end == 4,
+    "the actual implicit boundary lines both exist",
+  )
+  run Testing.expect(
+    !outside.hasStart && !outside.hasEnd,
+    "one line beyond either implicit boundary becomes auto",
+  )
+  run Testing.expect(
+    explicitEnd.hasStart && explicitEnd.start == 2 && explicitEnd.hasEnd && explicitEnd.end == 4,
+    "negative numbering still counts from the explicit end",
+  )
+  run Testing.expect(
+    empty.hasStart && empty.start == 0 && !empty.hasEnd,
+    "an empty grid has one explicit line, with equal-end conflict handling",
+  )
 }
 
 test effect fn absoluteNamedLinesAndSpansRespectExistingImplicitLines()
@@ -323,9 +374,24 @@ test effect fn absoluteNamedLinesAndSpansRespectExistingImplicitLines()
   let alias = resolveAbsoluteSpan(&line(0, 2), &line(0, 2), 3, &names, -1, 6)
   let namedSpan = resolveAbsoluteSpan(&line(1, 0), &span(2, 1), 3, &names, -1, 6)
   let unanchored = resolveAbsoluteSpan(&GridLine.auto(), &span(4, 1), 3, &names, -1, 6)
-  run Testing.expect(implicit.hasStart && implicit.start == -1 && implicit.hasEnd && implicit.end == 4, "existing implicit lines satisfy otherwise missing named occurrences")
-  run Testing.expect(!missing.hasStart && !missing.hasEnd, "named occurrences outside the existing grid do not extend it")
-  run Testing.expect(alias.hasStart && alias.start == 1 && alias.hasEnd && alias.end == 3, "bare area names retain their side-specific aliases")
-  run Testing.expect(namedSpan.hasStart && namedSpan.start == 0 && namedSpan.hasEnd && namedSpan.end == 4, "named spans can count existing implicit lines after explicit matches")
-  run Testing.expect(!unanchored.hasStart && !unanchored.hasEnd, "a lone named span cannot anchor an absolute area")
+  run Testing.expect(
+    implicit.hasStart && implicit.start == -1 && implicit.hasEnd && implicit.end == 4,
+    "existing implicit lines satisfy otherwise missing named occurrences",
+  )
+  run Testing.expect(
+    !missing.hasStart && !missing.hasEnd,
+    "named occurrences outside the existing grid do not extend it",
+  )
+  run Testing.expect(
+    alias.hasStart && alias.start == 1 && alias.hasEnd && alias.end == 3,
+    "bare area names retain their side-specific aliases",
+  )
+  run Testing.expect(
+    namedSpan.hasStart && namedSpan.start == 0 && namedSpan.hasEnd && namedSpan.end == 4,
+    "named spans can count existing implicit lines after explicit matches",
+  )
+  run Testing.expect(
+    !unanchored.hasStart && !unanchored.hasEnd,
+    "a lone named span cannot anchor an absolute area",
+  )
 }

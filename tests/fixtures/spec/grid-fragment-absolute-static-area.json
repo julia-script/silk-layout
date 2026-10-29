@@ -1,0 +1,23 @@
+{
+  "name": "grid-fragment-absolute-static-area",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "absolute-positioning", "alignment"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#abspos-items", "https://drafts.csswg.org/css-position-3/#static-position", "https://drafts.csswg.org/css-grid-2/#pagination"],
+  "derivation": "The hypothetical sole Grid item's static rectangle is its area. With gap3 and columns1fr/2fr, width123 makes column2 x43,width80; centering a14px absolute child gives x76. At width93 its area is x33,width60 so centered x56. With all insets auto these are area-relative static positions, not offsets added to the area a second time. Height89 consumes61+28 on pages at0/83. The second page is a positioning shell. Grid13 exact layout is not defined; section13.1 is nonnormative. The per-page allocation policy is hand-derived here.",
+  "input": {
+    "viewport": {"width": 123, "height": 166},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 61}, {"x": 0, "y": 83, "width": 93, "height": 61}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "position": "relative", "gridTemplateColumns": [{"fr": 1}, {"fr": 2}], "gridTemplateRows": [23], "columnGap": 3}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {"position": "absolute", "width": 14, "height": 89, "justifySelf": "center", "gridColumnStart": 2, "gridColumnEnd": 3}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 23}]},
+    {"rects": [{"x": 0, "y": 0, "width": 40, "height": 23}]},
+    {"rects": [{"x": 43, "y": 0, "width": 80, "height": 23}]},
+    {"rects": [{"x": 76, "y": 0, "width": 14, "height": 61}, {"x": 56, "y": 83, "width": 14, "height": 28}]}
+  ]}
+}

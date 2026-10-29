@@ -4,6 +4,7 @@ import grid_absolute { GridGeometry }
 import grid_lines { LineNames }
 import grid_tracks { TrackState }
 import tree { NO_NODE }
+import geometry { Rect }
 
 struct Slot {
   geometry: GridGeometry,
@@ -40,6 +41,14 @@ impl GridGeometryStore {
 
   pub fn get(self: &Self, slot: usize) -> &GridGeometry {
     return &self.slots.asSlice()[slot].geometry
+  }
+
+  // Finalization follows track capture, before any positioned descendant can
+  // observe this version. Preserve the engine's per-source overflow clipping.
+  pub fn setPadding(self: &mut Self, id: usize, padding: Rect) {
+    let index = self.find(id)
+    let slots = self.slots.asMutSlice()
+    slots[index].geometry.normalPadding = padding
   }
 
   pub fn checkpoint(self: &Self) -> usize {

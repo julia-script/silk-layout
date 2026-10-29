@@ -1,0 +1,61 @@
+{
+  "name": "grid-absolute-orthogonal-static-self-edges-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "The area is (60,80),60x50. The vertical-rl child has block-end left and inline-start top, so its self-end/self-start static alignment selects the physical top-left, not the parent inline end.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 160,
+          "height": 180,
+          "paddingLeft": 10,
+          "paddingRight": 20,
+          "paddingTop": 30,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            40,
+            60
+          ],
+          "gridTemplateRows": [
+            30,
+            50
+          ],
+          "columnGap": 10,
+          "rowGap": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "gridColumnStart": 2,
+          "gridColumnEnd": 3,
+          "gridRowStart": 2,
+          "gridRowEnd": 3,
+          "width": 20,
+          "height": 10,
+          "justifySelf": "self-end",
+          "alignSelf": "self-start",
+          "writingMode": "vertical-rl"
+        }
+      }
+    ]
+  }
+}

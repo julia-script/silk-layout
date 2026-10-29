@@ -3,6 +3,7 @@ import silk.collections.list { List }
 import silk.collections.slice { Slice }
 import silk.core.ownership { Copy }
 import silk.mem.pointer { Pointer }
+import silk.num.usize
 import geometry { Point, Size, Rect, ResolvedEdges, BaselineSet, sameSize, sameRect, sameEdges, sameBaselines, sameOverflow }
 import tree { NO_NODE }
 
@@ -129,7 +130,7 @@ fn locate(values: &[Fragment], index: usize) -> Point {
 const EDITS_TRACKED: usize = 256
 // A fragment slot at or above this names a saved position, at the slot
 // less this, instead of a saved fragment.
-const PARTIAL_SLOT: usize = 9223372036854775808
+const PARTIAL_SLOT: usize = usize.MAX / 2 + 1
 
 // Where a fragment is: its tree and box links, which appending and keeping
 // fragments after it write, and the placement LayoutPass.place writes of a

@@ -1,0 +1,149 @@
+{
+  "name": "grid-fragment-absolute-opposite-sliced-padding",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "fragmentation",
+    "absolute-position",
+    "writing-modes",
+    "box-decoration-break"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#pagination",
+    "https://drafts.csswg.org/css-grid-2/#abspos",
+    "https://drafts.csswg.org/css-break-3/#break-decoration"
+  ],
+  "derivation": "The vertical-rl context visits the vertical-lr grid rows in reverse: 23px then17px. First-page right padding3 leaves the first row at61-3-23=35. Its break-after forces the17px row to page2, where the sliced right padding is absent and the row starts at144-17=127. Final left padding5 lies outside that row. The absolute child uses exactly this row as its 17px percentage basis and right edge, not the joined padding edge.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 41
+    },
+    "fragmentation": {
+      "kind": "page",
+      "writingMode": "vertical-rl",
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 61,
+          "height": 41
+        },
+        {
+          "x": 83,
+          "y": 0,
+          "width": 61,
+          "height": 41
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "writingMode": "vertical-lr",
+          "gridTemplateColumns": [
+            41
+          ],
+          "gridTemplateRows": [
+            17,
+            23
+          ],
+          "rowGap": 5,
+          "padding": {
+            "left": 5,
+            "right": 3
+          }
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "gridRowStart": 1,
+          "gridRowEnd": 2
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "gridRowStart": 2,
+          "gridRowEnd": 3,
+          "breakAfter": "page"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "writingMode": "vertical-rl",
+          "gridRowStart": 1,
+          "gridRowEnd": 2,
+          "gridColumnStart": 1,
+          "gridColumnEnd": 2,
+          "width": {
+            "percent": 1
+          },
+          "height": 13,
+          "inset": {
+            "right": 0,
+            "top": 0
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 61,
+            "height": 41
+          },
+          {
+            "x": 122,
+            "y": 0,
+            "width": 22,
+            "height": 41
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 127,
+            "y": 0,
+            "width": 17,
+            "height": 41
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 35,
+            "y": 0,
+            "width": 23,
+            "height": 41
+          }
+        ]
+      },
+      {
+        "rects": [
+          {
+            "x": 127,
+            "y": 0,
+            "width": 17,
+            "height": 13
+          }
+        ]
+      }
+    ]
+  }
+}

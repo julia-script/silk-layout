@@ -965,6 +965,17 @@ pub effect fn descendantOffsets(nodes: &BoxTree, output: &LayoutPass, root: &Sty
   while index < state.entries.length() {
     let entry = state.entries.get(index)
     if entry.id != NO_NODE && entry.group != NO_NODE && entry.samples[3].present {
+      // The caller appends inherited members once. Do not duplicate the same
+      // ancestor-owned member at every nested subgrid boundary.
+      let mut inheritedAt: usize = 0
+      while inheritedAt < inherited.length
+        && (inherited[inheritedAt].id != entry.id || inherited[inheritedAt].horizontal != horizontal) {
+        inheritedAt = inheritedAt + 1
+      }
+      if inheritedAt < inherited.length {
+        index = index + 1
+        continue
+      }
       let mut value = shift(scratch, index, columns, 0.0)
       let parent = nodes.style(nodes.node(entry.id).parent)
       let localColumns = horizontal == (parent.writingMode == WritingMode.HorizontalTb)
@@ -975,7 +986,6 @@ pub effect fn descendantOffsets(nodes: &BoxTree, output: &LayoutPass, root: &Sty
         value = spanSize(tracks, entry.start, entry.end) - entry.extraBefore - entry.extraAfter
           - axisSize(layout.size, horizontal) - margin - value
       }
-      value = Subgrid.baselineShift(inherited, entry.id, horizontal, value)
       run result.append(BaselineOffset { id: entry.id, horizontal: horizontal, shift: value })
     }
     index = index + 1

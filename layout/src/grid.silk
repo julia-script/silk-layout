@@ -1033,6 +1033,9 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
         columnGap: columnSizing.usedGap,
         rowGap: rowSizing.usedGap,
         blockDefinite: rowSizing.definite,
+        subgridBaselines: subgridSharing,
+        columnBaselineDefinite: columnSizing.baselineDefinite,
+        rowBaselineDefinite: rowSizing.baselineDefinite,
         columnRepeat: columnRepeat,
         rowRepeat: rowRepeat,
       }
@@ -1167,7 +1170,8 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     }
     if subgridSharing && pass == 0 {
       run collectFinalSubgridBaselines(nodes, &mut output, &mut measurer, items, style,
-        columns, rows, &columnSizing, &rowSizing, &logical, &mut baselines)
+        columns, rows, columnSizing.usedGap, rowSizing.usedGap,
+        columnSizing.baselineDefinite, rowSizing.baselineDefinite, &logical, &mut baselines)
       match move output.cache.gridMemos.baselineOffsets.pop() {
         Option<List<BaselineOffset>>.Some { value } => { baselineOffsets = move value }
         Option<List<BaselineOffset>>.None => {}
@@ -1531,10 +1535,10 @@ effect fn collectInherited<'pass, 'source, M: Measure + TextMeasure>(
   return next
 }
 
-effect fn collectFinalSubgridBaselines<M: Measure>(
+pub effect fn collectFinalSubgridBaselines<M: Measure>(
   nodes: &BoxTree, output: &mut LayoutPass, measurer: &mut M, items: &[GridItem],
   root: &Style, columns: &[TrackState], rows: &[TrackState],
-  columnSizing: &AxisSizing, rowSizing: &AxisSizing, logical: &ResolvedBox,
+  columnGap: f32, rowGap: f32, columnDefinite: bool, rowDefinite: bool, logical: &ResolvedBox,
   baselines: &mut GridBaselines,
 ) ! OutOfMemoryError ? &mut Allocator {
   let mut work = ContributionWork.make()
@@ -1544,11 +1548,13 @@ effect fn collectFinalSubgridBaselines<M: Measure>(
     let isColumn = pass == 0
     let horizontal = isColumn == (root.writingMode == WritingMode.HorizontalTb)
     let mut tracks = rows
-    let mut sizing = rowSizing
+    let mut gap = rowGap
+    let mut definite = rowDefinite
     let mut origin = logical.inset.top
     if isColumn {
       tracks = columns
-      sizing = columnSizing
+      gap = columnGap
+      definite = columnDefinite
       origin = logical.inset.left
       if root.usedDirection() == Direction.Rtl { origin = logical.inset.right }
     }
@@ -1566,8 +1572,8 @@ effect fn collectFinalSubgridBaselines<M: Measure>(
         let mut span = item.row
         if isColumn { span = item.column }
         run captureSubgridBaselines(nodes, &mut output, &mut measurer, item.id, root,
-          tracks, sizing, origin, i32.toUsize(span.start), i32.toUsize(span.end),
-          sizing.usedGap, &mut work, &mut baselines)
+          tracks, isColumn, definite, origin, i32.toUsize(span.start), i32.toUsize(span.end),
+          gap, &mut work, &mut baselines)
       }
       index = index + 1
     }
@@ -1578,13 +1584,13 @@ effect fn collectFinalSubgridBaselines<M: Measure>(
 
 effect fn captureSubgridBaselines<M: Measure>(
   nodes: &BoxTree, output: &mut LayoutPass, measurer: &mut M, id: usize, root: &Style,
-  tracks: &[TrackState], sizing: &AxisSizing, origin: f32, rootStart: usize, rootEnd: usize,
+  tracks: &[TrackState], columns: bool, definite: bool, origin: f32, rootStart: usize, rootEnd: usize,
   parentGap: f32, work: &mut ContributionWork, baselines: &mut GridBaselines,
 ) ! OutOfMemoryError ? &mut Allocator {
   let style = nodes.style(id)
-  let horizontal = sizing.columns == (root.writingMode == WritingMode.HorizontalTb)
+  let horizontal = columns == (root.writingMode == WritingMode.HorizontalTb)
   let localColumns = horizontal == (style.writingMode == WritingMode.HorizontalTb)
-  let reversed = Subgrid.reversed(root, sizing.columns) != Subgrid.reversed(style, localColumns)
+  let reversed = Subgrid.reversed(root, columns) != Subgrid.reversed(style, localColumns)
   let lease = run output.cache.gridMemos.take(id, nodes.boxes.length())
   let geometry = &lease.value.baselines.asSlice()[0]
   let mut low = geometry.inset.top + geometry.margin.top
@@ -1593,7 +1599,7 @@ effect fn captureSubgridBaselines<M: Measure>(
     low = geometry.inset.left + geometry.margin.left
     high = geometry.inset.right + geometry.margin.right
   }
-  if Subgrid.reversed(root, sizing.columns) { let saved = low
+  if Subgrid.reversed(root, columns) { let saved = low
     low = high
     high = saved }
   let mut usedGap = geometry.rowGap
@@ -1612,15 +1618,15 @@ effect fn captureSubgridBaselines<M: Measure>(
       end = rootEnd - i32.toUsize(span.start) }
     if Subgrid.inherits(nodes, item.id, horizontal) && inheritedBaselines(nodes, item.id, horizontal) {
       run captureSubgridBaselines(nodes, &mut output, &mut measurer, item.id, root,
-        tracks, sizing, origin, start, end, usedGap, &mut work, &mut baselines)
+        tracks, columns, definite, origin, start, end, usedGap, &mut work, &mut baselines)
     } else {
       let before = SubgridContributions.edge(work.layers.asSlice(), start, true)
       let after = SubgridContributions.edge(work.layers.asSlice(), end, false)
       let entry = run Baselines.registerDescendant(nodes, &mut measurer, root, style,
-        item.id, start, end, before, after, tracks, sizing.baselineDefinite,
-        sizing.columns, NO_NODE, &mut baselines)
+        item.id, start, end, before, after, tracks, definite,
+        columns, NO_NODE, &mut baselines)
       if entry != NO_NODE {
-        Baselines.captureDescendant(&mut baselines, entry, sizing.columns, nodes.style(item.id),
+        Baselines.captureDescendant(&mut baselines, entry, columns, nodes.style(item.id),
           root, &output.boxes[item.id], origin + tracks[start].position, spanSize(tracks, start, end))
       }
     }

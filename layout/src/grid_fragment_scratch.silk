@@ -5,6 +5,7 @@ import silk.num.i32
 import geometry { Size, Point, OptionalSize, ResolvedEdges }
 import grid_placement { GridItem }
 import tree { NO_NODE }
+import grid_context { BaselineOffset }
 
 // Cursor/adjacency rows are frame-traversal ordinals; placement and tracks
 // remain in Grid logical order. This reversal is its own inverse.
@@ -73,6 +74,7 @@ pub struct GridFragmentScratch {
   pub items: List<FragmentItem>,
   pub rows: List<FragmentRow>,
   pub reversed: bool,
+  pub baselineOffsets: List<BaselineOffset>,
 }
 
 impl GridFragmentScratch {
@@ -81,6 +83,7 @@ impl GridFragmentScratch {
       items: List<FragmentItem>.make(),
       rows: List<FragmentRow>.make(),
       reversed: false,
+      baselineOffsets: List<BaselineOffset>.make(),
     }
   }
 
@@ -89,6 +92,7 @@ impl GridFragmentScratch {
     ? &mut Allocator {
     self.items.clear()
     self.rows.clear()
+    self.baselineOffsets.clear()
     self.reversed = reversed
     run self.items.reserve(items.length)
     let mut index: usize = 0

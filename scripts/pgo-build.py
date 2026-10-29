@@ -8,8 +8,8 @@ release binary at build/llvm/<triple>/release/silk_layout_cli.
 
   SILK_CLANG=/path/to/llvm/bin/clang python3 scripts/pgo-build.py [--docs DIR]
 
-Needs a Silk whose compiler reads SILK_PROFILE_GENERATE and SILK_PROFILE_USE (after
-0.1.0-dev.28).
+Needs Silk 0.1.0-dev.29 or later, whose compiler reads SILK_PROFILE_GENERATE and
+SILK_PROFILE_USE.
 
 --docs adds the small documents (under 400 KB) of a directory to the training set, such
 as the taffy README trees that `cargo run --release -- DIR` in bench/compare/taffy-readme

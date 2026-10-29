@@ -225,6 +225,17 @@ Benchmarks cover block stacks, growing/wrapping flex items, nested containers an
 
 The grid workloads are `grid-fixed` (fixed tracks, numeric lines/spans and self-alignment), `grid-fr` (definite flexible columns with wrapping measured leaves in auto rows), `grid-intrinsic` (intrinsic keywords, capped tracks and spanning contributions), `grid-nested` (three grid levels with intrinsic item probes), `grid-auto-placement` (automatic spans in matched sparse/dense grids), and `grid-areas-shell` (a named-area application shell with navigation, header/footer and 500 nested block/flex cards). Fixed, fr and intrinsic scenes have 10,000 items; the nested scene has 6,001 nodes; auto-placement has 10,000 leaves and three containers. Run `scripts/bench-compare --only grid-fixed,grid-fr,grid-intrinsic,grid-nested,grid-auto-placement,grid-areas-shell`. They compare against taffy 0.15.1 only: Yoga is explicitly skipped, and skipped workloads are excluded from its geometry and ratio summaries. JSON reports mark the taffy-only scope. The taffy adapter maps count/auto-fill/auto-fit repeats, named lines and spans, and area matrices directly to the pinned release's native APIs, including unnamed area-template extent. It also accepts all four auto-flow modes, intrinsic breadth keywords and length/percentage `fitContent` arguments. Invalid repeat grammar, malformed/nonrectangular areas, subgrid, masonry, calc, grid shorthands and nonzero `order` fail rather than being approximated.
 
+Cold-compute checkpoint, 2026-10-29: Silk `0.1.0-dev.29+94cf9559bf47` and taffy 0.15.1 on macOS arm64, with 15 rotated trials ×24 computes and 0.05 px geometry validation on every trial. Lower ratios favor Silk. These host-dependent wall medians are a checkpoint, not a portable speed guarantee; hot-path changes are retained using per-compute Callgrind instruction counts.
+
+| Grid workload | Silk ms | taffy ms | Silk / taffy |
+|---|---:|---:|---:|
+| `grid-fixed` | 2.404 | 3.218 | 0.747× |
+| `grid-fr` | 5.284 | 7.605 | 0.695× |
+| `grid-intrinsic` | 8.397 | 8.885 | 0.945× |
+| `grid-nested` | 7.824 | 8.140 | 0.961× |
+| `grid-auto-placement` | 2.517 | 25.278 | 0.100× |
+| `grid-areas-shell` | 1.622 | 1.630 | 0.995× |
+
 `scripts/bench-updates.py` times re-layout after small edits on the ASCII scenes in `bench/updates/workloads.py`. The Grid scene covers unchanged recomputes, fitting and growing text, item order and placement, auto-flow, hiding, automatic-repeat template changes and viewport resizes across a repetition-count boundary. The CLI's root `"updates":{"iterations":N,"cycle":[steps]}` field applies one step before each timed `compute`; a step may replace the `viewport` and `set` a node's whole `style`, a text node's `text` or an element's `scrollOffset` (`Tree.setStyle`, `Tree.setText`, `Tree.setScrollOffset`). Benchmark output reports average work per compute: passes, full layouts, size probes, cache hits and reused layouts (`LayoutTree.stats`), plus provider measure/analyze/shape calls. The script also checks that geometry after the updates equals a fresh layout of the final document, so `scripts/check` runs it with two iterations as a cache-correctness gate.
 
 A fitting text edit in the Grid scene performs no full layouts or size probes. Zero `reusedLayouts` on that path means the existing result was kept in place, not copied through the reuse walker. Native regressions pair this case with a text edit that must grow an intrinsic row.

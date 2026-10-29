@@ -1,0 +1,95 @@
+{
+  "name": "grid-subgrid-negative-internal-track-start",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-margins",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-gaps"
+  ],
+  "derivation": "The parent rows are0 and40 with no gap. A row-subgrid has3px padding at both edges. Its first inner line is content-start, but its second track starts at parent line0 minus top padding3, i.e. local -3. Therefore a stretched item in row2 starts at physical y0 and is37px high; an item spanning both rows starts at y3 and is34px high. Padding is the extra margin at the relevant outer edges (\u00a79), not a clamp on an interior track start.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 30,
+          "gridTemplateColumns": [
+            30
+          ],
+          "gridTemplateRows": [
+            0,
+            40
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridRowStart": 1,
+          "gridRowEnd": 3,
+          "gridTemplateColumns": [
+            30
+          ],
+          "gridTemplateRows": "subgrid",
+          "padding": {
+            "top": 3,
+            "bottom": 3
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 2
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "gridRowEnd": 3
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 37
+      },
+      {
+        "x": 0,
+        "y": 3,
+        "width": 30,
+        "height": 34
+      }
+    ]
+  }
+}

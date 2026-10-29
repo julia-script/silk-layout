@@ -1,0 +1,149 @@
+{
+  "name": "grid-subgrid-zero-terminal-track-start-and-end",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-margins"
+  ],
+  "derivation": "The parent rows40 and0 have a10px gap. Row-subgrid padding3 leaves a44px whole content span, starting at y3 and ending47. The final zero track nevertheless starts at the parent interior line50 (local47). A20px start-aligned item in that track starts at50, not47; a spanning stretched item remains44px tall. Nested padding2 consumes each outer edge again without moving the interior line: nested spanning height40 at y5; nested terminal item still starts50. The inherited track must retain independent raw start and end even when the residual breadth is negative.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 30,
+          "gridTemplateColumns": [
+            30
+          ],
+          "gridTemplateRows": [
+            40,
+            0
+          ],
+          "rowGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridRowStart": 1,
+          "gridRowEnd": 3,
+          "gridTemplateColumns": [
+            30
+          ],
+          "gridTemplateRows": "subgrid",
+          "padding": {
+            "top": 3,
+            "bottom": 3
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 2,
+          "height": 20,
+          "alignSelf": "start"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "gridRowEnd": 3
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": 1,
+          "display": "grid",
+          "gridRowStart": 1,
+          "gridRowEnd": 3,
+          "gridTemplateColumns": [
+            30
+          ],
+          "gridTemplateRows": "subgrid",
+          "padding": {
+            "top": 2,
+            "bottom": 2
+          }
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "gridRowEnd": 3
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 2,
+          "height": 20,
+          "alignSelf": "start"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 50
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 50
+      },
+      {
+        "x": 0,
+        "y": 50,
+        "width": 30,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 3,
+        "width": 30,
+        "height": 44
+      },
+      {
+        "x": 0,
+        "y": 3,
+        "width": 30,
+        "height": 44
+      },
+      {
+        "x": 0,
+        "y": 5,
+        "width": 30,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 50,
+        "width": 30,
+        "height": 20
+      }
+    ]
+  }
+}

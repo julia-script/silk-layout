@@ -1,0 +1,115 @@
+{
+  "name": "grid-subgrid-reversed-floored-terminal-endpoints",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-margins"
+  ],
+  "derivation": "A columns40 and0 with10px gap span50. B inherits them with3px inline padding: local final-track start47 and end44 are distinct although its floored breadth is0. C inherits B in RTL. Reflection around extent44 maps the actual final-track end44 to logical start0, not -3 from reflecting floored breadth. C border box is44 at x3. Its20px first-column start-aligned child therefore ends at physical47 and starts27; its full-span child stays44 at x3.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 50,
+          "gridTemplateColumns": [
+            40,
+            0
+          ],
+          "gridTemplateRows": [
+            20
+          ],
+          "columnGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": "subgrid",
+          "padding": {
+            "left": 3,
+            "right": 3
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "direction": "rtl",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1,
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "width": 20,
+          "height": 10,
+          "justifySelf": "start",
+          "alignSelf": "start"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 20
+      },
+      {
+        "x": 3,
+        "y": 0,
+        "width": 44,
+        "height": 20
+      },
+      {
+        "x": 27,
+        "y": 0,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 3,
+        "y": 0,
+        "width": 44,
+        "height": 20
+      }
+    ]
+  }
+}

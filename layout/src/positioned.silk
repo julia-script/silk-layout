@@ -1,5 +1,8 @@
 import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.core.effect { Effect }
+import silk.num.u64
+import silk.num.u32
+import silk.num.usize
 import geometry { Layout, Point, Size, Rect, ResolvedEdges, OptionalSize, AvailableSpace, Measure, max, min, clamp, abs }
 import style { Style, Position, DimensionKind, Direction, WritingMode, Align, FlexDirection, FlexWrap, OverflowAlignment, Overflow, Float, BoxDecorationBreak }
 import tree { NO_NODE }
@@ -1695,11 +1698,36 @@ fn fragmentFlowMargin(nodes: &BoxTree, output: &LayoutPass, parentId: usize, chi
 
 // Propagates the scrollable overflow of a pass holding one subtree alone.
 pub fn subtreeOverflow(nodes: &BoxTree, output: &mut LayoutPass) {
-  drop treeOverflow(nodes, &mut output, Rect.zero(), Rect.zero(), false)
+  drop treeOverflow(nodes, &mut output, Rect.zero(), Rect.zero(), false, false)
 }
 
 // With `marked`, output.outOfFlowBoxes holds which boxes are out of flow.
-fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normalViewport: Rect, marked: bool) -> Rect {
+// Marks the root and the box fragments published with overflow outside
+// their border box for a plain treeOverflow.
+effect fn markOverflowEscapes(output: &mut LayoutPass) ! OutOfMemoryError ? &mut Allocator {
+  let count = output.fragments.values.length()
+  output.overflowMarks.clear()
+  run output.overflowMarks.appendRepeated(0, (count + 63) / 64)
+  let marks = output.overflowMarks.asMutSlice()
+  if count > 0 { marks[0] = 1 }
+  let mut at: usize = 0
+  while at < output.overflowEscapes.length() {
+    let escape = output.overflowEscapes.get(at)
+    if escape < count { marks[escape / 64] = u64.bitOr(marks[escape / 64], u64.shiftLeft(1, usize.toU64(escape % 64))) }
+    at = at + 1
+  }
+}
+// The highest marked index below `index`, which the mark at 0 bounds.
+fn previousMark(marks: &[u64], index: usize) -> usize {
+  let mut word = (index - 1) / 64
+  let mut bits = u64.bitAnd(marks[word], u64.shiftRight(u64.MAX, usize.toU64(63 - (index - 1) % 64)))
+  while bits == 0 {
+    word = word - 1
+    bits = marks[word]
+  }
+  return word * 64 + 63 - u32.toUsize(u64.leadingZeros(bits))
+}
+fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normalViewport: Rect, marked: bool, plain: bool) -> Rect {
   let mut result = normalViewport
   let viewportStyle = Style.make()
   let mut viewportLimits = reachableLimits(&viewportStyle, viewport, viewport, true)
@@ -1708,6 +1736,10 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
   // Physical parents precede children, including CB-owned absolute subtrees.
   // Line/inline fragments pass overflow through; only actual box fragments clip.
   let mut index = output.fragments.values.length()
+  // With `plain`, only a fragment whose overflow leaves its border box adds
+  // anything to its parent's: visit those, their parents when that makes
+  // theirs leave too, and the root, marked in overflowMarks (see
+  // markOverflowEscapes).
   // Settled ranges already hold their final overflow: skip to their first fragment.
   let mut settled = output.fragments.settled.length()
   if output.frame != NO_NODE { settled = 0 }
@@ -1717,7 +1749,7 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
   // margin and border rects of its unmoved in-flow children (overflowGeometry).
   let mut parentCovers = false
   while index > 0 {
-    index = index - 1
+    if plain { index = previousMark(output.overflowMarks.asSlice(), index) } else { index = index - 1 }
     if settled > 0 && index + 1 == output.fragments.settled.get(settled - 1).end {
       let range = output.fragments.settled.get(settled - 1)
       settled = settled - 1
@@ -1809,7 +1841,12 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
           combined = addOverflow(combined, margin, limits)
         }
         let fragments = output.fragments.values.asMutSlice()
-        fragments[parentId].scrollableOverflow = addOverflow(combined, overflow, limits)
+        let grown = addOverflow(combined, overflow, limits)
+        fragments[parentId].scrollableOverflow = grown
+        if plain && (grown.x < 0.0 || grown.y < 0.0 || grown.x + grown.width > fragments[parentId].size.width || grown.y + grown.height > fragments[parentId].size.height) {
+          let marks = output.overflowMarks.asMutSlice()
+          marks[parentId / 64] = u64.bitOr(marks[parentId / 64], u64.shiftLeft(1, usize.toU64(parentId % 64)))
+        }
       }
     }
   }
@@ -1990,12 +2027,20 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   // Layout an absolute ancestor before visiting any of its source descendants.
   output.outOfFlowBoxes.clear()
   run output.outOfFlowBoxes.appendRepeated(false, output.boxes.length)
+  // Whether no box is out of flow, interrupted, or a parent with clipped or
+  // scrolled overflow.
+  let mut plainParents = true
   let mut at: usize = 0
   while at < output.visits.length() {
     let id = output.visits.get(at)
     let style = nodes.style(id)
-    if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE { run interruptions(nodes, &mut output, id) }
+    if nodes.node(id).firstForSource && nodes.node(id).interruptionFirst != NO_NODE {
+      plainParents = false
+      run interruptions(nodes, &mut output, id)
+    }
+    if nodes.node(id).firstChild != NO_NODE && (usedOverflowForAxis(style, true) != Overflow.Visible || usedOverflowForAxis(style, false) != Overflow.Visible) { plainParents = false }
     if outOfFlow(style) {
+      plainParents = false
       output.outOfFlowBoxes.set(id, true)
       run absolute(nodes, &mut output, &mut measurer, id, viewport, false, &viewportStyle)
     }
@@ -2022,7 +2067,13 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   }
   if relative || visual { output.fragments.offsetting() }
   if relative { run positionRelative(nodes, &mut output, viewport) }
-  let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport, true)
+  // Every box is an unmoved in-flow box fragment under the root, and every
+  // parent's overflow is visible and so already covers its children's
+  // border and margin boxes (see overflowGeometry).
+  let plain = plainParents && !relative && !visual && output.fragments.plain
+    && output.frame == NO_NODE && output.fragments.settled.length() == 0 && output.stats.reusedLayouts == 0
+  if plain { run markOverflowEscapes(&mut output) }
+  let overflow = treeOverflow(nodes, &mut output, viewportRect, normalViewport, true, plain)
   run output.selectScrollbars(nodes)
   if output.needsRelayout || !visual { return overflow }
   let usedViewportScroll = clampScroll(viewportScroll, viewportRect, overflow)
@@ -2179,7 +2230,7 @@ pub effect fn positionFragmentedTree<'pass, 'source, M: Measure + TextMeasure>(n
   output.frame = savedFrame
   output.fragments.offsetting()
   run positionRelative(nodes, &mut output, viewport)
-  let overflow = treeOverflow(nodes, &mut output, viewportRect, viewportRect, false)
+  let overflow = treeOverflow(nodes, &mut output, viewportRect, viewportRect, false, false)
   run output.selectScrollbars(nodes)
   if output.needsRelayout { return overflow }
   let usedViewportScroll = clampScroll(viewportScroll, viewportRect, overflow)

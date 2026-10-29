@@ -142,7 +142,7 @@ Canonical boxes and fragments expose `firstBaselines`/`lastBaselines` objects. S
 
 Dimensions accept pixel numbers, keywords, `{"percent":0.5}` and `{"length":10,"percent":0.5}`. Edge shorthands accept a uniform dimension or named sides. Each alignment property has its own `...Safety` qualifier (`default`, `safe`, `unsafe`). Unknown fields and malformed tree input fail with a nonzero exit status. Measurement fixtures are deterministic test services, not a font shaper.
 
-**Grid API:** `display` accepts `"grid"`, `"block grid"`, `"inline-grid"`, and `"inline grid"`. Numeric and named lines/spans, template areas, integer/automatic repeats, fixed/percentage/intrinsic tracks, `minmax`, `fit-content`, definite and indefinite `fr`, and gaps drive layout. Items use their grid areas as containing blocks. Track sizing includes spanning contributions, automatic item minima, container min/max-content sizes, orthogonal items and cyclic percentages. Implicit track lists cycle in both directions; row/column sparse/dense auto-placement follows stable `order`. Empty auto-fit tracks and their gutters collapse. Alignment includes track distribution, logical self-alignment, safe/unsafe overflow, auto margins, baseline sharing and container baseline export. Absolutely positioned descendants can use grid areas as containing blocks; static alignment and scroll origins account for the grid's logical axes. Grid containers remain monolithic during fragmentation; internal grid breaks and subgrid are not implemented. This is not full CSS Grid support; documented specification/browser differences remain in `SPECIFICATIONS.md`.
+**Grid API:** `display` accepts `"grid"`, `"block grid"`, `"inline-grid"`, and `"inline grid"`. Numeric and named lines/spans, template areas, integer/automatic repeats, fixed/percentage/intrinsic tracks, `minmax`, `fit-content`, definite and indefinite `fr`, and gaps drive layout. Items use their grid areas as containing blocks. Track sizing includes spanning contributions, automatic item minima, container min/max-content sizes, orthogonal items and cyclic percentages. Implicit track lists cycle in both directions; row/column sparse/dense auto-placement follows stable `order`. Empty auto-fit tracks and their gutters collapse. Alignment includes track distribution, logical self-alignment, safe/unsafe overflow, auto margins, baseline sharing and container baseline export. Absolutely positioned descendants can use grid areas as containing blocks; static alignment and scroll origins account for the grid's logical axes. Fragmented grids resume rows and spanning items, propagate item break controls to row boundaries, and export fragment-local baselines. Subgrid is not implemented. This is not full CSS Grid support; documented specification/browser differences remain in `SPECIFICATIONS.md`.
 
 The grid adapter accepts only parsed longhands, not CSS track-list strings or shorthands:
 
@@ -189,7 +189,7 @@ The CLI selects this entrypoint when the root request contains `fragmentation`:
  "nodes":[{"parent":null,"style":{"height":120}}]}
 ```
 
-`frames` must be nonempty; dimensions must be finite and nonnegative. Optional `writingMode` and `direction` default to horizontal-tb and ltr. `firstPage` and `recto` accept left/right, both defaulting to right. The engine resumes block children, paragraph cursors and flex lines/items against each actual frame, preserving full sizing bases and fractional size progress. Widow lookahead uses actual future ancestor/float geometry. Normal box extent and descendant overflow progress are separate. Absolute descendants can continue into further frames; page-fixed contents repeat without internal fragmentation. Frame geometry is supplied externally; this API does not construct CSS columns, page margin boxes, or named regions.
+`frames` must be nonempty; dimensions must be finite and nonnegative. Optional `writingMode` and `direction` default to horizontal-tb and ltr. `firstPage` and `recto` accept left/right, both defaulting to right. The engine resumes block children, paragraph cursors, flex lines/items and grid rows/items against each actual frame, preserving full sizing bases and fractional size progress. Widow lookahead uses actual future ancestor/float geometry. Normal box extent and descendant overflow progress are separate. Absolute descendants can continue into further frames; page-fixed contents repeat without internal fragmentation. Frame geometry is supplied externally; this API does not construct CSS columns, page margin boxes, or named regions.
 
 For nested contexts, JSON adds both `"contexts":["page",...]` and `"ancestors":[[{"index":0,"x":0,"y":0,"width":200,"height":300},...],...]`; each ancestry row corresponds to one `frames` entry. The same fixed context stack and writing mode govern the supplied leaf sequence.
 
@@ -229,12 +229,12 @@ Cold-compute checkpoint, 2026-10-29: Silk `0.1.0-dev.29+94cf9559bf47` and taffy 
 
 | Grid workload | Silk ms | taffy ms | Silk / taffy |
 |---|---:|---:|---:|
-| `grid-fixed` | 2.404 | 3.218 | 0.747× |
-| `grid-fr` | 5.284 | 7.605 | 0.695× |
-| `grid-intrinsic` | 8.397 | 8.885 | 0.945× |
-| `grid-nested` | 7.824 | 8.140 | 0.961× |
-| `grid-auto-placement` | 2.517 | 25.278 | 0.100× |
-| `grid-areas-shell` | 1.622 | 1.630 | 0.995× |
+| `grid-fixed` | 2.305 | 3.003 | 0.768× |
+| `grid-fr` | 4.975 | 6.747 | 0.737× |
+| `grid-intrinsic` | 7.999 | 8.011 | 0.998× |
+| `grid-nested` | 7.740 | 7.824 | 0.989× |
+| `grid-auto-placement` | 2.352 | 24.180 | 0.097× |
+| `grid-areas-shell` | 1.437 | 1.431 | 1.004× |
 
 `scripts/bench-updates.py` times re-layout after small edits on the ASCII scenes in `bench/updates/workloads.py`. The Grid scene covers unchanged recomputes, fitting and growing text, item order and placement, auto-flow, hiding, automatic-repeat template changes and viewport resizes across a repetition-count boundary. The CLI's root `"updates":{"iterations":N,"cycle":[steps]}` field applies one step before each timed `compute`; a step may replace the `viewport` and `set` a node's whole `style`, a text node's `text` or an element's `scrollOffset` (`Tree.setStyle`, `Tree.setText`, `Tree.setScrollOffset`). Benchmark output reports average work per compute: passes, full layouts, size probes, cache hits and reused layouts (`LayoutTree.stats`), plus provider measure/analyze/shape calls. The script also checks that geometry after the updates equals a fresh layout of the final document, so `scripts/check` runs it with two iterations as a cache-correctness gate.
 

@@ -16,3 +16,4 @@ import grid_alignment_tests
 import grid_baseline_tests
 import grid_absolute_tests
 import grid_geometry_tests
+import grid_positioned_tests

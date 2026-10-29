@@ -333,7 +333,7 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
   let mut input = Input.make(viewport)
   if positioned && parent != NO_NODE {
     let mut rect = containingRect(nodes, output, parent, viewport)
-    if GridPositioned.isContainer(nodes, parent) { rect = GridPositioned.containingRect(nodes, output, parent, id, rect, output.fragments.first(parent)) }
+    if GridPositioned.isContainer(nodes, parent) { rect = GridPositioned.containingRect(nodes, output, parent, id, rect, output.fragments.first(parent), false) }
     input.parent = OptionalSize.definite(rect.width, rect.height)
   } else if parent != NO_NODE {
     let rect = output.boxes[parent].contentRect()
@@ -636,7 +636,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   if gridContaining {
     let mut fragment = output.fragments.first(cb)
     if attached { fragment = containingExisting(nodes, &output, cb, output.frame) }
-    cbRect = GridPositioned.containingRect(nodes, &output, cb, id, cbRect, fragment)
+    cbRect = GridPositioned.containingRect(nodes, &output, cb, id, cbRect, fragment, fragmented && !attached)
   }
   let mut containing = viewport
   if cb != NO_NODE || fragmented { containing = OptionalSize.definite(cbRect.width, cbRect.height) }
@@ -1232,7 +1232,7 @@ effect fn frameContainingRect(nodes: &BoxTree, output: &LayoutPass, id: usize, c
     return rect.translated(Point { x: -shift.x, y: -shift.y })
   }
   let rect = output.fragments.values.get(parent).paddingRect.translated(fragmentPosition(output, parent, false))
-  if GridPositioned.isContainer(nodes, cb) { return GridPositioned.containingRect(nodes, output, cb, id, rect, parent) }
+  if GridPositioned.isContainer(nodes, cb) { return GridPositioned.containingRect(nodes, output, cb, id, rect, parent, false) }
   return rect
 }
 

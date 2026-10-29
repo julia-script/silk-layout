@@ -1,0 +1,321 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.collections.list { List }
+import silk.text.string { String }
+import silk.testing.testing { Testing, AssertionError }
+import geometry { Rect }
+import grid_absolute { GridGeometry, containingArea }
+import grid_lines { LineNames, prepareLineNames }
+import grid_style { GridLine, GridLineKind, GridPlacement, GridNamedLine, GridArea }
+import grid_tracks { TrackState }
+import style { Style, Direction, WritingMode, TextOrientation, Align }
+
+fn line(number: i32) -> GridLine {
+  return GridLine { kind: GridLineKind.Line, number: number, name: 0 }
+}
+
+fn track(start: f64, size: f64) -> TrackState {
+  let mut result = TrackState.fixed(size)
+  result.position = start
+  return result
+}
+
+fn same(actual: Rect, expected: Rect) -> bool {
+  return actual.x == expected.x && actual.y == expected.y && actual.width == expected.width
+    && actual.height == expected.height
+}
+
+effect fn capture(columns: &[TrackState], rows: &[TrackState]) -> GridGeometry
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  let mut result = GridGeometry.make()
+  let names = LineNames.make()
+  run result.columns.capture(columns, 0, columns.length, &names)
+  run result.rows.capture(rows, 0, rows.length, &names)
+  return move result
+}
+
+// Hand-derived areas use final track edges, not a constant-gap approximation.
+test effect fn absoluteAreaExcludesBoundaryGapsButIncludesInteriorGaps()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let columns: [TrackState; 4] = [
+    track(7.0, 20.0),
+    track(40.0, 30.0),
+    track(90.0, 15.0),
+    track(130.0, 10.0),
+  ]
+  let rows: [TrackState; 3] = [track(4.0, 10.0), track(22.0, 12.0), track(45.0, 8.0)]
+  let geometry = run capture(&columns, &rows) |> Effect.provideMut<Allocator>(&mut allocator)
+  let content = Rect { x: 100.0, y: 200.0, width: 160.0, height: 80.0 }
+  let padding = Rect { x: 95.0, y: 192.0, width: 172.0, height: 98.0 }
+  let placement = GridPlacement {
+    columnStart: line(2),
+    columnEnd: line(4),
+    rowStart: line(2),
+    rowEnd: line(3),
+  }
+
+  // Columns [40,105], row [22,34]: neither exterior gutter belongs to the area.
+  run Testing.expect(
+    same(
+      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      Rect { x: 140.0, y: 222.0, width: 65.0, height: 12.0 },
+    ),
+    "area edges face inward across gutters",
+  )
+}
+
+test effect fn absoluteAreaUsesSignedImplicitOriginAndExplicitNegativeLines()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let columns: [TrackState; 4] = [
+    track(-30.0, 10.0),
+    track(-12.0, 12.0),
+    track(8.0, 20.0),
+    track(36.0, 14.0),
+  ]
+  let rows: [TrackState; 1] = [track(6.0, 18.0)]
+  let mut geometry = run capture(&columns, &rows) |> Effect.provideMut<Allocator>(&mut allocator)
+  let names = LineNames.make()
+  run geometry.columns.capture(&columns, -2, 1, &names)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let content = Rect { x: 50.0, y: 70.0, width: 60.0, height: 40.0 }
+  let padding = Rect { x: 15.0, y: 65.0, width: 100.0, height: 50.0 }
+
+  // With one explicit track, -4 is logical line -2; positive 3 is logical line 2.
+  let placement = GridPlacement {
+    columnStart: line(-4),
+    columnEnd: line(3),
+    rowStart: line(1),
+    rowEnd: line(-1),
+  }
+  run Testing.expect(
+    same(
+      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      Rect { x: 20.0, y: 76.0, width: 80.0, height: 18.0 },
+    ),
+    "implicit endpoints index from signed origin, not explicit line one",
+  )
+}
+
+test effect fn absoluteAreaMixesAutoPaddingAndFinalTrackEdges()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let columns: [TrackState; 2] = [track(10.0, 20.0), track(45.0, 25.0)]
+  let rows: [TrackState; 2] = [track(5.0, 15.0), track(30.0, 10.0)]
+  let geometry = run capture(&columns, &rows) |> Effect.provideMut<Allocator>(&mut allocator)
+  let content = Rect { x: 20.0, y: 40.0, width: 100.0, height: 60.0 }
+  let padding = Rect { x: 13.0, y: 29.0, width: 116.0, height: 84.0 }
+  let placement = GridPlacement {
+    columnStart: line(2),
+    columnEnd: GridLine.auto(),
+    rowStart: GridLine.auto(),
+    rowEnd: line(2),
+  }
+
+  // Right is augmented padding 129; top is 29; definite bottom is 40+20.
+  run Testing.expect(
+    same(
+      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      Rect { x: 65.0, y: 29.0, width: 64.0, height: 31.0 },
+    ),
+    "auto contributes only its corresponding padding edge",
+  )
+  let missing = GridPlacement {
+    columnStart: line(-99),
+    columnEnd: line(2),
+    rowStart: line(2),
+    rowEnd: line(99),
+  }
+  run Testing.expect(
+    same(
+      containingArea(&Style.make(), &missing, &geometry, content, padding),
+      Rect { x: 13.0, y: 70.0, width: 37.0, height: 43.0 },
+    ),
+    "nonexistent lines become auto without creating geometry",
+  )
+}
+
+test effect fn absoluteAreaPreservesCollapsedAndOuterBoundaryLines()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut collapsed = track(20.0, 0.0)
+  collapsed.collapsed = true
+  let columns: [TrackState; 3] = [track(0.0, 20.0), collapsed, track(20.0, 30.0)]
+  let rows: [TrackState; 1] = [track(3.0, 12.0)]
+  let geometry = run capture(&columns, &rows) |> Effect.provideMut<Allocator>(&mut allocator)
+  let content = Rect { x: 10.0, y: 30.0, width: 80.0, height: 40.0 }
+  let padding = Rect { x: 5.0, y: 25.0, width: 90.0, height: 50.0 }
+  let placement = GridPlacement {
+    columnStart: line(2),
+    columnEnd: line(3),
+    rowStart: line(1),
+    rowEnd: line(2),
+  }
+  run Testing.expect(
+    same(
+      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      Rect { x: 30.0, y: 33.0, width: 0.0, height: 12.0 },
+    ),
+    "collapsed tracks preserve coincident distinct lines",
+  )
+  let outer = GridPlacement {
+    columnStart: line(4),
+    columnEnd: GridLine.auto(),
+    rowStart: GridLine.auto(),
+    rowEnd: line(1),
+  }
+  run Testing.expect(
+    same(
+      containingArea(&Style.make(), &outer, &geometry, content, padding),
+      Rect { x: 60.0, y: 25.0, width: 35.0, height: 8.0 },
+    ),
+    "last start and first end use existing outer track boundaries",
+  )
+}
+
+test effect fn absoluteAreaEmptyGridKeepsItsSingleContentBoundary()
+  ! AssertionError<'static> {
+  let geometry = GridGeometry.make()
+  let content = Rect { x: 20.0, y: 40.0, width: 100.0, height: 60.0 }
+  let padding = Rect { x: 13.0, y: 29.0, width: 116.0, height: 84.0 }
+  run Testing.expect(
+    same(
+      containingArea(&Style.make(), &GridPlacement.make(), &geometry, content, padding),
+      padding,
+    ),
+    "all-auto empty grid uses augmented padding",
+  )
+  let placement = GridPlacement {
+    columnStart: line(1),
+    columnEnd: line(1),
+    rowStart: GridLine.auto(),
+    rowEnd: line(-1),
+  }
+  let mut style = Style.make()
+  style.justifyContent = Align.End
+  style.alignContent = Align.Center
+
+  // Grid §11.5 keeps the sole line at start even with end/center alignment.
+  // Equal column endpoints discard the end. The only row boundary is at content start.
+  run Testing.expect(
+    same(
+      containingArea(&style, &placement, &geometry, content, padding),
+      Rect { x: 20.0, y: 29.0, width: 109.0, height: 11.0 },
+    ),
+    "empty explicit grid retains one line without indexing a track",
+  )
+}
+
+test effect fn absoluteAreaMapsFlowRelativeSidesToPhysicalRectangles()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let columns: [TrackState; 1] = [track(12.0, 25.0)]
+  let rows: [TrackState; 1] = [track(9.0, 16.0)]
+  let geometry = run capture(&columns, &rows) |> Effect.provideMut<Allocator>(&mut allocator)
+  let content = Rect { x: 100.0, y: 200.0, width: 120.0, height: 80.0 }
+  let padding = Rect { x: 93.0, y: 189.0, width: 140.0, height: 108.0 }
+  let placement = GridPlacement {
+    columnStart: line(1),
+    columnEnd: GridLine.auto(),
+    rowStart: GridLine.auto(),
+    rowEnd: line(2),
+  }
+
+  // Inline-start is 12 from its flow edge; block-end is 25 from its flow edge.
+  // Each row exercises a different mode/direction mapping; no expected values use the mapper.
+  let modes: [WritingMode; 6] = [
+    WritingMode.HorizontalTb,
+    WritingMode.VerticalRl,
+    WritingMode.VerticalLr,
+    WritingMode.SidewaysRl,
+    WritingMode.SidewaysLr,
+    WritingMode.SidewaysLr,
+  ]
+  let directions: [Direction; 6] = [
+    Direction.Rtl,
+    Direction.Rtl,
+    Direction.Ltr,
+    Direction.Ltr,
+    Direction.Ltr,
+    Direction.Rtl,
+  ]
+  let expected: [Rect; 6] = [
+    Rect { x: 93.0, y: 189.0, width: 115.0, height: 36.0 },
+    Rect { x: 195.0, y: 189.0, width: 38.0, height: 79.0 },
+    Rect { x: 93.0, y: 212.0, width: 32.0, height: 85.0 },
+    Rect { x: 195.0, y: 212.0, width: 38.0, height: 85.0 },
+    Rect { x: 93.0, y: 189.0, width: 32.0, height: 79.0 },
+    Rect { x: 93.0, y: 212.0, width: 32.0, height: 85.0 },
+  ]
+  let mut at: usize = 0
+  while at < modes.length {
+    let mut style = Style.make()
+    style.writingMode = modes[at]
+    style.direction = directions[at]
+    run Testing.expect(
+      same(containingArea(&style, &placement, &geometry, content, padding), expected[at]),
+      "grid lines follow container writing mode and direction, while padding stays physical",
+    )
+    at = at + 1
+  }
+  let mut upright = Style.make()
+  upright.writingMode = WritingMode.VerticalRl
+  upright.direction = Direction.Rtl
+  upright.textOrientation = TextOrientation.Upright
+  run Testing.expect(
+    same(
+      containingArea(&upright, &placement, &geometry, content, padding),
+      Rect { x: 195.0, y: 212.0, width: 38.0, height: 85.0 },
+    ),
+    "upright uses the container's used LTR direction",
+  )
+}
+
+test effect fn absoluteCaptureOwnsNamedEdgesAndReplacesRemovedGeometry()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut labels = List<String>.make()
+  let emptyName = run String.copy("") |> Effect.provideMut<Allocator>(&mut allocator)
+  let panelName = run String.copy("panel") |> Effect.provideMut<Allocator>(&mut allocator)
+  run labels.append(move emptyName) |> Effect.provideMut<Allocator>(&mut allocator)
+  run labels.append(move panelName) |> Effect.provideMut<Allocator>(&mut allocator)
+  let lines: [GridNamedLine; 0] = []
+  let areas: [GridArea; 1] = [
+    GridArea { name: 1, rowStart: 0, rowEnd: 1, columnStart: 1, columnEnd: 2 },
+  ]
+  let mut names = LineNames.make()
+  run prepareLineNames(&lines, &areas, labels.asSlice(), true, &mut names)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut columns: [TrackState; 3] = [track(5.0, 10.0), track(25.0, 20.0), track(60.0, 15.0)]
+  let rows: [TrackState; 0] = []
+  let mut geometry = run capture(&columns, &rows) |> Effect.provideMut<Allocator>(&mut allocator)
+  run geometry.columns.capture(&columns, 0, 3, &names)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  columns[1].position = 500.0
+  let noAreas: [GridArea; 0] = []
+  run prepareLineNames(&lines, &noAreas, labels.asSlice(), true, &mut names)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let named = GridLine { kind: GridLineKind.Line, number: 0, name: 1 }
+  let placement = GridPlacement {
+    columnStart: named,
+    columnEnd: named,
+    rowStart: GridLine.auto(),
+    rowEnd: GridLine.auto(),
+  }
+  let content = Rect { x: 10.0, y: 20.0, width: 100.0, height: 60.0 }
+  let padding = Rect { x: 7.0, y: 15.0, width: 108.0, height: 72.0 }
+  run Testing.expect(
+    same(
+      containingArea(&Style.make(), &placement, &geometry, content, padding),
+      Rect { x: 35.0, y: 15.0, width: 20.0, height: 72.0 },
+    ),
+    "retained edges and area aliases do not borrow source scratch",
+  )
+  run geometry.columns.capture(&rows, 0, 0, &names) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    same(containingArea(&Style.make(), &placement, &geometry, content, padding), padding),
+    "recapture removes old tracks and names rather than retaining stale placement",
+  )
+}

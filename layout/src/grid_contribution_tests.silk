@@ -72,8 +72,8 @@ impl Measure for ContributionMeasure {
   fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
     drop key
     provider.calls = provider.calls + 1
-    let mut width = 91.0
-    let mut height = 67.0
+    let mut width: f32 = 91.0
+    let mut height: f32 = 67.0
     if request.width.kind == AvailableKind.MinContent {
       width = 23.0
     }
@@ -131,7 +131,7 @@ effect fn check(
   input: Input,
   horizontal: bool,
   allowed: bool,
-  cap: f64,
+  cap: f32,
   expected: ItemContribution,
 )
   ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static>
@@ -144,8 +144,8 @@ effect fn checkWithOptions(
   input: Input,
   horizontal: bool,
   allowed: bool,
-  cap: f64,
-  crossCap: f64,
+  cap: f32,
+  crossCap: f32,
   minimumOnly: bool,
   expected: ItemContribution,
 )

@@ -166,15 +166,15 @@ pub fn nextRelaxation(relaxation: BreakRelaxation) -> BreakRelaxation {
 // fragmentainer, not its height or the previous fragment's remaining length.
 // Inputs are finite nonnegative layout extents. Track offsets and sizes with
 // separate progress values; completing one must not consume the other's share.
-pub struct FractionalProgress { pub remaining: f64, correction: f64 }
+pub struct FractionalProgress { pub remaining: f32, correction: f32 }
 impl Copy for FractionalProgress {}
 impl FractionalProgress {
   pub fn make() -> FractionalProgress { return FractionalProgress { remaining: 1.0, correction: 0.0 } }
-  pub fn resolve(self: &Self, extent: f64) -> f64 { return self.remaining * extent }
+  pub fn resolve(self: &Self, extent: f32) -> f32 { return self.remaining * extent }
 
   // Returns used space (at most available). A zero resolved extent completes
   // even when no space remains; it never divides by zero or skips a page.
-  pub fn consume(self: &mut Self, extent: f64, available: f64) -> f64 {
+  pub fn consume(self: &mut Self, extent: f32, available: f32) -> f32 {
     if extent == 0.0 || self.remaining == 0.0 {
       self.remaining = 0.0
       self.correction = 0.0

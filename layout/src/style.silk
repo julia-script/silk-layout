@@ -3,13 +3,13 @@ import silk.core.ownership { Copy }
 // Values have already passed CSS parsing and cascade. Percentages are fractions.
 // Keeping a percentage coefficient distinguishes 0% from 0px in indefinite axes.
 pub enum DimensionKind { Auto, Length, Percent, Calc, MinContent, MaxContent, FitContent, Content, None }
-pub struct Dimension { pub kind: DimensionKind, pub value: f64, pub percent: f64 }
+pub struct Dimension { pub kind: DimensionKind, pub value: f32, pub percent: f32 }
 impl Copy for Dimension {}
 impl Dimension {
   pub fn auto() -> Dimension { return Dimension { kind: DimensionKind.Auto, value: 0.0, percent: 0.0 } }
-  pub fn px(value: f64) -> Dimension { return Dimension { kind: DimensionKind.Length, value: value, percent: 0.0 } }
-  pub fn pct(value: f64) -> Dimension { return Dimension { kind: DimensionKind.Percent, value: 0.0, percent: value } }
-  pub fn calc(length: f64, percent: f64) -> Dimension { return Dimension { kind: DimensionKind.Calc, value: length, percent: percent } }
+  pub fn px(value: f32) -> Dimension { return Dimension { kind: DimensionKind.Length, value: value, percent: 0.0 } }
+  pub fn pct(value: f32) -> Dimension { return Dimension { kind: DimensionKind.Percent, value: 0.0, percent: value } }
+  pub fn calc(length: f32, percent: f32) -> Dimension { return Dimension { kind: DimensionKind.Calc, value: length, percent: percent } }
   pub fn keyword(kind: DimensionKind) -> Dimension { return Dimension { kind: kind, value: 0.0, percent: 0.0 } }
 }
 pub struct Edges { pub top: Dimension, pub right: Dimension, pub bottom: Dimension, pub left: Dimension }
@@ -81,7 +81,7 @@ pub enum Position { Static, Relative, Absolute, Fixed, Sticky }
 pub enum Float { None, Left, Right }
 pub enum Clear { None, Left, Right, Both }
 pub enum Visibility { Visible, Hidden, Collapse }
-pub union LineHeight { Normal, Number { pub value: f64 }, Length { pub value: f64 } }
+pub union LineHeight { Normal, Number { pub value: f32 }, Length { pub value: f32 } }
 impl Copy for LineHeight {}
 pub enum VerticalAlignKind { Baseline, Middle, TextTop, TextBottom, Top, Bottom, Sub, Super, Shift }
 pub struct VerticalAlign { pub kind: VerticalAlignKind, pub shift: Dimension }
@@ -91,7 +91,7 @@ pub enum TextAlign { Auto, Start, End, Left, Right, Center, Justify }
 pub enum TextJustify { Auto, None, InterWord, InterCharacter }
 pub enum TextWrap { Wrap, NoWrap }
 pub enum WhiteSpaceCollapse { Collapse, Discard, Preserve, PreserveBreaks, PreserveSpaces, BreakSpaces }
-pub union TabSize { Number { pub value: f64 }, Length { pub value: f64 } }
+pub union TabSize { Number { pub value: f32 }, Length { pub value: f32 } }
 impl Copy for TabSize {}
 pub struct TextIndent { pub value: Dimension, pub hanging: bool, pub eachLine: bool }
 impl Copy for TextIndent {}
@@ -121,7 +121,7 @@ pub struct Style {
   pub breakBefore: BreakBetween, pub breakAfter: BreakBetween, pub breakInside: BreakInside,
   pub orphans: usize, pub widows: usize,
   pub flexDirection: FlexDirection, pub flexWrap: FlexWrap,
-  pub flexGrow: f64, pub flexShrink: f64, pub flexBasis: Dimension,
+  pub flexGrow: f32, pub flexShrink: f32, pub flexBasis: Dimension,
   pub order: i32,
   pub justifyContent: Align, pub alignItems: Align, pub alignSelf: Align, pub alignContent: Align,
   pub justifySelf: Align, pub justifyItems: Align,
@@ -133,7 +133,7 @@ pub struct Style {
   pub scrollbarWidth: ScrollbarWidth, pub scrollbarGutter: ScrollbarGutter,
   pub position: Position, pub float: Float, pub clear: Clear,
   pub visibility: Visibility,
-  pub aspectRatio: f64, pub aspectRatioAuto: bool, pub replaced: bool,
+  pub aspectRatio: f32, pub aspectRatioAuto: bool, pub replaced: bool,
 }
 impl Style {
   // Upright changes used bidi direction, never the computed inherited value.

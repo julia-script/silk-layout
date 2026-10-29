@@ -140,20 +140,20 @@ pub struct TextShapeRequest<'tokens, 'text> {
   // Requested extra inline advance after line selection; zero means natural
   // shaping. Preserve content coverage and vertical metrics. If the line has
   // no eligible opportunities, return its natural advances for CSS fallback.
-  pub justificationSpace: f64,
+  pub justificationSpace: f32,
   // Visual hanging whitespace excluded from expansion on this selected line.
   pub hangingRanges: &'tokens [TextRange],
 }
 impl Copy for TextShapeRequest {}
 pub union TextRun {
   Text {
-    pub unit: usize, pub start: usize, pub end: usize, pub advance: f64,
+    pub unit: usize, pub start: usize, pub end: usize, pub advance: f32,
     pub fontKey: usize, pub bidiLevel: u8, pub shapeKey: usize
   },
   Object {
     pub unit: usize, pub bidiLevel: u8,
     // Additional spacing outside the atomic margin box, in visual line axes.
-    pub lineLeftSpacing: f64, pub lineRightSpacing: f64,
+    pub lineLeftSpacing: f32, pub lineRightSpacing: f32,
   }
 }
 impl Copy for TextRun {}

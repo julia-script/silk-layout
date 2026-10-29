@@ -10,7 +10,7 @@ import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensi
 import tree { Tree, LayoutTree, InvalidNode }
 import engine { compute }
 
-struct Host { horizontal: f64, vertical: f64 }
+struct Host { horizontal: f32, vertical: f32 }
 impl Measure for Host {
   fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
     drop provider

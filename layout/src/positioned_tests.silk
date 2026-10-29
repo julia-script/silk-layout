@@ -53,7 +53,7 @@ impl TextMeasure for EmptyMeasure {
     fail TextError { source: source, message: "box-only fixture does not support text" }
   }
 }
-effect fn near(actual: f64, expected: f64) ! AssertionError<'static> {
+effect fn near(actual: f32, expected: f32) ! AssertionError<'static> {
   run Testing.expect(abs(actual - expected) < 0.00001, "positioned consumer geometry follows the cited CSS clause")
 }
 enum Case { RowReverse, ReverseRtl, LogicalStart, VerticalRow, VerticalColumnReverse, Sideways, WrapReverse, SafeMain, UnsafeMain, SafeCross, DistributedOverflow, SelfStart, AutoMargins, NegativeRtlMargins, VerticalMargins, Overconstrained, VerticalOverconstrained, Relative, VerticalRelative, Fixed, InsetSelfAlignment, VerticalSelfAlignment, DefaultInsetSafety, UnsafeInsetSafety, StaticJustification, VerticalBlock }
@@ -68,8 +68,8 @@ effect fn scenario(case: Case) ! OutOfMemoryError | TextError | FragmentationErr
   child.position = Position.Absolute
   child.width = Dimension.px(40.0)
   child.height = Dimension.px(20.0)
-  let mut x = 0.0
-  let mut y = 0.0
+  let mut x: f32 = 0.0
+  let mut y: f32 = 0.0
   if case == Case.InsetSelfAlignment {
     // Position 3 §4.3: actual self alignment, not the parent's flex alignment.
     child.inset = Edges.all(Dimension.px(10.0))

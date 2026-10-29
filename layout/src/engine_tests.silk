@@ -13,7 +13,7 @@ import tree { Tree, LayoutTree, InvalidNode, NO_NODE }
 import engine { compute }
 import fragments { Fragment, FragmentKind }
 
-struct Content { minimum: f64, maximum: f64, height: f64 }
+struct Content { minimum: f32, maximum: f32, height: f32 }
 impl Measure for Content {
   fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
     drop provider
@@ -27,7 +27,7 @@ impl Measure for Content {
   }
   fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
     drop key
-    let mut ratio = 0.0
+    let mut ratio: f32 = 0.0
     if provider.height > 0.0 { ratio = provider.maximum / provider.height }
     return NaturalDimensions { size: OptionalSize.definite(provider.maximum, provider.height), aspectRatio: ratio }
   }
@@ -59,7 +59,7 @@ impl TextMeasure for Content {
   }
 }
 
-struct Paragraph { forced: bool, advance: f64, zeroHeight: bool, levelBoundary: bool }
+struct Paragraph { forced: bool, advance: f32, zeroHeight: bool, levelBoundary: bool }
 impl Measure for Paragraph {
   fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
     let mut font = FontMetrics.zero()
@@ -107,7 +107,7 @@ impl TextMeasure for Paragraph {
         if token.kind == TextTokenKind.Space { end = 1 }
         if unit == request.start.unit { start = request.start.offset }
         if unit == request.end.unit { end = request.end.offset }
-        let mut advance = usize.toF64(end - start) * provider.advance
+        let mut advance = usize.toF32(end - start) * provider.advance
         // This fixture's non-ASCII input consists of zero-width bidi controls.
         let bytes = String.utf8Bytes(token.text)
         if bytes.length != 0 && bytes[0] >= 0x80 { advance = 0.0 }
@@ -121,7 +121,7 @@ impl TextMeasure for Paragraph {
   }
 }
 
-struct TabFont { paragraph: Paragraph, spaceAdvance: f64, zeroAdvance: f64 }
+struct TabFont { paragraph: Paragraph, spaceAdvance: f32, zeroAdvance: f32 }
 impl Measure for TabFont {
   fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
     let mut metrics = Measure.font(&mut provider.paragraph, request)
@@ -215,7 +215,7 @@ impl TextMeasure for HyphenBidiText {
           let mut limit = end
           if boundary.unit == unit && boundary.offset < limit { limit = boundary.offset }
           let mut level = request.analysis.levelAt(cursor)
-          let mut advance = usize.toF64(limit - start) * 5.0
+          let mut advance = usize.toF32(limit - start) * 5.0
           if start == 0 && bytes[0] == 0xd7 { advance = 5.0 }
           if request.analysis.removedAt(cursor) {
             advance = 0.0

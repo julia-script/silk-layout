@@ -14,7 +14,7 @@ fn line(number: i32) -> GridLine {
   return GridLine { kind: GridLineKind.Line, number: number, name: 0 }
 }
 
-fn track(start: f64, size: f64) -> TrackState {
+fn track(start: f32, size: f32) -> TrackState {
   let mut result = TrackState.fixed(size)
   result.position = start
   return result

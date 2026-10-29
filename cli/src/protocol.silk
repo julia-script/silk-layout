@@ -1,3 +1,4 @@
+import silk.num.f64
 import silk.mem.box { Box }
 import silk.json.value { Json, Value, JsonChild }
 import silk.collections.list { List }
@@ -102,18 +103,18 @@ pub fn isNull(value: &Value) -> bool {
   }
 }
 
-pub effect fn number(value: &Value) -> f64 ! ProtocolError {
+pub effect fn number(value: &Value) -> f32 ! ProtocolError {
   return match move Json.asF64(Option<&Value>.some(value)) {
-    Option<f64>.Some { value: result } => result
+    Option<f64>.Some { value: result } => f64.toF32(result)
     Option<f64>.None => { fail invalid("expected a finite number") }
   }
 }
-pub effect fn finite(value: &Value) -> f64 ! ProtocolError {
+pub effect fn finite(value: &Value) -> f32 ! ProtocolError {
   let result = run number(value)
   if result - result != 0.0 { fail invalid("expected a finite number") }
   return result
 }
-pub effect fn nonnegative(value: &Value) -> f64 ! ProtocolError {
+pub effect fn nonnegative(value: &Value) -> f32 ! ProtocolError {
   let result = run finite(value)
   if result < 0.0 { fail invalid("expected a nonnegative number") }
   return result

@@ -42,24 +42,24 @@ fn axes(style: &Style) -> Axes {
   if style.flexWrap == FlexWrap.WrapReverse { crossReverse = !crossReverse }
   return Axes { horizontal: row != vertical, row: row, mainReverse: mainReverse, crossReverse: crossReverse, mainStartReverse: mainStartReverse, crossStartReverse: crossStartReverse }
 }
-fn axisSize(size: Size, horizontal: bool) -> f64 { if horizontal { return size.width }
+fn axisSize(size: Size, horizontal: bool) -> f32 { if horizontal { return size.width }
   return size.height }
-fn optionalSize(size: OptionalSize, horizontal: bool) -> f64 { if horizontal { return size.width }
+fn optionalSize(size: OptionalSize, horizontal: bool) -> f32 { if horizontal { return size.width }
   return size.height }
 fn definite(size: OptionalSize, horizontal: bool) -> bool { if horizontal { return size.widthDefinite }
   return size.heightDefinite }
 fn axisDimension(style: &Style, horizontal: bool) -> Dimension { if horizontal { return style.width }
   return style.height }
-fn edgeStart(edges: ResolvedEdges, horizontal: bool, reverse: bool) -> f64 {
+fn edgeStart(edges: ResolvedEdges, horizontal: bool, reverse: bool) -> f32 {
   if horizontal { if reverse { return edges.right }
     return edges.left }
   if reverse { return edges.bottom }
   return edges.top
 }
-fn edgeEnd(edges: ResolvedEdges, horizontal: bool, reverse: bool) -> f64 { return edgeStart(edges, horizontal, !reverse) }
-fn edgeTotal(edges: ResolvedEdges, horizontal: bool) -> f64 { if horizontal { return edges.horizontal() }
+fn edgeEnd(edges: ResolvedEdges, horizontal: bool, reverse: bool) -> f32 { return edgeStart(edges, horizontal, !reverse) }
+fn edgeTotal(edges: ResolvedEdges, horizontal: bool) -> f32 { if horizontal { return edges.horizontal() }
   return edges.vertical() }
-fn setEdge(edges: &mut ResolvedEdges, horizontal: bool, reverse: bool, value: f64) {
+fn setEdge(edges: &mut ResolvedEdges, horizontal: bool, reverse: bool, value: f32) {
   if horizontal {
     if reverse { edges.right = value } else { edges.left = value }
   } else {
@@ -72,7 +72,7 @@ fn autoMargin(style: &Style, horizontal: bool, reverse: bool) -> bool {
   if reverse { return style.margin.bottom.kind == DimensionKind.Auto }
   return style.margin.top.kind == DimensionKind.Auto
 }
-fn setKnown(input: &mut Input, horizontal: bool, value: f64) {
+fn setKnown(input: &mut Input, horizontal: bool, value: f32) {
   if horizontal { input.known.width = value
     input.known.widthDefinite = true } else { input.known.height = value
     input.known.heightDefinite = true }
@@ -88,7 +88,7 @@ fn alignment(style: &Style, parent: &Style) -> Align {
   if value == Align.Normal { value = Align.Stretch }
   return value
 }
-fn transfer(cross: f64, ratio: f64, horizontal: bool, insetMain: f64, insetCross: f64, borderBox: bool) -> f64 {
+fn transfer(cross: f32, ratio: f32, horizontal: bool, insetMain: f32, insetCross: f32, borderBox: bool) -> f32 {
   let mut value = cross
   if !borderBox { value = max(0.0, value - insetCross) }
   if horizontal { value = value * ratio } else { value = value / ratio }
@@ -106,16 +106,16 @@ fn blockReverse(style: &Style) -> bool {
   return style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
 }
 struct Item {
-  id: usize, base: f64, hypothetical: f64, target: f64, minimum: f64, maximum: f64, inset: f64,
-  grow: f64, shrink: f64, marginStart: f64, marginEnd: f64, crossStart: f64, crossEnd: f64,
-  cross: f64, crossMin: f64, crossMax: f64,
-  baseline: f64, lastBaseline: f64, violation: f64, strut: f64,
-  minContribution: f64, maxContribution: f64,
+  id: usize, base: f32, hypothetical: f32, target: f32, minimum: f32, maximum: f32, inset: f32,
+  grow: f32, shrink: f32, marginStart: f32, marginEnd: f32, crossStart: f32, crossEnd: f32,
+  cross: f32, crossMin: f32, crossMax: f32,
+  baseline: f32, lastBaseline: f32, violation: f32, strut: f32,
+  minContribution: f32, maxContribution: f32,
   // The cross size known before layout (§9.2 step 3B).
-  knownCross: f64,
+  knownCross: f32,
   // The preferred main size a pending automatic minimum depends on.
-  pendingPreferred: f64,
-  // Flags last so they pack without padding between the f64 fields.
+  pendingPreferred: f32,
+  // Flags last so they pack without padding between the f32 fields.
   align: Align,
   autoStart: bool, autoEnd: bool, autoCrossStart: bool, autoCrossEnd: bool, crossAuto: bool,
   baselineEligible: bool, baselineSizesLine: bool, baselineEnd: bool,
@@ -135,7 +135,7 @@ impl Item {
       knownCross: 0.0, knownCrossDefinite: false, minimumPending: false, pendingPreferred: 0.0 }
   }
 }
-struct Line { start: usize, end: usize, count: usize, cross: f64, baseline: f64, lastBaseline: f64, baselineCross: f64, lastBaselineCross: f64 }
+struct Line { start: usize, end: usize, count: usize, cross: f32, baseline: f32, lastBaseline: f32, baselineCross: f32, lastBaselineCross: f32 }
 impl Copy for Line {}
 // Whether any collected item has a nonzero order, so that sort can move it.
 // Reads the items' styles only without facts' itemFlags.
@@ -188,9 +188,9 @@ fn sort(items: &mut [Item], nodes: &BoxTree, count: usize) {
     index = index + 1
   }
 }
-struct Probe { size: Size, preferredRatio: f64, ratioBorderBox: bool }
+struct Probe { size: Size, preferredRatio: f32, ratioBorderBox: bool }
 impl Copy for Probe {}
-fn contribution(value: f64, preferred: f64, item: &Item) -> f64 {
+fn contribution(value: f32, preferred: f32, item: &Item) -> f32 {
   let mut result = max(value, preferred)
   if item.grow == 0.0 { result = min(result, item.base) }
   if item.shrink == 0.0 { result = max(result, item.base) }
@@ -207,7 +207,7 @@ fn blockAxisConstraint(style: &Style, horizontal: bool, constraint: AvailableSpa
   if isFlex(style) && style.flexWrap != FlexWrap.NoWrap && axes(style).horizontal != inlineHorizontal { return constraint }
   return AvailableSpace.maxContent()
 }
-effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f64) -> Probe ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f32) -> Probe ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   // A childless box without measured content.
   let shape = output.keyShape(id)
   if constraintFreeProbe(shape) {
@@ -237,7 +237,7 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sourc
   let layout = &output.boxes[id]
   return Probe { size: layout.size, preferredRatio: layout.preferredRatio, ratioBorderBox: layout.ratioBorderBox }
 }
-fn probeInput(childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f64) -> Input {
+fn probeInput(childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f32) -> Input {
   let mut input = childInput.*
   input.performLayout = false
   input.baselines = false
@@ -420,7 +420,7 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   }
   item.hypothetical = clamp(item.base, item.minimum, item.maximum)
   item.target = item.hypothetical
-  let mut preferredContribution = 0.0
+  let mut preferredContribution: f32 = 0.0
   if preferredDefinite { preferredContribution = preferredSize }
   if preferred.kind == DimensionKind.MinContent { preferredContribution = minContent }
   if preferred.kind == DimensionKind.MaxContent { preferredContribution = maxContent }
@@ -441,19 +441,19 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   item.maxContribution = contribution(maximumContributionSize, preferredContribution, &item.*)
 }
 fn active(item: &Item, collapsed: bool) -> bool { return !collapsed || !item.collapsed }
-fn gaps(count: usize, gap: f64) -> f64 { if count == 0 { return 0.0 }
-  return usize.toF64(count - 1) * gap }
-effect fn collectLines(items: &[Item], count: usize, lines: &mut List<Line>, main: f64, gap: f64, wrap: bool, collapsed: bool) ! OutOfMemoryError ? &mut Allocator {
+fn gaps(count: usize, gap: f32) -> f32 { if count == 0 { return 0.0 }
+  return usize.toF32(count - 1) * gap }
+effect fn collectLines(items: &[Item], count: usize, lines: &mut List<Line>, main: f32, gap: f32, wrap: bool, collapsed: bool) ! OutOfMemoryError ? &mut Allocator {
   lines.clear()
   let mut start: usize = 0
   let mut index: usize = 0
-  let mut used = 0.0
+  let mut used: f32 = 0.0
   let mut activeCount: usize = 0
   while index < count {
     let item = items[index]
     let present = active(&item, collapsed)
-    let mut outer = 0.0
-    let mut before = 0.0
+    let mut outer: f32 = 0.0
+    let mut before: f32 = 0.0
     if present { outer = item.hypothetical + item.marginStart + item.marginEnd
       if activeCount > 0 { before = gap } }
     // Collapsed items still collect as zero-sized items. Even zero does not
@@ -472,9 +472,9 @@ effect fn collectLines(items: &[Item], count: usize, lines: &mut List<Line>, mai
   if start < count { run lines.append(Line { start: start, end: count, count: activeCount, cross: 0.0, baseline: 0.0, lastBaseline: 0.0, baselineCross: 0.0, lastBaselineCross: 0.0 }) }
 }
 // Measures the automatic minimums prepare deferred, once a line shrinks.
-effect fn deferredMinimums<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: &Line, childInput: &Input, axis: &Axes, main: f64, gap: f64, collapsed: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn deferredMinimums<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &mut [Item], line: &Line, childInput: &Input, axis: &Axes, main: f32, gap: f32, collapsed: bool) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut pending = false
-  let mut hypothetical = 0.0
+  let mut hypothetical: f32 = 0.0
   let mut index = line.start
   while index < line.end {
     let item = &items[index]
@@ -502,9 +502,9 @@ effect fn deferredMinimums<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     index = index + 1
   }
 }
-fn resolveFlexible(items: &mut [Item], line: &Line, main: f64, gap: f64, collapsed: bool) {
+fn resolveFlexible(items: &mut [Item], line: &Line, main: f32, gap: f32, collapsed: bool) {
   let space = main - gaps(line.count, gap)
-  let mut hypothetical = 0.0
+  let mut hypothetical: f32 = 0.0
   let mut index = line.start
   while index < line.end { let item = items[index]
     if active(&item, collapsed) { hypothetical = hypothetical + item.hypothetical + item.marginStart + item.marginEnd }
@@ -528,8 +528,8 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f64, gap: f64, collaps
   }
   while true {
     let mut remaining = space
-    let mut factors = 0.0
-    let mut weights = 0.0
+    let mut factors: f32 = 0.0
+    let mut weights: f32 = 0.0
     let mut unfrozen: usize = 0
     index = line.start
     while index < line.end {
@@ -550,7 +550,7 @@ fn resolveFlexible(items: &mut [Item], line: &Line, main: f64, gap: f64, collaps
     }
     if unfrozen == 0 { break }
     if factors < 1.0 && abs(initial * factors) < abs(remaining) { remaining = initial * factors }
-    let mut violation = 0.0
+    let mut violation: f32 = 0.0
     index = line.start
     while index < line.end {
       let mut item = items[index]
@@ -610,7 +610,7 @@ fn physicalBaselines(layout: &Layout, style: &Style, containerMode: WritingMode,
   }
   return BaselineSet.synthesized(0.0, extent)
 }
-fn baselineDistance(layout: &Layout, style: &Style, containerMode: WritingMode, containerOrientation: TextOrientation, axis: &Axes, last: bool) -> f64 {
+fn baselineDistance(layout: &Layout, style: &Style, containerMode: WritingMode, containerOrientation: TextOrientation, axis: &Axes, last: bool) -> f32 {
   let baselines = physicalBaselines(&layout, style, containerMode, !axis.horizontal, last)
   let value = baselines.forContext(containerMode, containerOrientation)
   if axis.crossReverse { return axisSize(layout.size, !axis.horizontal) - value }
@@ -648,8 +648,8 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut lastSizingBefore = -UNBOUNDED
   let mut lastSizingAfter = -UNBOUNDED
   let contextMode = baselineMode(parentStyle, parentStyle.writingMode, !axis.horizontal)
-  let mut strut = 0.0
-  let mut mirrorOffset = 0.0
+  let mut strut: f32 = 0.0
+  let mut mirrorOffset: f32 = 0.0
   let mut hasMirrorOffset = false
   let mut index = line.start
   while index < line.end {
@@ -724,9 +724,9 @@ effect fn crossSizes<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   result.lastBaselineCross = max(0.0, lastBefore + lastAfter)
   return result
 }
-struct Distribution { offset: f64, between: f64 }
+struct Distribution { offset: f32, between: f32 }
 impl Copy for Distribution {}
-fn distribute(value: Align, free: f64, count: usize, safe: bool, reverse: bool, startReverse: bool, horizontal: bool) -> Distribution {
+fn distribute(value: Align, free: f32, count: usize, safe: bool, reverse: bool, startReverse: bool, horizontal: bool) -> Distribution {
   let mut align = value
   // Baseline content alignment outside a shared context falls back to safe
   // start/end (Align §4.2), including when wrap-reverse flips cross-start.
@@ -736,18 +736,18 @@ fn distribute(value: Align, free: f64, count: usize, safe: bool, reverse: bool, 
   if align == Align.SpaceBetween && (free < 0.0 || count <= 1) { align = Align.FlexStart }
   if (align == Align.SpaceAround || align == Align.SpaceEvenly) && (free < 0.0 || count == 0) { align = Align.Center
     if free < 0.0 { align = Align.Start } }
-  let mut offset = 0.0
-  let mut between = 0.0
+  let mut offset: f32 = 0.0
+  let mut between: f32 = 0.0
   if align == Align.Center { offset = free / 2.0 }
   else if align == Align.FlexEnd { offset = free }
   else if (align == Align.Start || align == Align.SelfStart) && reverse != startReverse { offset = free }
   else if (align == Align.End || align == Align.SelfEnd) && reverse == startReverse { offset = free }
   else if align == Align.Left && horizontal && reverse { offset = free }
   else if align == Align.Right && horizontal && !reverse { offset = free }
-  else if align == Align.SpaceBetween && count > 1 { between = free / usize.toF64(count - 1) }
-  else if align == Align.SpaceAround && count > 0 { between = free / usize.toF64(count)
+  else if align == Align.SpaceBetween && count > 1 { between = free / usize.toF32(count - 1) }
+  else if align == Align.SpaceAround && count > 0 { between = free / usize.toF32(count)
     offset = between / 2.0 }
-  else if align == Align.SpaceEvenly { between = free / usize.toF64(count + 1)
+  else if align == Align.SpaceEvenly { between = free / usize.toF32(count + 1)
     offset = between }
   return Distribution { offset: offset, between: between }
 }
@@ -767,7 +767,7 @@ effect fn zeroSubtree(nodes: &BoxTree, output: &mut LayoutPass, id: usize) ! Out
     child = nodes.node(child).nextSibling }
 }
 // Layout baselines use each node's logical block axis, not physical y.
-struct BaselinePick { chosen: usize, rank: usize, useLast: bool, position: f64 }
+struct BaselinePick { chosen: usize, rank: usize, useLast: bool, position: f32 }
 impl Copy for BaselinePick {}
 impl BaselinePick {
   fn none(last: bool) -> BaselinePick with Intrinsic.inlineAlways() { return BaselinePick { chosen: NO_NODE, rank: 0, useLast: last, position: 0.0 } }
@@ -775,7 +775,7 @@ impl BaselinePick {
 struct BaselinePicks { first: BaselinePick, last: BaselinePick }
 impl Copy for BaselinePicks {}
 
-fn considerBaseline(pick: &mut BaselinePick, item: &Item, child: &Layout, compatible: bool, position: f64, axis: &Axes, last: bool) with Intrinsic.inlineAlways() {
+fn considerBaseline(pick: &mut BaselinePick, item: &Item, child: &Layout, compatible: bool, position: f32, axis: &Axes, last: bool) with Intrinsic.inlineAlways() {
   let mut rank: usize = 1
   let mut useLast = last
   if axis.row {
@@ -1169,7 +1169,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
   // §9.9.2: wrapped columns use the largest item contribution as their
   // intrinsic cross constraint, rather than an unconstrained width per line.
   let columnIntrinsic = !axis.row && style.flexWrap != FlexWrap.NoWrap && !crossKnown && crossConstraint.kind != AvailableKind.Definite
-  let mut intrinsicCross = 0.0
+  let mut intrinsicCross: f32 = 0.0
   if columnIntrinsic {
     let mut crossIndex: usize = 0
     while crossIndex < count {
@@ -1198,10 +1198,10 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
     index = index + 1
   }
   if !mainKnown {
-    let mut contributionSum = 0.0
-    let mut largest = 0.0
-    let mut minimumSum = 0.0
-    let mut minimumLargest = 0.0
+    let mut contributionSum: f32 = 0.0
+    let mut largest: f32 = 0.0
+    let mut minimumSum: f32 = 0.0
+    let mut minimumLargest: f32 = 0.0
     let mut activeCount: usize = 0
     index = 0
     while index < count {
@@ -1264,7 +1264,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
       cross = max(0.0, clamp(intrinsicCross + crossInset, axisSize(box.min, !axis.horizontal), axisSize(box.max, !axis.horizontal)) - crossInset)
     }
     if (style.alignContent == Align.Stretch || style.alignContent == Align.Normal) && cross > totalCross && scratch.lines.length() > 0 {
-      let extra = (cross - totalCross) / usize.toF64(scratch.lines.length())
+      let extra = (cross - totalCross) / usize.toF32(scratch.lines.length())
       lineIndex = 0
       while lineIndex < scratch.lines.length() { let mut line = scratch.lines.get(lineIndex)
         line.cross = line.cross + extra
@@ -1312,7 +1312,7 @@ effect fn layoutFlexPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
 
 // An item's location within its container, with auto margins resolved
 // into usedMargin. cursor is the main position before the item's margin.
-fn itemLocation(nodes: &BoxTree, item: &Item, line: &Line, style: &Style, axis: &Axes, box: &ResolvedBox, size: Size, usedMargin: &mut ResolvedEdges, autoShare: f64, cursor: f64, crossCursor: f64, main: f64, cross: f64) -> Point {
+fn itemLocation(nodes: &BoxTree, item: &Item, line: &Line, style: &Style, axis: &Axes, box: &ResolvedBox, size: Size, usedMargin: &mut ResolvedEdges, autoShare: f32, cursor: f32, crossCursor: f32, main: f32, cross: f32) -> Point {
   let childCross = axisSize(size, !axis.horizontal)
   let crossOffset = fragmentCrossOffset(nodes, item, line, style, axis, childCross)
   if item.autoStart { setEdge(&mut usedMargin, axis.horizontal, axis.mainReverse, autoShare) }
@@ -1334,7 +1334,7 @@ fn itemLocation(nodes: &BoxTree, item: &Item, line: &Line, style: &Style, axis: 
 
 // layoutFlexPass's line and item placement, returning one local so the result
 // is built in the caller's slot.
-effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: &Axes, scratch: FlexScratch, main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: &Axes, scratch: FlexScratch, main: f32, cross: f32, mainGap: f32, crossGap: f32, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let items = scratch.items.asSlice()
   let lines = scratch.lines.asSlice()
   let style = nodes.style(id)
@@ -1383,8 +1383,8 @@ effect fn placeFlexLines<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTr
       }
       index = index + 1 }
     let mut free = main - used
-    let mut autoShare = 0.0
-    if free > 0.0 && autoCount > 0 { autoShare = free / usize.toF64(autoCount)
+    let mut autoShare: f32 = 0.0
+    if free > 0.0 && autoCount > 0 { autoShare = free / usize.toF32(autoCount)
       free = 0.0 }
     let distribution = distribute(style.justifyContent, free, line.count, style.justifyContentSafety == OverflowAlignment.Safe, axis.mainReverse, axis.mainStartReverse, axis.horizontal)
     let mut cursor = distribution.offset
@@ -1514,7 +1514,7 @@ fn fragmentItemInput(nodes: &BoxTree, item: Item, line: Line, childInput: &Input
 
 // Shared with continuous layout so fragmentation retains auto-margin,
 // self-alignment, and first/last-baseline sharing-group placement.
-fn fragmentCrossOffset(nodes: &BoxTree, item: &Item, line: &Line, style: &Style, axis: &Axes, childCross: f64) -> f64 {
+fn fragmentCrossOffset(nodes: &BoxTree, item: &Item, line: &Line, style: &Style, axis: &Axes, childCross: f32) -> f32 {
   let free = line.cross - childCross - item.crossStart - item.crossEnd
   let mut offset = item.crossStart
   if item.autoCrossStart || item.autoCrossEnd {
@@ -1547,9 +1547,9 @@ fn fragmentCrossOffset(nodes: &BoxTree, item: &Item, line: &Line, style: &Style,
   return offset
 }
 
-struct FragmentDistribution { alignment: Distribution, autoShare: f64 }
+struct FragmentDistribution { alignment: Distribution, autoShare: f32 }
 impl Copy for FragmentDistribution {}
-fn fragmentDistribution(items: &[Item], line: &Line, style: &Style, axis: &Axes, main: f64, gap: f64, collapsed: bool) -> FragmentDistribution {
+fn fragmentDistribution(items: &[Item], line: &Line, style: &Style, axis: &Axes, main: f32, gap: f32, collapsed: bool) -> FragmentDistribution {
   let mut used = gaps(line.count, gap)
   let mut autoCount: usize = 0
   let mut index = line.start
@@ -1563,13 +1563,13 @@ fn fragmentDistribution(items: &[Item], line: &Line, style: &Style, axis: &Axes,
     index = index + 1
   }
   let free = main - used
-  if free > 0.0 && autoCount > 0 { return FragmentDistribution { alignment: Distribution { offset: 0.0, between: 0.0 }, autoShare: free / usize.toF64(autoCount) } }
+  if free > 0.0 && autoCount > 0 { return FragmentDistribution { alignment: Distribution { offset: 0.0, between: 0.0 }, autoShare: free / usize.toF32(autoCount) } }
   return FragmentDistribution { alignment: distribute(style.justifyContent, free, line.count, style.justifyContentSafety == OverflowAlignment.Safe, axis.mainReverse, axis.mainStartReverse, axis.horizontal), autoShare: 0.0 }
 }
 
 // Record positive logical block offsets; the caller mirrors accepted fragments
 // after the current container fragment's extent is known.
-fn placeFragment(layout: &mut Layout, blockHorizontal: bool, position: f64, inlinePosition: f64) {
+fn placeFragment(layout: &mut Layout, blockHorizontal: bool, position: f32, inlinePosition: f32) {
   if blockHorizontal {
     layout.location.x = position
     layout.location.y = inlinePosition
@@ -1602,7 +1602,7 @@ effect fn discoverItemBefore<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
   run output.resumes.set(item.id, state)
 }
 
-effect fn layoutFlexFragment<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn layoutFlexFragment<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f32, cross: f32, mainGap: f32, crossGap: f32, collapsed: bool) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let blockHorizontal = output.frames.writingMode != WritingMode.HorizontalTb
   let reverse = blockReverseMode(output.frames.writingMode)
@@ -1694,7 +1694,7 @@ effect fn handleLineBefore(output: &mut LayoutPass, items: &[Item], line: Line) 
   }
 }
 
-effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f32, cross: f32, mainGap: f32, crossGap: f32, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let initial = output.resumes.get(id)
   let mut before = initial.before
@@ -1724,13 +1724,13 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   let capacity = max(0.0, input.fragmentation.limit - input.fragmentation.offset - opening - ending)
   let inlineInset = edgeStart(box.inset, !blockHorizontal, false)
   let avoidedInside = input.fragmentation.avoidInside || input.fragmentation.avoidsInside(style.breakInside)
-  let mut cursor = 0.0
+  let mut cursor: f32 = 0.0
   let mut requested = ForcedBreaks.none()
   let mut blocked = false
   let mut placed = false
   let mut waiting = false
   let mut fallback = output.checkpoint()
-  let mut fallbackCursor = 0.0
+  let mut fallbackCursor: f32 = 0.0
   let mut fallbackLine = nextLine
   let mut fallbackProgress = progress
   let mut fallbackGap = gap
@@ -1771,7 +1771,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
     let savedGap = gap
     if !overflowOnly {
       let mut spacing = lineDistribution.between
-      let mut gutter = 0.0
+      let mut gutter: f32 = 0.0
       if ordinal == 0 { spacing = leading }
       else if cursor > 0.0 && gap.remaining == 1.0 {
         // Gutters disappear at a fragmentation break; distributed alignment
@@ -1796,9 +1796,9 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
     let mut mainCursor = distribution.alignment.offset
     let between = distribution.alignment.between
     let autoShare = distribution.autoShare
-    let mut rowExtent = 0.0
-    let mut originalMarginExtent = 0.0
-    let mut explicitMarginExtent = 0.0
+    let mut rowExtent: f32 = 0.0
+    let mut originalMarginExtent: f32 = 0.0
+    let mut explicitMarginExtent: f32 = 0.0
     let mut explicitRowMargins = false
     let mut anyFit = false
     let mut anyReady = false
@@ -1834,7 +1834,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
           let mut authoredStart = item.crossStart
           if axis.crossReverse != reverse { authoredStart = item.crossEnd }
           if explicitMargins { aligned = aligned - authoredStart }
-          let mut blockMargin = 0.0
+          let mut blockMargin: f32 = 0.0
           if !old.started && !overflowOnly && old.notBeforeFrame <= output.frame {
             blockMargin = old.flexLeading.consume(aligned, max(0.0, capacity - rowStart))
             if explicitMargins && old.flexLeading.remaining == 0.0 {
@@ -1884,7 +1884,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
             let extent = axisSize(childLayout.size, blockHorizontal)
             anyFit = anyFit || extent > 0.0 || child.normalComplete
             if !overflowOnly && !old.normalComplete {
-              let mut trailing = 0.0
+              let mut trailing: f32 = 0.0
               if child.normalComplete { trailing = item.crossEnd
                 if axis.crossReverse != reverse { trailing = item.crossStart } }
               if explicitMargins && itemStyle.marginBreak == MarginBreak.Discard && (marginInput.marginEnd || rowStart + blockMargin + extent + trailing >= capacity) { trailing = 0.0 }
@@ -2020,7 +2020,7 @@ effect fn fragmentRows<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   }
 }
 
-effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f64, cross: f64, mainGap: f64, crossGap: f64, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, childInput: &Input, axis: Axes, items: &[Item], lines: &[Line], main: f32, cross: f32, mainGap: f32, crossGap: f32, collapsed: bool, blockHorizontal: bool, reverse: bool, result: &mut Layout) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let style = nodes.style(id)
   let initial = output.resumes.get(id)
   let firstItem = boundaryItemIndex(items, collapsed, true)
@@ -2037,7 +2037,7 @@ effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     lineIndex = lineIndex + 1 }
   let lineDistribution = distribute(style.alignContent, cross - totalCross, lines.length, style.alignContentSafety == OverflowAlignment.Safe, axis.crossReverse, axis.crossStartReverse, !axis.horizontal)
   let mut crossCursor = lineDistribution.offset
-  let mut extent = 0.0
+  let mut extent: f32 = 0.0
   let mut anyFit = false
   let mut blocked = false
   let mut waiting = false
@@ -2062,11 +2062,11 @@ effect fn fragmentColumns<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       leading = main - occupied - leading
     }
     let mut activeOrdinal: usize = 0
-    let mut cursor = 0.0
+    let mut cursor: f32 = 0.0
     let mut previous = BreakBoundary.none()
     let mut needsGap = false
     let mut fallback = output.checkpoint()
-    let mut fallbackCursor = 0.0
+    let mut fallbackCursor: f32 = 0.0
     let previousExtent = extent
     let mut ordinal: usize = 0
     while ordinal < line.end - line.start {

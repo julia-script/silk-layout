@@ -58,7 +58,7 @@ pub fn flowPosition(output: &LayoutPass, id: usize) -> Point {
   result.y = result.y + shift.y
   return result
 }
-pub fn blockStart(output: &LayoutPass, point: Point, size: Size) -> f64 {
+pub fn blockStart(output: &LayoutPass, point: Point, size: Size) -> f32 {
   if output.frames.writingMode == WritingMode.HorizontalTb { return point.y }
   if output.frames.writingMode == WritingMode.VerticalRl || output.frames.writingMode == WritingMode.SidewaysRl { return -point.x - size.width }
   return point.x

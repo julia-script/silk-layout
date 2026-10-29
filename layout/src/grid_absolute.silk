@@ -10,8 +10,8 @@ import grid_tracks { TrackState }
 import style { Style, Direction }
 
 pub struct TrackEdges {
-  pub start: f64,
-  pub end: f64
+  pub start: f32,
+  pub end: f32
 }
 
 impl Copy for TrackEdges {}
@@ -73,7 +73,7 @@ impl GridGeometry {
   }
 }
 
-fn lineEdge(axis: &GridAxisGeometry, line: i32, start: bool) -> f64 {
+fn lineEdge(axis: &GridAxisGeometry, line: i32, start: bool) -> f32 {
   let tracks = axis.tracks.asSlice()
 
   // Grid §11.5 explicitly fixes an empty grid's sole line at flow-start,
@@ -102,10 +102,10 @@ fn axisArea(
   axis: &GridAxisGeometry,
   start: &GridLine,
   end: &GridLine,
-  contentStart: f64,
-  contentSize: f64,
-  paddingStart: f64,
-  paddingSize: f64,
+  contentStart: f32,
+  contentSize: f32,
+  paddingStart: f32,
+  paddingSize: f32,
   reverse: bool,
 ) -> TrackEdges {
   let span = resolveAbsoluteSpan(

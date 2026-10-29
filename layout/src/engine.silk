@@ -1,7 +1,7 @@
 import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.num.usize
 import silk.core.effect { Effect }
-import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
+import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp, EMPTY_EXTENT }
 import style { Style, Display, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, FlexDirection, FlexWrap, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
 import context { Input, ResolvedBox, resolveBox, resolveBoxEdges, resolves, withGutter, scrollbarGutter, edges, isFlex, isGrid, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
@@ -92,7 +92,7 @@ fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: 
   if writingMode == WritingMode.VerticalLr || writingMode == WritingMode.SidewaysLr { baselineInset = box.inset.left }
   let mut contentBlockSize = max(0.0, layout.size.height - box.inset.vertical())
   if writingMode != WritingMode.HorizontalTb { contentBlockSize = max(0.0, layout.size.width - box.inset.horizontal()) }
-  let mut offset = 0.0
+  let mut offset: f32 = 0.0
   if !isFlex(nodes.style(id)) && !isGrid(nodes.style(id)) && !nodes.style(id).replaced {
     offset = blockContentOffset(nodes.style(id), contentBlockSize - result.contentBlockSize)
   }
@@ -208,7 +208,7 @@ fn replacedContents(style: &Style, input: &Input, box: &ResolvedBox, natural: Na
   return layoutReplaced(style, &input, &box, natural)
 }
 
-effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, natural: NaturalDimensions, horizontal: bool, minimum: bool) -> f64 ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, natural: NaturalDimensions, horizontal: bool, minimum: bool) -> f32 ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut request = input.*
   request.performLayout = false
   request.baselines = false
@@ -278,7 +278,7 @@ pub fn flowMarginRect(nodes: &BoxTree, id: usize, child: usize, layout: &Layout,
   return flowMarginIn(nodes, &FlowMargins.of(nodes.style(id), parent), child, layout)
 }
 // What flowMarginRect reads of the parent, worked out once for its children.
-struct FlowMargins { declared: bool, basis: f64, definite: bool }
+struct FlowMargins { declared: bool, basis: f32, definite: bool }
 impl FlowMargins {
   fn of(parentStyle: &Style, parent: &Layout) -> FlowMargins {
     let mut basis = parent.contentSize.width
@@ -307,7 +307,7 @@ fn padFlow(rect: Rect, padding: ResolvedEdges) -> Rect {
   return Rect { x: rect.x - padding.left, y: rect.y - padding.top, width: rect.width + padding.horizontal(), height: rect.height + padding.vertical() }
 }
 fn addFlow(base: Rect, rect: Rect, padding: ResolvedEdges, limits: ResolvedEdges) -> Rect {
-  if rect.width <= 0.0 || rect.height <= 0.0 || rect.x + rect.width <= limits.left || rect.x >= limits.right || rect.y + rect.height <= limits.top || rect.y >= limits.bottom { return base }
+  if rect.width < EMPTY_EXTENT || rect.height < EMPTY_EXTENT || rect.x + rect.width <= limits.left || rect.x >= limits.right || rect.y + rect.height <= limits.top || rect.y >= limits.bottom { return base }
   return addOverflow(base, padFlow(rect, padding), limits)
 }
 // Capture normal-flow extents before relative/sticky/scroll translations.
@@ -319,13 +319,13 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
   let measured = nodes.node(id).measurement == Measurement.Content || nodes.node(id).kind == BoxKind.InlineFormatting
   let grid = nodes.node(id).kind == BoxKind.Grid
   let external = result.scrollableOverflow
-  if (measured && external.width > 0.0 && external.height > 0.0)
-    || (grid && (external.width > 0.0 || external.height > 0.0)) { flow = flow.unionWith(external) }
+  if (measured && external.width >= EMPTY_EXTENT && external.height >= EMPTY_EXTENT)
+    || (grid && (external.width >= EMPTY_EXTENT || external.height >= EMPTY_EXTENT)) { flow = flow.unionWith(external) }
   let margins = FlowMargins.of(nodes.style(id), &result)
   let mut child = nodes.node(id).firstChild
   while child != NO_NODE {
     let rect = flowMarginIn(nodes, &margins, child, &output.boxes[child])
-    if rect.width > 0.0 && rect.height > 0.0 { flow = flow.unionWith(rect) }
+    if rect.width >= EMPTY_EXTENT && rect.height >= EMPTY_EXTENT { flow = flow.unionWith(rect) }
     child = nodes.node(child).nextSibling
   }
   flow = padFlow(flow, box.padding)
@@ -358,7 +358,7 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
   }
   let limits = reachableLimits(style, padding, flow, false)
   let mut overflow = padding
-  if grid && (external.width > 0.0 || external.height > 0.0) {
+  if grid && (external.width >= EMPTY_EXTENT || external.height >= EMPTY_EXTENT) {
     // Grid §5.3 includes tracks even when the other axis has no tracks.
     // Unlike border-box overflow, a zero-extent grid axis is not discarded.
     let tracks = padFlow(external, box.padding)
@@ -926,10 +926,10 @@ struct BoxSizing {
   box: ResolvedBox,
   request: Input,
   natural: NaturalDimensions,
-  ratio: f64,
+  ratio: f32,
   ratioBorder: bool,
-  ratioInsetWidth: f64,
-  ratioInsetHeight: f64,
+  ratioInsetWidth: f32,
+  ratioInsetHeight: f32,
 }
 
 // Whether prepareSizing's general path reduces to its plain branch for this box.
@@ -1387,7 +1387,7 @@ effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
     }
     run output.resumes.set(id, state)
     let delta = frameAxes.size(result.size).height - previousExtent
-    let mut alignment = 0.0
+    let mut alignment: f32 = 0.0
     if !monolithic && node.kind == BoxKind.Block && !wasNormalComplete {
       let content = max(0.0, frameAxes.size(result.size).height - frameAxes.box(sizing.box).inset.vertical())
       alignment = blockContentOffset(style, content - naturalContent)

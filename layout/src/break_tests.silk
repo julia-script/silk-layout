@@ -12,8 +12,8 @@ import fragments { FragmentArena, FragmentKind, TextFragment, TextFragmentKind }
 import layout_pass { LayoutPass }
 import tree { Node, NO_NODE }
 
-fn close(actual: f64, expected: f64) -> bool {
-  return actual > expected - 0.000001 && actual < expected + 0.000001
+fn close(actual: f32, expected: f32) -> bool {
+  return actual > expected - 0.0001 && actual < expected + 0.0001
 }
 
 test effect fn forcedKindsCombineWithoutErasingSide() ! AssertionError<'static> {

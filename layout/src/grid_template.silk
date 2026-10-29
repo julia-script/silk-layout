@@ -1,5 +1,5 @@
 import silk.mem.allocator { Allocator, OutOfMemoryError }
-import silk.num.f64
+import silk.num.f32
 import silk.collections.list { List }
 import silk.core.ownership { Copy }
 import silk.num.usize
@@ -42,9 +42,9 @@ impl ExpandedAxis {
 }
 
 pub struct RepeatSizing {
-  pub size: f64,
-  pub minimum: f64,
-  pub maximum: f64,
+  pub size: f32,
+  pub minimum: f32,
+  pub maximum: f32,
   pub definite: bool,
   pub gap: Dimension
 }
@@ -81,13 +81,13 @@ fn repetitions(repeat: &GridRepeat, automatic: usize) -> usize {
   return automatic
 }
 
-fn definiteBreadth(value: &GridBreadth, basis: f64) -> f64 {
+fn definiteBreadth(value: &GridBreadth, basis: f32) -> f32 {
   return max(0.0, value.length + value.percent * basis)
 }
 
 // Negative is the sentinel for neither track-sizing function being definite.
 // CSSWG #4480: a definite min/max constraint is not a percentage-track basis.
-fn countingSize(track: &GridTrack, basis: f64, definite: bool) -> f64 {
+fn countingSize(track: &GridTrack, basis: f32, definite: bool) -> f32 {
   let minimumDefinite = track.min.kind == GridBreadthKind.Length
     || (definite && track.min.isFixed())
   let maximumDefinite = track.max.kind == GridBreadthKind.Length
@@ -95,7 +95,7 @@ fn countingSize(track: &GridTrack, basis: f64, definite: bool) -> f64 {
   if !minimumDefinite && !maximumDefinite {
     return -1.0
   }
-  let mut size = 1.0
+  let mut size: f32 = 1.0
   if minimumDefinite {
     size = max(size, definiteBreadth(&track.min, basis))
   }
@@ -124,14 +124,14 @@ pub fn repeatCount(axis: &GridAxis, sizing: &RepeatSizing) -> usize {
       return 1
     }
   }
-  if !f64.isFinite(basis) || basis <= 0.0 {
+  if !f32.isFinite(basis) || basis <= 0.0 {
     return 1
   }
   let gap = max(0.0, resolve(sizing.gap, basis, sizing.definite, sizing.gap.value))
   let tracks = axis.tracks.asSlice()
   let repeats = axis.repeats.asSlice()
-  let mut fixedSize = 0.0
-  let mut automaticSize = 0.0
+  let mut fixedSize: f32 = 0.0
+  let mut automaticSize: f32 = 0.0
   let mut fixedTracks: usize = 0
   let mut automaticTracks: usize = 0
   let mut repeatIndex: usize = 0
@@ -156,7 +156,7 @@ pub fn repeatCount(axis: &GridAxis, sizing: &RepeatSizing) -> usize {
       automaticSize = automaticSize + size
       automaticTracks = automaticTracks + 1
     } else {
-      fixedSize = fixedSize + size * usize.toF64(count)
+      fixedSize = fixedSize + size * usize.toF32(count)
       fixedTracks = fixedTracks + count
     }
     index = index + 1
@@ -167,13 +167,13 @@ pub fn repeatCount(axis: &GridAxis, sizing: &RepeatSizing) -> usize {
   let mut first = fixedSize + automaticSize
   let gutters = fixedTracks + automaticTracks - 1
   if gutters != 0 {
-    first = first + gap * usize.toF64(gutters)
+    first = first + gap * usize.toF32(gutters)
   }
-  if !f64.isFinite(first) || basis <= first || limit == 1 {
+  if !f32.isFinite(first) || basis <= first || limit == 1 {
     return 1
   }
-  let step = automaticSize + gap * usize.toF64(automaticTracks)
-  if !f64.isFinite(step) {
+  let step = automaticSize + gap * usize.toF32(automaticTracks)
+  if !f32.isFinite(step) {
     if roundUp {
       return 2
     }
@@ -184,12 +184,12 @@ pub fn repeatCount(axis: &GridAxis, sizing: &RepeatSizing) -> usize {
   // Clamp before conversion, then compare actual extents at the boundary.
   // (21 - 2.1) / 2.1 rounds below 9 even though ten 2.1px tracks fit exactly.
   // No epsilon: a genuinely smaller constraint must still lose a repetition.
-  if !f64.isFinite(extra) || extra < 0.0 {
+  if !f32.isFinite(extra) || extra < 0.0 {
     return 1
   }
   let mut count = limit
-  if extra < usize.toF64(limit - 1) {
-    count = f64.toUsize(extra) + 1
+  if extra < usize.toF32(limit - 1) {
+    count = f32.toUsize(extra) + 1
   }
   if roundUp {
     if count < limit
@@ -218,15 +218,15 @@ pub fn repeatCount(axis: &GridAxis, sizing: &RepeatSizing) -> usize {
 }
 
 fn repeatedExtent(
-  fixed: f64,
-  automatic: f64,
+  fixed: f32,
+  automatic: f32,
   fixedTracks: usize,
   automaticTracks: usize,
-  gap: f64,
+  gap: f32,
   count: usize,
-) -> f64 with Intrinsic.inline() {
-  return fixed + automatic * usize.toF64(count)
-    + gap * usize.toF64(fixedTracks + automaticTracks * count - 1)
+) -> f32 with Intrinsic.inline() {
+  return fixed + automatic * usize.toF32(count)
+    + gap * usize.toF32(fixedTracks + automaticTracks * count - 1)
 }
 
 pub effect fn expandAxis(

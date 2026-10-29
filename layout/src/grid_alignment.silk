@@ -38,7 +38,7 @@ fn selfSafety(style: &Style, parent: &Style, inline: bool) -> OverflowAlignment 
   return style.alignSelfSafety
 }
 
-fn positionalOffset(value: Align, safety: OverflowAlignment, free: f64) -> f64 {
+fn positionalOffset(value: Align, safety: OverflowAlignment, free: f32) -> f32 {
   if free < 0.0 && safety == OverflowAlignment.Safe {
     return 0.0
   }
@@ -56,8 +56,8 @@ fn positionalOffset(value: Align, safety: OverflowAlignment, free: f64) -> f64 {
 // changed bases in grid_tracks. A rerun must call positionTracks first.
 pub fn alignTracks(
   tracks: &mut [TrackState],
-  used: f64,
-  extent: f64,
+  used: f32,
+  extent: f32,
   parent: &Style,
   columns: bool,
 ) {
@@ -99,8 +99,8 @@ pub fn alignTracks(
   }
   let distributed = value == Align.SpaceBetween || value == Align.SpaceAround
     || value == Align.SpaceEvenly
-  let mut offset = 0.0
-  let mut between = 0.0
+  let mut offset: f32 = 0.0
+  let mut between: f32 = 0.0
   if distributed {
     // Negative free space always uses the distribution's safe fallback.
     if free < 0.0 {
@@ -121,12 +121,12 @@ pub fn alignTracks(
       if count == 1 {
         return
       }
-      between = free / usize.toF64(count - 1)
+      between = free / usize.toF32(count - 1)
     } else if value == Align.SpaceAround {
-      between = free / usize.toF64(count)
+      between = free / usize.toF32(count)
       offset = between / 2.0
     } else {
-      between = free / usize.toF64(count + 1)
+      between = free / usize.toF32(count + 1)
       offset = between
     }
   } else {
@@ -144,7 +144,7 @@ pub fn alignTracks(
     return
   }
   let mut index: usize = 0
-  let mut liveBefore = 0.0
+  let mut liveBefore: f32 = 0.0
   let mut shift = offset
   while index < tracks.length {
     let track = &mut tracks[index]
@@ -179,7 +179,7 @@ pub fn oppositeSelfStart(style: &Style, parent: &Style, axis: &Axes, inline: boo
   return subjectInlineHigh != axis.reverseBlock
 }
 
-fn itemOffset(style: &Style, parent: &Style, axis: &Axes, inline: bool, free: f64) -> f64 {
+fn itemOffset(style: &Style, parent: &Style, axis: &Axes, inline: bool, free: f32) -> f32 {
   let mut value = selfAlignment(style, parent, inline)
   let mut safety = selfSafety(style, parent, inline)
   if value == Align.Baseline {
@@ -213,8 +213,8 @@ fn itemOffset(style: &Style, parent: &Style, axis: &Axes, inline: bool, free: f6
 
 pub struct ItemAlignment {
   pub margin: ResolvedEdges,
-  pub inlineShift: f64,
-  pub blockShift: f64,
+  pub inlineShift: f32,
+  pub blockShift: f32,
 }
 
 // Grid 2 §11.2: auto margins absorb positive space before self-alignment;
@@ -260,8 +260,8 @@ pub fn alignItem(
   }
   let inlineFree = area.width - size.width - margin.horizontal()
   let blockFree = area.height - size.height - margin.vertical()
-  let mut inlineShift = 0.0
-  let mut blockShift = 0.0
+  let mut inlineShift: f32 = 0.0
+  let mut blockShift: f32 = 0.0
   if inlineFree > 0.0 && (lowAuto || highAuto) {
     let mut share = inlineFree
     if lowAuto && highAuto {

@@ -51,22 +51,22 @@ impl Plan {
   }
 }
 pub struct Placement {
-  pub span: usize, pub x: f64, pub advance: f64, pub precedingReal: bool,
+  pub span: usize, pub x: f32, pub advance: f32, pub precedingReal: bool,
   anchor: usize, lowHead: usize, highHead: usize, next: usize, sourceOrder: usize,
   level: u8, part: usize, flow: bool, marker: bool,
-  low: f64, high: f64, outerStart: f64, outerEnd: f64,
+  low: f32, high: f32, outerStart: f32, outerEnd: f32,
 }
 impl Copy for Placement {}
 pub struct Span {
-  pub scope: usize, pub parent: usize, pub start: f64, pub end: f64,
+  pub scope: usize, pub parent: usize, pub start: f32, pub end: f32,
   pub lowEdge: bool, pub highEdge: bool, pub first: bool, pub last: bool,
   pub next: usize,
-  part: usize, firstLeaf: usize, lastLeaf: usize, sourceOrder: usize, low: f64, high: f64,
+  part: usize, firstLeaf: usize, lastLeaf: usize, sourceOrder: usize, low: f32, high: f32,
 }
 impl Copy for Span {}
 pub struct Line {
   pub active: bool, pub order: List<usize>, pub positions: List<Placement>,
-  pub spans: List<Span>, pub firstSpan: usize, pub advance: f64, pub real: bool,
+  pub spans: List<Span>, pub firstSpan: usize, pub advance: f32, pub real: bool,
 }
 impl Line {
   pub fn make() -> Self {
@@ -395,8 +395,8 @@ fn reorderPlacements(order: &mut List<usize>, positions: &[Placement]) {
   }
 }
 
-fn anchorDecoration(scopes: &[Scope], line: &Line, scope: usize, leaf: usize, low: bool) -> f64 {
-  let mut result = 0.0
+fn anchorDecoration(scopes: &[Scope], line: &Line, scope: usize, leaf: usize, low: bool) -> f32 {
+  let mut result: f32 = 0.0
   let mut span = line.positions.get(leaf).span
   while span != 0 {
     let value = line.spans.get(span)
@@ -429,7 +429,7 @@ effect fn positionAnchors(plan: &mut Plan, scopes: &[Scope], items: &[Item], lin
       // differ (e.g. a neutral between a number and an LRM). Shaping and tab
       // advances remain those of the actual line, as CSS2's approximation.
       index = 0
-      let mut cursor = 0.0
+      let mut cursor: f32 = 0.0
       while plan.visual.get(index) != anchor {
         cursor = cursor + line.positions.get(plan.visual.get(index)).advance
         index = index + 1
@@ -548,7 +548,7 @@ fn endSpan(nodes: &BoxTree, scopes: &[Scope], states: &[ScopeState], scope: usiz
   return states[scope].last
 }
 
-fn edgeBoundary(span: &Span, rtl: bool, opening: bool, preceding: f64) -> f64 {
+fn edgeBoundary(span: &Span, rtl: bool, opening: bool, preceding: f32) -> f32 {
   if opening {
     if rtl && span.high != 0.0 { return span.end - span.high }
     if !rtl && span.low != 0.0 { return span.start + span.low }
@@ -637,11 +637,11 @@ fn edgeHasInset(scopes: &[Scope], line: &Line, item: usize, high: bool) -> bool 
   return false
 }
 
-pub struct WhitespaceTail { pub advance: f64, pub items: usize }
+pub struct WhitespaceTail { pub advance: f32, pub items: usize }
 pub fn trailingWhitespace(nodes: &BoxTree, scopes: &[Scope], items: &[Item], context: TextContext, analysis: &TextAnalysis, line: &Line, rtl: bool) -> WhitespaceTail {
   let mut count = items.length
   if line.active { count = line.order.length() }
-  let mut total = 0.0
+  let mut total: f32 = 0.0
   let mut tail: usize = 0
   let mut index: usize = 0
   while index < count {
@@ -670,7 +670,7 @@ pub fn trailingWhitespace(nodes: &BoxTree, scopes: &[Scope], items: &[Item], con
   return WhitespaceTail { advance: total, items: tail }
 }
 
-fn resolveTabs(nodes: &BoxTree, scopes: &[Scope], items: &mut [Item], context: TextContext, line: &Line, origin: f64) -> f64 {
+fn resolveTabs(nodes: &BoxTree, scopes: &[Scope], items: &mut [Item], context: TextContext, line: &Line, origin: f32) -> f32 {
   let rtl = context.direction == Direction.Rtl
   let mut count = items.length
   if line.active { count = line.order.length() }
@@ -682,8 +682,8 @@ fn resolveTabs(nodes: &BoxTree, scopes: &[Scope], items: &mut [Item], context: T
     let mut itemIndex = ordered
     if line.active { itemIndex = line.order.get(ordered) }
     let item = items[itemIndex]
-    let mut low = 0.0
-    let mut high = 0.0
+    let mut low: f32 = 0.0
+    let mut high: f32 = 0.0
     let mut advance = item.advance
     if line.active {
       let placement = line.positions.get(itemIndex)
@@ -707,7 +707,7 @@ fn resolveTabs(nodes: &BoxTree, scopes: &[Scope], items: &mut [Item], context: T
   return cursor - origin
 }
 
-pub effect fn fit(plan: &mut Plan, nodes: &BoxTree, scopes: &[Scope], items: &mut [Item], context: TextContext, analysis: &TextAnalysis, start: TextCursor, end: TextCursor, tabs: bool, inlineOrigin: f64, output: &mut Line) ! OutOfMemoryError ? &mut Allocator {
+pub effect fn fit(plan: &mut Plan, nodes: &BoxTree, scopes: &[Scope], items: &mut [Item], context: TextContext, analysis: &TextAnalysis, start: TextCursor, end: TextCursor, tabs: bool, inlineOrigin: f32, output: &mut Line) ! OutOfMemoryError ? &mut Allocator {
   output.active = plan.active
   output.order.clear()
   output.positions.clear()
@@ -878,7 +878,7 @@ pub effect fn fit(plan: &mut Plan, nodes: &BoxTree, scopes: &[Scope], items: &mu
     index = index + 1
   }
   if tabs { drop resolveTabs(nodes, scopes, &mut items, context, &output, inlineOrigin) }
-  let mut cursor = 0.0
+  let mut cursor: f32 = 0.0
   index = 0
   while index < output.order.length() {
     let itemIndex = output.order.get(index)
@@ -923,7 +923,7 @@ pub effect fn fit(plan: &mut Plan, nodes: &BoxTree, scopes: &[Scope], items: &mu
       index = index + 1
     }
   }
-  let mut boundary = 0.0
+  let mut boundary: f32 = 0.0
   if analysis.paragraphAt(start).level % 2 == 1 { boundary = output.advance }
   let mut real = false
   index = 0

@@ -175,18 +175,18 @@ pub enum GridBreadthKind {
 
 pub struct GridBreadth {
   pub kind: GridBreadthKind,
-  pub length: f64,
-  pub percent: f64
+  pub length: f32,
+  pub percent: f32
 }
 
 impl Copy for GridBreadth {}
 
 impl GridBreadth {
-  pub fn fixed(value: f64) -> GridBreadth {
+  pub fn fixed(value: f32) -> GridBreadth {
     return GridBreadth { kind: GridBreadthKind.Length, length: value, percent: 0.0 }
   }
 
-  pub fn flex(value: f64) -> GridBreadth {
+  pub fn flex(value: f32) -> GridBreadth {
     return GridBreadth { kind: GridBreadthKind.Flex, length: value, percent: 0.0 }
   }
 

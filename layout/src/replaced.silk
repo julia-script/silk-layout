@@ -2,7 +2,7 @@ import geometry { NaturalDimensions, Layout, Size, AvailableKind, max, min, clam
 import style { Style, DimensionKind, BoxSizing, WritingMode }
 import context { Input, ResolvedBox }
 
-pub fn preferredRatio(style: &Style, natural: NaturalDimensions) -> f64 {
+pub fn preferredRatio(style: &Style, natural: NaturalDimensions) -> f32 {
   if style.aspectRatio > 0.0 && (!style.aspectRatioAuto || natural.aspectRatio <= 0.0) { return style.aspectRatio }
   return natural.aspectRatio
 }
@@ -12,7 +12,7 @@ pub fn borderRatio(style: &Style) -> bool {
 
 // CSS 2.1 §10.4: constrain both automatic dimensions together, preserving
 // their ratio unless opposing min/max constraints make that impossible.
-fn constrainPair(size: Size, minimum: Size, maximum: Size, ratio: f64) -> Size {
+fn constrainPair(size: Size, minimum: Size, maximum: Size, ratio: f32) -> Size {
   let maxWidth = max(minimum.width, maximum.width)
   let maxHeight = max(minimum.height, maximum.height)
   let w = size.width
@@ -45,8 +45,8 @@ pub fn layoutReplaced(style: &Style, input: &Input, box: &ResolvedBox, natural: 
   if border { ratioInsetWidth = 0.0
     ratioInsetHeight = 0.0 }
   let explicitRatio = style.aspectRatio > 0.0 && (!style.aspectRatioAuto || natural.aspectRatio <= 0.0)
-  let mut width = 300.0 + insetWidth
-  let mut height = 150.0 + insetHeight
+  let mut width: f32 = 300.0 + insetWidth
+  let mut height: f32 = 150.0 + insetHeight
   // Sizing 3 §5.1 gives dimensionless objects author-controlled fallback
   // intrinsic sizes. An absent dimension is distinct from a natural zero.
   if style.minWidth.kind == DimensionKind.Length { width = box.min.width }
@@ -83,7 +83,7 @@ pub fn layoutReplaced(style: &Style, input: &Input, box: &ResolvedBox, natural: 
           initialDefinite = input.initialContainingBlock.heightDefinite
           margin = box.margin.vertical()
         }
-        let mut inlineSize = 0.0
+        let mut inlineSize: f32 = 0.0
         if available.kind == AvailableKind.Definite { inlineSize = max(0.0, available.value - margin) }
         else if parentDefinite { inlineSize = max(0.0, parentSize - margin) }
         else if style.minWidth.kind == DimensionKind.Length || style.minHeight.kind == DimensionKind.Length {

@@ -2,7 +2,7 @@ import layout.lib { Size, Rect, Measure, MeasureRequest, Measured, NaturalDimens
 import silk.collections.list { List }
 import silk.core.ownership { Copy }
 import silk.json.value { Value }
-import silk.num.f64
+import silk.num.f32
 import protocol as P
 import protocol { ProtocolError }
 import layout.lib { TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun }
@@ -11,8 +11,8 @@ import text_profile as TextProfile
 
 // Opaque fixture boxes plus a bounded ASCII/control-character text service.
 pub struct Fixture {
-  pub minWidth: f64, pub maxWidth: f64, pub height: f64,
-  pub firstBaseline: f64, pub lastBaseline: f64, pub hasBaseline: bool,
+  pub minWidth: f32, pub maxWidth: f32, pub height: f32,
+  pub firstBaseline: f32, pub lastBaseline: f32, pub hasBaseline: bool,
   pub wrap: bool,
   pub hasLineBoxes: bool,
 }
@@ -80,8 +80,8 @@ pub effect fn parse(value: &Value) -> Fixture ! ProtocolError {
   if minimum > maximum { fail P.invalid("measure.minWidth exceeds maxWidth") }
   let firstPresent = P.has(value, "firstBaseline")
   let lastPresent = P.has(value, "lastBaseline")
-  let mut first = 0.0
-  let mut last = 0.0
+  let mut first: f32 = 0.0
+  let mut last: f32 = 0.0
   if firstPresent { first = run P.number(run P.required(value, "firstBaseline")) }
   if lastPresent { last = run P.number(run P.required(value, "lastBaseline")) }
   if firstPresent && !lastPresent { last = first }
@@ -111,28 +111,28 @@ pub effect fn parseNatural(value: &Value) -> NaturalDimensions ! ProtocolError {
   return natural
 }
 
-struct LineFlow { blockSize: f64, firstOffset: f64, lastOffset: f64, bounds: Rect }
+struct LineFlow { blockSize: f32, firstOffset: f32, lastOffset: f32, bounds: Rect }
 impl Copy for LineFlow {}
-fn includeLines(result: &mut LineFlow, first: bool, left: f64, right: f64, blockEnd: f64) {
+fn includeLines(result: &mut LineFlow, first: bool, left: f32, right: f32, blockEnd: f32) {
   if first {
     result.bounds = Rect { x: left, y: result.blockSize, width: right - left, height: blockEnd - result.blockSize }
   } else {
-    let end = f64.max(result.bounds.x + result.bounds.width, right)
-    result.bounds.x = f64.min(result.bounds.x, left)
+    let end = f32.max(result.bounds.x + result.bounds.width, right)
+    result.bounds.x = f32.min(result.bounds.x, left)
     result.bounds.width = end - result.bounds.x
-    result.bounds.height = f64.max(result.bounds.y + result.bounds.height, blockEnd) - result.bounds.y
+    result.bounds.height = f32.max(result.bounds.y + result.bounds.height, blockEnd) - result.bounds.y
   }
 }
-fn fixtureLines(request: &MeasureRequest, inlineSize: f64, contentInlineSize: f64, minimumInlineSize: f64, lineBlockSize: f64, overflowLineBlockSize: f64, wrap: bool) -> LineFlow {
+fn fixtureLines(request: &MeasureRequest, inlineSize: f32, contentInlineSize: f32, minimumInlineSize: f32, lineBlockSize: f32, overflowLineBlockSize: f32, wrap: bool) -> LineFlow {
   let mut result = LineFlow { blockSize: 0.0, firstOffset: 0.0, lastOffset: 0.0, bounds: Rect.zero() }
   let mut remaining = contentInlineSize
   let mut first = true
   let exclusionEnd = request.exclusionBlockEnd()
   while first || remaining > 0.0 {
     let mut minimum = remaining
-    if wrap { minimum = f64.min(remaining, minimumInlineSize) }
+    if wrap { minimum = f32.min(remaining, minimumInlineSize) }
     let mut available = inlineSize
-    let mut left = 0.0
+    let mut left: f32 = 0.0
     let mut right = inlineSize
     if result.blockSize < exclusionEnd {
       let mut band = request.lineSpace(inlineSize, result.blockSize, lineBlockSize)
@@ -140,7 +140,7 @@ fn fixtureLines(request: &MeasureRequest, inlineSize: f64, contentInlineSize: f6
         result.blockSize = band.nextBlockOffset
         band = request.lineSpace(inlineSize, result.blockSize, lineBlockSize)
       }
-      available = f64.max(0.0, band.lineRight - band.lineLeft)
+      available = f32.max(0.0, band.lineRight - band.lineLeft)
       left = band.lineLeft
       right = band.lineRight
     }
@@ -150,28 +150,28 @@ fn fixtureLines(request: &MeasureRequest, inlineSize: f64, contentInlineSize: f6
     first = false
     // After the last float, identical synthetic lines need no per-line loop.
     if !wrap || result.blockSize >= exclusionEnd || lineBlockSize == 0.0 {
-      let mut lines = 1.0
-      let capacity = f64.max(minimum, available)
-      if wrap && capacity > 0.0 { lines = f64.max(1.0, f64.ceil(remaining / capacity)) }
+      let mut lines: f32 = 1.0
+      let capacity = f32.max(minimum, available)
+      if wrap && capacity > 0.0 { lines = f32.max(1.0, f32.ceil(remaining / capacity)) }
       result.lastOffset = result.blockSize + (lines - 1.0) * lineBlockSize
       let mut content = remaining
       if wrap && lines > 1.0 { content = capacity }
       // Include both the whole line box and content extending past its edge.
-      if request.direction == Direction.Rtl { left = f64.min(left, right - content) }
-      else { right = f64.max(right, left + content) }
+      if request.direction == Direction.Rtl { left = f32.min(left, right - content) }
+      else { right = f32.max(right, left + content) }
       let blockEnd = result.lastOffset + overflowLineBlockSize
       includeLines(&mut result, isFirst, left, right, blockEnd)
       result.blockSize = result.blockSize + lines * lineBlockSize
       return result
     }
-    let mut consumed = f64.max(minimum, available)
+    let mut consumed = f32.max(minimum, available)
     if consumed <= 0.0 { consumed = remaining }
-    let content = f64.min(remaining, consumed)
-    if request.direction == Direction.Rtl { left = f64.min(left, right - content) }
-    else { right = f64.max(right, left + content) }
+    let content = f32.min(remaining, consumed)
+    if request.direction == Direction.Rtl { left = f32.min(left, right - content) }
+    else { right = f32.max(right, left + content) }
     let blockEnd = result.blockSize + overflowLineBlockSize
     includeLines(&mut result, isFirst, left, right, blockEnd)
-    remaining = f64.max(0.0, remaining - consumed)
+    remaining = f32.max(0.0, remaining - consumed)
     result.blockSize = result.blockSize + lineBlockSize
   }
   return result
@@ -193,8 +193,8 @@ impl Measure for Fixtures {
       if request.writingMode == WritingMode.HorizontalTb { width = width / 2.0 }
       else { height = height / 2.0 }
     }
-    if request.available.widthDefinite { metrics.vertical = f64.min(metrics.vertical, f64.max(0.0, width)) }
-    if request.available.heightDefinite { metrics.horizontal = f64.min(metrics.horizontal, f64.max(0.0, height)) }
+    if request.available.widthDefinite { metrics.vertical = f32.min(metrics.vertical, f32.max(0.0, width)) }
+    if request.available.heightDefinite { metrics.horizontal = f32.min(metrics.horizontal, f32.max(0.0, height)) }
     return metrics
   }
   fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
@@ -206,7 +206,7 @@ impl Measure for Fixtures {
     let mut width = fixture.maxWidth
     if request.width.kind == AvailableKind.MinContent { width = fixture.minWidth }
     if request.width.kind == AvailableKind.Definite {
-      width = f64.max(fixture.minWidth, f64.min(fixture.maxWidth, request.width.value))
+      width = f32.max(fixture.minWidth, f32.min(fixture.maxWidth, request.width.value))
     }
     let intrinsicWidth = width
     if request.known.widthDefinite { width = request.known.width }

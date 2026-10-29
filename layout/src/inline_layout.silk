@@ -47,7 +47,7 @@ fn fontBaselines(font: &FontBox, mode: WritingMode) -> BaselineSet {
   if mode == WritingMode.VerticalLr { return font.metrics.baselines.reversed(font.height) }
   return font.metrics.baselines
 }
-fn alignmentBaseline(baselines: &BaselineSet, style: &Style, parent: &Style) -> f64 {
+fn alignmentBaseline(baselines: &BaselineSet, style: &Style, parent: &Style) -> f32 {
   let kind = style.verticalAlign.kind
   if kind == VerticalAlignKind.Middle {
     if style.textOrientation == TextOrientation.Upright && style.usesCentralBaseline() { return baselines.central }
@@ -57,7 +57,7 @@ fn alignmentBaseline(baselines: &BaselineSet, style: &Style, parent: &Style) -> 
   if kind == VerticalAlignKind.TextBottom { return baselines.textUnder }
   return baselines.forContext(parent.writingMode, parent.textOrientation)
 }
-fn fontAlignmentOffset(font: &FontBox, style: &Style, parent: &Style) -> f64 {
+fn fontAlignmentOffset(font: &FontBox, style: &Style, parent: &Style) -> f32 {
   if style.verticalAlign.kind == VerticalAlignKind.Top || style.verticalAlign.kind == VerticalAlignKind.Bottom { return 0.0 }
   let mut baseline = alignmentBaseline(&font.metrics.baselines, style, parent)
   if parent.writingMode == WritingMode.VerticalLr { baseline = font.height - baseline }
@@ -71,22 +71,22 @@ fn lineAlignment(kind: VerticalAlignKind, mode: WritingMode) -> VerticalAlignKin
   }
   return kind
 }
-fn alignmentShift(style: &Style, lineHeight: f64, parent: &FontBox, mode: WritingMode) -> f64 {
+fn alignmentShift(style: &Style, lineHeight: f32, parent: &FontBox, mode: WritingMode) -> f32 {
   let kind = style.verticalAlign.kind
-  let mut over = -1.0
+  let mut over: f32 = -1.0
   if mode == WritingMode.VerticalLr { over = 1.0 }
   if kind == VerticalAlignKind.Shift { return over * resolve(style.verticalAlign.shift, lineHeight, true, 0.0) }
   if kind == VerticalAlignKind.Sub { return -over * parent.metrics.subscriptOffset }
   if kind == VerticalAlignKind.Super { return over * parent.metrics.superscriptOffset }
   return 0.0
 }
-fn atomicBaseline(style: &Style, layout: &Layout, axes: &Axes, margin: ResolvedEdges, parent: &Style) -> f64 {
+fn atomicBaseline(style: &Style, layout: &Layout, axes: &Axes, margin: ResolvedEdges, parent: &Style) -> f32 {
   let size = axes.size(layout.size)
   let childAxes = Axes.make(style.writingMode)
   let first = style.baselineSource == BaselineSource.First || (style.baselineSource == BaselineSource.Auto && (style.display.insideIs(DisplayInside.Flex) || style.display.insideIs(DisplayInside.Grid)))
   let available = (first && layout.hasFirstBaseline) || (!first && layout.hasLastBaseline)
   if childAxes.vertical == axes.vertical && available {
-    let mut baseline = 0.0
+    let mut baseline: f32 = 0.0
     if first { baseline = alignmentBaseline(&layout.firstBaselines, style, parent) }
     else { baseline = alignmentBaseline(&layout.lastBaselines, style, parent) }
     if childAxes.reverseBlock != axes.reverseBlock { baseline = size.height - baseline }
@@ -95,7 +95,7 @@ fn atomicBaseline(style: &Style, layout: &Layout, axes: &Axes, margin: ResolvedE
   return marginBaseline(style, size, axes.*, margin, parent)
 }
 
-fn marginBaseline(style: &Style, size: Size, axes: Axes, margin: ResolvedEdges, parent: &Style) -> f64 {
+fn marginBaseline(style: &Style, size: Size, axes: Axes, margin: ResolvedEdges, parent: &Style) -> f32 {
   let childAxes = Axes.make(style.writingMode)
   // Inline3 A.3 synthesizes absent atomic baselines from the used margin box.
   let mut reverseOver = parent.writingMode == WritingMode.VerticalLr
@@ -112,16 +112,16 @@ fn marginBaseline(style: &Style, size: Size, axes: Axes, margin: ResolvedEdges, 
 
 struct AtomicData {
   input: Input, size: Size, location: Point, margin: ResolvedEdges, deferred: bool, requested: ForcedBreaks,
-  usedTop: f64, usedBottom: f64, baseline: f64, baselineFromMargin: bool,
+  usedTop: f32, usedBottom: f32, baseline: f32, baselineFromMargin: bool,
 }
-struct Extent { alignment: VerticalAlignKind, active: bool, before: f64, after: f64, baseline: f64 }
+struct Extent { alignment: VerticalAlignKind, active: bool, before: f32, after: f32, baseline: f32 }
 impl Copy for Extent {}
 impl Extent {
   fn make(alignment: VerticalAlignKind) -> Extent {
     return Extent { alignment: alignment, active: false, before: 0.0, after: 0.0, baseline: 0.0 }
   }
 }
-fn include(extent: &mut Extent, before: f64, after: f64) {
+fn include(extent: &mut Extent, before: f32, after: f32) {
   if !extent.active { extent.before = before
     extent.after = after
     extent.active = true }
@@ -134,7 +134,7 @@ fn effectiveTextAlign(style: &Style, last: bool) -> TextAlign {
   if style.textAlign == TextAlign.Justify { return TextAlign.Start }
   return style.textAlign
 }
-fn lineOffset(style: &Style, direction: Direction, remaining: f64, last: bool) -> f64 {
+fn lineOffset(style: &Style, direction: Direction, remaining: f32, last: bool) -> f32 {
   // CSS Text §6.1: overfull lines overflow their end edge, irrespective of
   // the requested alignment or unexpandable-line fallback.
   if remaining < 0.0 {
@@ -154,14 +154,14 @@ fn lineOffset(style: &Style, direction: Direction, remaining: f64, last: bool) -
   return 0.0
 }
 
-fn lineIndent(style: &Style, firstFormatted: bool, firstLine: bool, afterForced: bool, width: f64) -> f64 {
+fn lineIndent(style: &Style, firstFormatted: bool, firstLine: bool, afterForced: bool, width: f32) -> f32 {
   let indent = style.textIndent
   let selected = (firstLine && (firstFormatted || indent.eachLine)) || (afterForced && indent.eachLine)
   if selected == indent.hanging { return 0.0 }
   return resolve(indent.value, width, true, 0.0)
 }
 
-fn indentBand(band: Band, indent: f64, rtl: bool) -> Band {
+fn indentBand(band: Band, indent: f32, rtl: bool) -> Band {
   let mut result = band
   if rtl {
     result.right = result.right - indent
@@ -237,7 +237,7 @@ effect fn collect<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'sou
   childInput.blockRoot = true
   childInput.shrinkToFit = true
   let layout = run layoutNode(nodes, &mut output, &mut measurer, id, &childInput)
-  let mut baseline = 0.0
+  let mut baseline: f32 = 0.0
   let mut baselineFromMargin = false
   if item.kind == ItemKind.Atomic {
     baseline = atomicBaseline(style, &layout, &axes, resolved.margin, parentStyle)
@@ -374,13 +374,13 @@ fn atomicLineMargins(nodes: &BoxTree, items: &mut [Item], atomics: &mut [AtomicD
   return metrics
 }
 
-struct Chunk { start: usize, end: usize, advance: f64, real: bool, breakBefore: bool }
+struct Chunk { start: usize, end: usize, advance: f32, real: bool, breakBefore: bool }
 impl Copy for Chunk {}
 struct LineBox {
-  start: usize, end: usize, y: f64, left: f64, width: f64, advance: f64, hangingStart: f64,
-  height: f64, baseline: f64, real: bool, last: bool, direction: Direction, visual: Line,
+  start: usize, end: usize, y: f32, left: f32, width: f32, advance: f32, hangingStart: f32,
+  height: f32, baseline: f32, real: bool, last: bool, direction: Direction, visual: Line,
 }
-struct Span { active: bool, next: usize, start: f64, end: f64, opened: bool, closed: bool, fragment: usize, origin: Point }
+struct Span { active: bool, next: usize, start: f32, end: f32, opened: bool, closed: bool, fragment: usize, origin: Point }
 impl Copy for Span {}
 impl Span {
   fn make(fragment: usize) -> Span {
@@ -415,13 +415,13 @@ fn boundaryScope(items: &[Item], scopes: &[Scope], at: usize) -> usize {
   if item.kind == ItemKind.Open { return scopes[item.scope].parent }
   return item.scope
 }
-fn cloneEdge(scope: Scope, leading: bool, rtl: bool) -> f64 {
+fn cloneEdge(scope: Scope, leading: bool, rtl: bool) -> f32 {
   if leading != rtl { return scope.inset.left + scope.margin.left }
   return scope.inset.right + scope.margin.right
 }
-fn continuationEdges(nodes: &BoxTree, items: &[Item], scopes: &[Scope], at: usize, leading: bool, rtl: bool) -> f64 {
+fn continuationEdges(nodes: &BoxTree, items: &[Item], scopes: &[Scope], at: usize, leading: bool, rtl: bool) -> f32 {
   let mut current = boundaryScope(items, scopes, at)
-  let mut size = 0.0
+  let mut size: f32 = 0.0
   while current != 0 {
     let scope = scopes[current]
     if nodes.style(scope.id).boxDecorationBreak == BoxDecorationBreak.Clone { size = size + cloneEdge(scope, leading, rtl) }
@@ -572,7 +572,7 @@ effect fn acknowledgeFloatBefore<'pass, 'source>(output: &mut LayoutPass<'pass, 
   }
 }
 
-fn floatRequest(atomic: &AtomicData, input: &Input, blockInset: f64) -> Input {
+fn floatRequest(atomic: &AtomicData, input: &Input, blockInset: f32) -> Input {
   let mut request = atomic.input
   request.performLayout = true
   request.fragmentation = input.fragmentation
@@ -586,7 +586,7 @@ fn floatRequest(atomic: &AtomicData, input: &Input, blockInset: f64) -> Input {
   return request
 }
 
-effect fn placeFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], visual: &Line, atomics: &mut [AtomicData], start: usize, end: usize, bfc: &mut BfcState, origin: Point, width: f64, sourceY: f64, lineHeight: f64, axes: Axes, leading: f64, input: &Input, blockInset: f64) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn placeFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, items: &[Item], visual: &Line, atomics: &mut [AtomicData], start: usize, end: usize, bfc: &mut BfcState, origin: Point, width: f32, sourceY: f32, lineHeight: f32, axes: Axes, leading: f32, input: &Input, blockInset: f32) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let fragmented = input.fragmentation.active && input.performLayout
   let mut advance = leading
   let mut index = start
@@ -669,7 +669,7 @@ effect fn placeFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<
   }
 }
 
-effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, item: Item, atomic: &AtomicData, input: &Input, blockInset: f64, parent: usize, point: Point, container: Size, axes: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, item: Item, atomic: &AtomicData, input: &Input, blockInset: f32, parent: usize, point: Point, container: Size, axes: Axes) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if atomic.deferred {
     if output.resumes.get(item.id).notBeforeFrame <= output.frame { run output.defer(item.id, atomic.requested) }
     run output.enqueuePending(owner, item.id)
@@ -696,7 +696,7 @@ effect fn emitFloat<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   output.closeCheckpoint(checkpoint)
 }
 
-effect fn fitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, original: &[Item], atomics: &mut [AtomicData], input: &Input, box: &ResolvedBox, bfc: &mut BfcState, width: f64, axes: Axes) -> bool ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn fitPendingFloats<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, owner: usize, original: &[Item], atomics: &mut [AtomicData], input: &Input, box: &ResolvedBox, bfc: &mut BfcState, width: f32, axes: Axes) -> bool ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut current = output.resumes.get(owner).pendingFirst
   let noVisual = Line.make()
   let mut progress = false
@@ -867,8 +867,8 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     return run layoutText(nodes, &mut output, &mut measurer, id, rootBidi, needsAnalysis, &input, &box, &mut bfc, items.asSlice(), &mut atomics, scopes.asSlice(), &mut extents)
   }
   let chunks = run chunksFor(nodes, items.asSlice(), scopes.asSlice())
-  let mut maximum = 0.0
-  let mut minimum = 0.0
+  let mut maximum: f32 = 0.0
+  let mut minimum: f32 = 0.0
   let mut firstIntrinsic = true
   let mut index: usize = 0
   while index < chunks.length() {
@@ -901,7 +901,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   else if available.kind == AvailableKind.Definite { width = max(0.0, available.value - box.inset.horizontal()) }
   let mut lines = List<LineBox>.make()
   let noVisual = Line.make()
-  let mut cursor = 0.0
+  let mut cursor: f32 = 0.0
   let mut next: usize = 0
   let mut allPhantom = true
   while next < chunks.length() {
@@ -911,7 +911,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     let leading = continuationEdges(nodes, items.asSlice(), scopes.asSlice(), start, true, rtl)
     let checkpoint = bfc.checkpoint()
     let sourceY = cursor
-    let mut advance = 0.0
+    let mut advance: f32 = 0.0
     let mut real = false
     let mut end = start
     let mut band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, 0.0), indent, rtl)
@@ -981,7 +981,7 @@ pub effect fn layoutInline<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   return result
 }
 
-fn cover(spans: &mut Spans, scopes: &[Scope], scope: usize, start: f64, end: f64) {
+fn cover(spans: &mut Spans, scopes: &[Scope], scope: usize, start: f32, end: f32) {
   if scope == 0 { return }
   cover(&mut spans, scopes, scopes[scope].parent, start, end)
   let values = spans.values.asMutSlice()
@@ -994,7 +994,7 @@ fn cover(spans: &mut Spans, scopes: &[Scope], scope: usize, start: f64, end: f64
   }
   values[scope].end = end
 }
-fn startClones(nodes: &BoxTree, scopes: &[Scope], spans: &mut Spans, current: usize, rtl: bool) -> f64 {
+fn startClones(nodes: &BoxTree, scopes: &[Scope], spans: &mut Spans, current: usize, rtl: bool) -> f32 {
   if current == 0 { return 0.0 }
   let scope = scopes[current]
   let start = startClones(nodes, scopes, &mut spans, scope.parent, rtl)
@@ -1025,8 +1025,8 @@ effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   spans.reset(lineId.index)
   let mut index: usize = 0
   let rtl = style.usedDirection() == Direction.Rtl
-  let mut leading = 0.0
-  let mut cursor = 0.0
+  let mut leading: f32 = 0.0
+  let mut cursor: f32 = 0.0
   if line.visual.active {
     while spans.values.length() < line.visual.spans.length() { run spans.values.append(Span.make(NO_NODE)) }
     spans.first = line.visual.firstSpan
@@ -1369,7 +1369,7 @@ fn runUnit(value: TextRun) -> usize {
 // Shapes [start, end) into `result`. Without a visual plan or tabs a range's
 // shaping does not depend on its inline origin, so each range is shaped once
 // and copied when a later line, probe or compute covers it again.
-effect fn shapeRange<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, analysis: &TextAnalysis, visualPlan: &mut Visual.Plan, shapeText: bool, original: &[Item], scopes: &[Scope], memo: &mut TextMemo, shaped: &mut List<TextRun>, result: &mut TextCandidate, start: TextCursor, end: TextCursor, hyphenated: bool, inlineOrigin: f64, reusable: bool, limit: usize) ! OutOfMemoryError | TextError ? &mut Allocator {
+effect fn shapeRange<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, analysis: &TextAnalysis, visualPlan: &mut Visual.Plan, shapeText: bool, original: &[Item], scopes: &[Scope], memo: &mut TextMemo, shaped: &mut List<TextRun>, result: &mut TextCandidate, start: TextCursor, end: TextCursor, hyphenated: bool, inlineOrigin: f32, reusable: bool, limit: usize) ! OutOfMemoryError | TextError ? &mut Allocator {
   if reusable && !hyphenated {
     let found = memo.segment(start, end)
     if found != NO_NODE {
@@ -1381,7 +1381,7 @@ effect fn shapeRange<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M
   if reusable && !hyphenated { run memo.addSegment(start, end, &result, limit) }
 }
 
-effect fn shapeCandidate<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, analysis: &TextAnalysis, visualPlan: &mut Visual.Plan, shapeText: bool, original: &[Item], scopes: &[Scope], fonts: &mut List<TextFont>, shaped: &mut List<TextRun>, result: &mut TextCandidate, start: TextCursor, end: TextCursor, hyphenated: bool, justificationSpace: f64, inlineOrigin: f64, hangingRanges: &[TextRange]) ! OutOfMemoryError | TextError ? &mut Allocator {
+effect fn shapeCandidate<M: Measure + TextMeasure>(nodes: &BoxTree, measurer: &mut M, context: TextContext, analysis: &TextAnalysis, visualPlan: &mut Visual.Plan, shapeText: bool, original: &[Item], scopes: &[Scope], fonts: &mut List<TextFont>, shaped: &mut List<TextRun>, result: &mut TextCandidate, start: TextCursor, end: TextCursor, hyphenated: bool, justificationSpace: f32, inlineOrigin: f32, hangingRanges: &[TextRange]) ! OutOfMemoryError | TextError ? &mut Allocator {
   result.items.clear()
   result.texts.clear()
   result.advance = 0.0
@@ -1605,7 +1605,7 @@ fn inlineBreakBoundary(items: &[Item], scopes: &[Scope], at: usize) -> usize {
   return result
 }
 
-fn textEdge(nodes: &BoxTree, items: &[Item], scopes: &[Scope], at: TextCursor, leading: bool, rtl: bool, visual: bool) -> f64 {
+fn textEdge(nodes: &BoxTree, items: &[Item], scopes: &[Scope], at: TextCursor, leading: bool, rtl: bool, visual: bool) -> f32 {
   if visual { return 0.0 }
   return continuationEdges(nodes, items, scopes, at.unit, leading, rtl)
 }
@@ -1713,8 +1713,8 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut hasFloats = false
   let mut hasText = false
   let mut hasAtomicMargins = false
-  let mut floatMaximum = 0.0
-  let mut floatMinimum = 0.0
+  let mut floatMaximum: f32 = 0.0
+  let mut floatMinimum: f32 = 0.0
   while index < normalized.origins.length() {
     let mut item = raw[normalized.origins.get(index)]
     item.start = TextCursor { unit: index, offset: 0 }
@@ -1814,7 +1814,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut hangingRanges = List<TextRange>.make()
   let mut available = input.availableWidth
   if axes.vertical { available = input.availableHeight }
-  let mut width = 0.0
+  let mut width: f32 = 0.0
   if box.size.widthDefinite { width = max(0.0, box.size.width - box.inset.horizontal()) }
   else if available.kind == AvailableKind.Definite { width = max(0.0, available.value - box.inset.horizontal()) }
   else {
@@ -1824,7 +1824,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     // CSS Sizing §5.1 defines intrinsic widths through shrink-to-fit. An
     // indent can make the all-breaks width exceed the no-soft-breaks width.
     let capMinimum = minimum && resolve(style.textIndent.value, 0.0, true, 0.0) != 0.0
-    let mut minimumWidth = 0.0
+    let mut minimumWidth: f32 = 0.0
     if remembered {
       width = memo.maxContent
       if minimum { width = memo.minContent }
@@ -1880,7 +1880,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
   let mut result = Layout.zero()
   result.collapsesThrough = true
   let baselineOffsets = fontBaselines(&scopes[0].font, style.writingMode).translated(-scopes[0].font.baseline)
-  let mut cursor = 0.0
+  let mut cursor: f32 = 0.0
   let mut next: usize = 0
   let mut start = TextCursor { unit: 0, offset: 0 }
   let mut lineDirection = style.usedDirection()
@@ -1996,7 +1996,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
     let sourceY = cursor
     let mut end = start
     let mut sourceEnding = false
-    let mut total = 0.0
+    let mut total: f32 = 0.0
     let mut lineClosed = false
     let mut band = indentBand(bfc.band(input.bfcContentOrigin, width, cursor, 0.0), indent, indentRtl)
     if memoFirst != NO_NODE {
@@ -2032,7 +2032,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         let point = points.get(probe)
         let mut endUnit = point.at.unit
         while endUnit > startUnit && context.tokens[endUnit - 1].kind == TextTokenKind.Space { endUnit = endUnit - 1 }
-        let mut estimate = 0.0
+        let mut estimate: f32 = 0.0
         if endUnit > startUnit { estimate = memo.prefix.get(endUnit) - memo.prefix.get(startUnit) }
         if probe > next && leading + estimate > room { break }
         guess = probe
@@ -2269,7 +2269,7 @@ effect fn layoutText<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'
         index = index + 1
       }
       run Visual.prepareEmission(&mut accepted.visual)
-      let mut hangingStart = 0.0
+      let mut hangingStart: f32 = 0.0
       if lineDirection == Direction.Rtl {
         hangingStart = max(0.0, leading + accepted.advance + textEdge(nodes, original.asSlice(), scopes, end, false, rtl, visualPlan.active) - total)
       }

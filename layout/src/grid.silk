@@ -117,7 +117,7 @@ fn itemInput(
 struct TrackPolicy {
   automatic: bool,
   fixed: bool,
-  cap: f64,
+  cap: f32,
   intrinsic: bool,
   needMin: bool,
   needMax: bool,
@@ -127,13 +127,13 @@ fn trackPolicy(
   tracks: &[TrackState],
   start: usize,
   end: usize,
-  gap: f64,
+  gap: f32,
   constraint: AvailableKind,
 ) -> TrackPolicy {
   let mut result = TrackPolicy {
     automatic: false,
     fixed: true,
-    cap: usize.toF64(end - start - 1) * gap,
+    cap: usize.toF32(end - start - 1) * gap,
     intrinsic: false,
     needMin: false,
     needMax: false,
@@ -172,18 +172,18 @@ struct AxisSizing {
   count: usize,
   definite: bool,
   baselineDefinite: bool,
-  size: f64,
-  minimum: f64,
-  maximum: f64,
+  size: f32,
+  minimum: f32,
+  maximum: f32,
   available: AvailableSpace,
   gap: Dimension,
-  usedGap: f64,
+  usedGap: f32,
   stretch: bool,
   resolveCyclic: bool,
   resolvedCyclic: bool,
 }
 
-fn gridSpace(definite: bool, size: f64, available: AvailableSpace) -> AvailableSpace {
+fn gridSpace(definite: bool, size: f32, available: AvailableSpace) -> AvailableSpace {
   if definite {
     return AvailableSpace.definite(size)
   }
@@ -347,7 +347,7 @@ effect fn finishTracks(
   own: &mut GridAxisScratch,
   sizing: &AxisSizing,
   work: &mut List<usize>,
-) -> f64
+) -> f32
   ! OutOfMemoryError
   ? &mut Allocator {
   let tracks = own.tracks.asMutSlice()
@@ -483,7 +483,7 @@ effect fn applyMinimum<'pass, 'source, M: Measure + TextMeasure>(
   id: usize,
   request: &mut Input,
   horizontal: bool,
-  minimum: f64,
+  minimum: f32,
 )
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
@@ -769,10 +769,10 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   let columns = lease.value.columns.tracks.asSlice()
   let rows = lease.value.rows.tracks.asSlice()
   let rtl = style.usedDirection() == Direction.Rtl
-  let mut gridInline = 0.0
-  let mut gridBlock = 0.0
-  let mut gridWidth = 0.0
-  let mut gridHeight = 0.0
+  let mut gridInline: f32 = 0.0
+  let mut gridBlock: f32 = 0.0
+  let mut gridWidth: f32 = 0.0
+  let mut gridHeight: f32 = 0.0
   if columns.length > 0 {
     gridInline = columns[0].position
     gridWidth = columns[columns.length - 1].position + columns[columns.length - 1].base - gridInline

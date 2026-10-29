@@ -11,8 +11,8 @@ import grid_alignment { selfAlignment, alignTracks, alignItem }
 test effect fn gridContentDistributionExpandsSpans()
   ! AssertionError<'static> {
   let values: [Align; 3] = [Align.SpaceBetween, Align.SpaceAround, Align.SpaceEvenly]
-  let offsets: [f64; 3] = [0.0, 20.0, 30.0]
-  let steps: [f64; 3] = [90.0, 70.0, 60.0]
+  let offsets: [f32; 3] = [0.0, 20.0, 30.0]
+  let steps: [f32; 3] = [90.0, 70.0, 60.0]
   let mut index: usize = 0
   while index < values.length {
     let mut parent = Style.make()
@@ -87,7 +87,7 @@ test effect fn gridContentCollapsedTracksCoincide()
 test effect fn gridContentDistributionFallbacks()
   ! AssertionError<'static> {
   let values: [Align; 3] = [Align.SpaceBetween, Align.SpaceAround, Align.SpaceEvenly]
-  let expected: [f64; 3] = [0.0, 30.0, 30.0]
+  let expected: [f32; 3] = [0.0, 30.0, 30.0]
   let mut index: usize = 0
   while index < values.length {
     let mut parent = Style.make()
@@ -119,7 +119,7 @@ test effect fn gridContentSafetyAndDirectionalEdges()
     OverflowAlignment.Safe,
     OverflowAlignment.Unsafe,
   ]
-  let centers: [f64; 3] = [-10.0, 0.0, -10.0]
+  let centers: [f32; 3] = [-10.0, 0.0, -10.0]
   let mut index: usize = 0
   while index < modes.length {
     let mut parent = Style.make()
@@ -264,11 +264,11 @@ test effect fn gridItemSelfAlignmentAllWritingModes()
           subjectInlineHigh = blockHigh[c]
           subjectBlockHigh = inlineHigh[c] != childRtl
         }
-        let mut inlineExpected = 0.0
+        let mut inlineExpected: f32 = 0.0
         if subjectInlineHigh != (inlineHigh[p] != parentRtl) {
           inlineExpected = 80.0
         }
-        let mut blockExpected = 0.0
+        let mut blockExpected: f32 = 0.0
         if subjectBlockHigh == blockHigh[p] {
           blockExpected = 60.0
         }
@@ -293,7 +293,7 @@ test effect fn gridItemSelfAlignmentAllWritingModes()
           Size { width: 20.0, height: 30.0 },
           ResolvedEdges.zero(),
         )
-        let mut leftExpected = 0.0
+        let mut leftExpected: f32 = 0.0
         if parentRtl {
           leftExpected = 80.0
         }

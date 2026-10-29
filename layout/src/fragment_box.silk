@@ -52,7 +52,7 @@ pub fn marginPolicy(style: &Style, frameMode: WritingMode) -> MarginBreak {
   return style.marginBreak
 }
 
-pub fn startMargin(style: &Style, value: f64, state: ResumeState, input: FragmentInput, frameMode: WritingMode) -> f64 {
+pub fn startMargin(style: &Style, value: f32, state: ResumeState, input: FragmentInput, frameMode: WritingMode) -> f32 {
   if !applies(style, frameMode) { return value }
   if state.normalComplete { return 0.0 }
   // Slice has no continuation edge. Keep cannot create a missing margin.
@@ -65,7 +65,7 @@ pub fn startMargin(style: &Style, value: f64, state: ResumeState, input: Fragmen
   return 0.0
 }
 
-pub fn endMargin(style: &Style, value: f64, complete: bool, contextEnd: bool, frameMode: WritingMode) -> f64 {
+pub fn endMargin(style: &Style, value: f32, complete: bool, contextEnd: bool, frameMode: WritingMode) -> f32 {
   if !applies(style, frameMode) { return value }
   if !complete {
     if style.boxDecorationBreak == BoxDecorationBreak.Clone && style.marginBreak == MarginBreak.Keep { return value }
@@ -129,7 +129,7 @@ pub fn finish(style: &Style, input: &Input, full: &ResolvedBox, current: &Resolv
   let fixed = original.size.heightDefinite && !input.fragmentation.flexAutoExtent
   let allottedMinimum = original.size.heightDefinite && input.fragmentation.flexAutoExtent
   let hadNormalEnd = state.normalComplete
-  let mut used = 0.0
+  let mut used: f32 = 0.0
   if !hadNormalEnd {
     let mut desired = natural
     if !state.normalContentComplete { desired = max(desired, available) }
@@ -137,7 +137,7 @@ pub fn finish(style: &Style, input: &Input, full: &ResolvedBox, current: &Resolv
     if allottedMinimum { desired = max(desired, state.size.resolve(fullSize)) }
     desired = clamp(desired, state.minimum.resolve(fullMin), state.maximum.resolve(fullMax))
     let avoid = input.fragmentation.avoidInside || input.fragmentation.avoidsInside(style.breakInside)
-    let mut ending = 0.0
+    let mut ending: f32 = 0.0
     if style.boxDecorationBreak == BoxDecorationBreak.Slice && !state.endDecorationDone { ending = original.inset.bottom }
     if input.fragmentation.canBreakBefore && avoid && input.fragmentation.relaxation != BreakRelaxation.Avoidance && desired + ending > available {
       state.blocked = true

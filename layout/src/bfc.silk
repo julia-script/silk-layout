@@ -7,13 +7,13 @@ import style { Float, Clear }
 
 // CSS 2.2 §§9.5–9.5.2: exclusions belong to a formatting context, not
 // an individual block. Coordinates are logical line/block axes at its root.
-pub struct FloatBox { pub side: Float, pub left: f64, pub right: f64, pub top: f64, pub bottom: f64 }
+pub struct FloatBox { pub side: Float, pub left: f32, pub right: f32, pub top: f32, pub bottom: f32 }
 impl Copy for FloatBox {}
-pub struct Band { pub left: f64, pub right: f64, pub nextBottom: f64, pub occupied: bool }
+pub struct Band { pub left: f32, pub right: f32, pub nextBottom: f32, pub occupied: bool }
 impl Copy for Band {}
-pub struct Checkpoint { pub count: usize, pub sourceFloor: f64, leftDeferred: bool, rightDeferred: bool, pendingFloat: bool }
+pub struct Checkpoint { pub count: usize, pub sourceFloor: f32, leftDeferred: bool, rightDeferred: bool, pendingFloat: bool }
 impl Copy for Checkpoint {}
-pub struct BfcState { floats: List<FloatBox>, pub count: usize, pub sourceFloor: f64, leftDeferred: bool, rightDeferred: bool, pub pendingFloat: bool }
+pub struct BfcState { floats: List<FloatBox>, pub count: usize, pub sourceFloor: f32, leftDeferred: bool, rightDeferred: bool, pub pendingFloat: bool }
 impl BfcState {
   pub fn make() -> BfcState { return BfcState { floats: List<FloatBox>.make(), count: 0, sourceFloor: 0.0, leftDeferred: false, rightDeferred: false, pendingFloat: false } }
   pub fn checkpoint(self: &Self) -> Checkpoint { return Checkpoint { count: self.count, sourceFloor: self.sourceFloor, leftDeferred: self.leftDeferred, rightDeferred: self.rightDeferred, pendingFloat: self.pendingFloat } }
@@ -40,7 +40,7 @@ impl BfcState {
     }
   }
   // No exclusions extend below `top`, and none are deferred or pending.
-  pub fn clearBelow(self: &Self, top: f64) -> bool {
+  pub fn clearBelow(self: &Self, top: f32) -> bool {
     if self.leftDeferred || self.rightDeferred || self.pendingFloat { return false }
     let mut index: usize = 0
     while index < self.count {
@@ -75,7 +75,7 @@ impl BfcState {
     }
     self.sourceFloor = max(checkpoint.sourceFloor, self.sourceFloor + offset.y)
   }
-  pub fn clearFloor(self: &Self, clear: Clear, fallback: f64) -> f64 {
+  pub fn clearFloor(self: &Self, clear: Clear, fallback: f32) -> f32 {
     let mut floor = fallback
     let mut index: usize = 0
     while index < self.count {
@@ -85,8 +85,8 @@ impl BfcState {
     }
     return floor
   }
-  pub fn band(self: &Self, origin: Point, width: f64, y: f64, height: f64) -> Band {
-    let mut band = Band { left: 0.0, right: width, nextBottom: 1.0e100, occupied: false }
+  pub fn band(self: &Self, origin: Point, width: f32, y: f32, height: f32) -> Band {
+    let mut band = Band { left: 0.0, right: width, nextBottom: 1.0e30, occupied: false }
     let mut index: usize = 0
     while index < self.count {
       let item = self.floats.get(index)
@@ -102,8 +102,8 @@ impl BfcState {
     }
     return band
   }
-  pub fn bottom(self: &Self, origin: Point) -> f64 {
-    let mut bottom = 0.0
+  pub fn bottom(self: &Self, origin: Point) -> f32 {
+    let mut bottom: f32 = 0.0
     let mut index: usize = 0
     while index < self.count {
       bottom = max(bottom, self.floats.get(index).bottom - origin.y)

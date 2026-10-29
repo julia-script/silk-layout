@@ -1,7 +1,7 @@
 import layout.lib { Style, Dimension, DimensionKind, Edges, Display, DisplayOutside, DisplayInside, BoxSizing, Direction, UnicodeBidi, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, Overflow, ScrollbarWidth, ScrollbarGutter, Position, Float, Clear, Visibility }
 import layout.lib { LineHeight, VerticalAlign, VerticalAlignKind, BaselineSource, TextAlign, TextJustify, TextIndent, TextWrap, WhiteSpaceCollapse, TabSize, BoxDecorationBreak }
 import layout.lib { BreakBetween, BreakInside, MarginBreak }
-import silk.num.f64
+import silk.num.f32
 import silk.option { Option }
 import silk.num.i32
 import silk.json.value { Value }
@@ -374,10 +374,10 @@ effect fn parseBreakInside(value: &Value) -> BreakInside ! ProtocolError {
 
 effect fn parseLineCount(value: &Value) -> usize ! ProtocolError {
   let count = run P.finite(value)
-  if count <= 0.0 || f64.trunc(count) != count {
+  if count <= 0.0 || f32.trunc(count) != count {
     fail P.invalid("orphans and widows must be positive integers")
   }
-  return match move f64.checkedToUsize(count) {
+  return match move f32.checkedToUsize(count) {
     Option<usize>.Some { value: result } => result
     Option<usize>.None => { fail P.invalid("orphans or widows exceeds usize range") }
   }

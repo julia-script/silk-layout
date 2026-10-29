@@ -146,10 +146,10 @@ fn absoluteStyle() -> Style {
 effect fn tracks(
   tree: &mut Tree,
   owner: NodeId,
-  firstColumn: f64,
-  secondColumn: f64,
-  firstRow: f64,
-  secondRow: f64,
+  firstColumn: f32,
+  secondColumn: f32,
+  firstRow: f32,
+  secondRow: f32,
 )
   ! OutOfMemoryError | InvalidNode | GridError
   ? &mut Allocator {
@@ -182,10 +182,10 @@ effect fn layout(tree: &Tree, output: &mut LayoutTree)
 effect fn expectRect(
   output: &mut LayoutTree,
   source: NodeId,
-  x: f64,
-  y: f64,
-  width: f64,
-  height: f64,
+  x: f32,
+  y: f32,
+  width: f32,
+  height: f32,
 )
   ! InvalidNode | AssertionError<'static> {
   let actual = run output.sourceBounds(source)

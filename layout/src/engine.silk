@@ -4,7 +4,7 @@ import silk.effect { Effect }
 import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
 import style { Style, Display, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, FlexDirection, FlexWrap, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
-import context { Input, ResolvedBox, resolveBox, resolves, withGutter, scrollbarGutter, edges, isFlex, isGrid, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
+import context { Input, ResolvedBox, resolveBox, resolveBoxEdges, resolves, withGutter, scrollbarGutter, edges, isFlex, isGrid, outOfFlow, establishesContext, selfCollapsingSize, scrollable, overflowForAxis, usedOverflowForAxis, blockContentOffset, effectiveDisplay, blockJustification, UNBOUNDED }
 import block { layoutBlock, leafBlockInto }
 import flex { layoutFlex, emptyFlexSize, FlexScratch }
 import grid_scratch { GridScratchPool }
@@ -438,6 +438,9 @@ const KEY_CONTENT_FREE_TREE: u16 = 8192
 // The parts of emptyBoxApplies that depend only on the box and its
 // children; see plainEmptyShape.
 const KEY_EMPTY_PLAIN: u16 = 16384
+// Every margin, padding and border edge has zero value and percent, so
+// resolveBoxEdges can skip them.
+const KEY_ZERO_EDGES: u16 = 32768
 
 fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   let node = nodes.node(id)
@@ -446,6 +449,7 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   let noInFlow = noInFlowChildren(nodes, id)
   let mut shape: u16 = 0
   if noInFlow && plainEmptyShape(style, node) { shape = KEY_EMPTY_PLAIN }
+  if zeroEdges(&style.margin) && zeroEdges(&style.padding) && zeroEdges(&style.border) { shape = shape | KEY_ZERO_EDGES }
   // Empty grids can still have different min/max-content track sizes (§5.2).
   if node.measurement == Measurement.None && node.kind != BoxKind.Text && node.kind != BoxKind.Grid && noInFlow { shape = shape | KEY_EMPTY }
   if style.width.kind == DimensionKind.Length { shape = shape | KEY_WIDTH_LENGTH }
@@ -461,6 +465,15 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
     if !isFlex(style) || style.flexWrap == FlexWrap.NoWrap { shape = shape | KEY_CONTENT_FREE }
   }
   return shape
+}
+
+fn zeroEdges(value: &Edges) -> bool {
+  return value.top.value == 0.0 && value.top.percent == 0.0 && value.right.value == 0.0 && value.right.percent == 0.0
+    && value.bottom.value == 0.0 && value.bottom.percent == 0.0 && value.left.value == 0.0 && value.left.percent == 0.0
+}
+// resolveBox for box `id`, skipping its edges when its key shape says they are zero.
+pub fn shapedBox(output: &LayoutPass, style: &Style, id: usize, input: &Input) -> ResolvedBox with Intrinsic.inlineAlways() {
+  return resolveBoxEdges(style, input, output.keyShape(id) & KEY_ZERO_EDGES != 0)
 }
 
 // Sets KEY_WIDTH_FREE_TREE and KEY_CONTENT_FREE_TREE on boxes whose whole
@@ -739,7 +752,7 @@ fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut Resolv
 pub fn sizeEmptyBox(nodes: &BoxTree, shape: u16, id: usize, input: &Input, result: &mut Layout) -> bool {
   if !shapeEmptyBox(nodes, shape, id, &input) { return false }
   let style = nodes.style(id)
-  let mut box = resolveBox(style, &input)
+  let mut box = resolveBoxEdges(style, &input, shape & KEY_ZERO_EDGES != 0)
   emptyBoxLayout(style, &input, &BfcState.make(), &mut box, &mut result)
   return true
 }
@@ -747,7 +760,7 @@ pub fn sizeEmptyBox(nodes: &BoxTree, shape: u16, id: usize, input: &Input, resul
 effect fn probeEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, id: usize, input: &Input, key: &Input) ! OutOfMemoryError ? &mut Allocator {
   output.stats.sizeProbes = output.stats.sizeProbes + 1
   let style = nodes.style(id)
-  let mut box = resolveBox(style, &input)
+  let mut box = shapedBox(&output, style, id, &input)
   let mut result = Layout.zero()
   emptyBoxLayout(style, &input, &BfcState.make(), &mut box, &mut result)
   run output.store(id, &result, false)
@@ -771,7 +784,7 @@ effect fn layoutEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut 
   let emitted = run output.fragments.appendBox(id, node.source, FragmentKind.Box, previousParent, 0, first, last)
   output.fragmentParent = emitted.index
   let style = nodes.style(id)
-  let mut box = resolveBox(style, &input)
+  let mut box = shapedBox(&output, style, id, &input)
   let mut result = Layout.zero()
   emptyBoxLayout(style, &input, &bfc, &mut box, &mut result)
   emptyOverflowGeometry(&box, &mut result)
@@ -1130,7 +1143,7 @@ effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
     wasStarted = previous.started
     wasNormalComplete = previous.normalComplete
   }
-  let mut sizing = BoxSizing { box: resolveBox(nodes.style(id), &input), request: input.*, natural: NaturalDimensions.none(), ratio: 0.0, ratioBorder: false, ratioInsetWidth: 0.0, ratioInsetHeight: 0.0 }
+  let mut sizing = BoxSizing { box: shapedBox(&output, nodes.style(id), id, &input), request: input.*, natural: NaturalDimensions.none(), ratio: 0.0, ratioBorder: false, ratioInsetWidth: 0.0, ratioInsetHeight: 0.0 }
   run prepareSizing(nodes, &mut output, &mut measurer, id, &input, fragmented, monolithic, &mut sizing)
   let natural = sizing.natural
   let ratio = sizing.ratio

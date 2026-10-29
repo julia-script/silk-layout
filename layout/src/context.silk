@@ -105,15 +105,26 @@ fn minimumLength(value: Dimension, basis: f64, definite: bool) -> f64 {
   return value.value + value.percent * used
 }
 pub fn resolveBox(style: &Style, input: &Input) -> ResolvedBox with Intrinsic.inlineAlways() {
-  let mut basis = input.parent.width
-  let mut basisDefinite = input.parent.widthDefinite
-  if input.parentWritingMode != WritingMode.HorizontalTb {
-    basis = input.parent.height
-    basisDefinite = input.parent.heightDefinite
+  return resolveBoxEdges(style, input, false)
+}
+// resolveBox for a style whose margin, padding and border resolve to zero
+// when `zeroEdges` holds (every edge's value and percent are zero), which
+// skips reading them.
+pub fn resolveBoxEdges(style: &Style, input: &Input, zeroEdges: bool) -> ResolvedBox with Intrinsic.inlineAlways() {
+  let mut padding = ResolvedEdges.zero()
+  let mut border = ResolvedEdges.zero()
+  let mut margin = ResolvedEdges.zero()
+  if !zeroEdges {
+    let mut basis = input.parent.width
+    let mut basisDefinite = input.parent.widthDefinite
+    if input.parentWritingMode != WritingMode.HorizontalTb {
+      basis = input.parent.height
+      basisDefinite = input.parent.heightDefinite
+    }
+    padding = edges(style.padding, basis, basisDefinite)
+    border = edges(style.border, 0.0, false)
+    margin = edges(style.margin, basis, basisDefinite)
   }
-  let padding = edges(style.padding, basis, basisDefinite)
-  let border = edges(style.border, 0.0, false)
-  let margin = edges(style.margin, basis, basisDefinite)
   let inset = ResolvedEdges { top: padding.top + border.top, right: padding.right + border.right, bottom: padding.bottom + border.bottom, left: padding.left + border.left }
   let mut addWidth = inset.horizontal()
   let mut addHeight = inset.vertical()

@@ -6,7 +6,7 @@ import tree { NO_NODE }
 import box_tree { BoxTree, BoxKind }
 import fragments { FragmentKind }
 import context { Input, ResolvedBox, resolveBox, childrenInput, withGutter, resolve, resolves, outOfFlow, isFlex, isGrid, scrollable, usedOverflowForAxis, UNBOUNDED }
-import engine { layoutNode, layoutNodeInPlace, layoutInBfc, flowMarginRect, resolveFragmentBox }
+import engine { layoutNode, layoutNodeInPlace, layoutInBfc, flowMarginRect, resolveFragmentBox, shapedBox }
 import layout_pass { LayoutPass, FullBoxGeometry, CacheKind }
 import text { TextMeasure, TextError }
 import fragmentation { FragmentationError, FragmentInput, FragmentAncestor }
@@ -703,7 +703,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   input.shrinkToFit = true
   input.parentWritingMode = cbStyle.writingMode
   input.parentTextOrientation = cbStyle.textOrientation
-  let box = resolveBox(style, &input)
+  let box = shapedBox(&output, style, id, &input)
   let inlineHorizontal = cbStyle.writingMode == WritingMode.HorizontalTb
   let mut xAlign = style.alignSelf
   let mut yAlign = style.justifySelf

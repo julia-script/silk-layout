@@ -48,7 +48,7 @@ pub struct PassCheckpoint {
   fragments: usize, resume: ResumeCheckpoint,
   frame: usize, parentFragment: usize,
   roots: usize, fullBoxes: usize, fullIndices: usize,
-  scrollbars: usize, gridGeometry: usize,
+  scrollbars: usize, gridGeometry: usize, gridContexts: usize,
 }
 impl Copy for PassCheckpoint {}
 // Size-only results go to `cache`; compute lends it the LayoutTree's cache so
@@ -306,12 +306,13 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // Normal-flow fitting checkpoints cover append publication, source anchors,
   // content cursors, final grid geometry and scalar measurement scratch. Positioning follows fitting.
   pub fn checkpoint(self: &mut Self) -> PassCheckpoint {
-    return PassCheckpoint { fragments: self.fragments.checkpoint(), resume: self.resumes.checkpoint(), frame: self.frame, parentFragment: self.fragmentParent, roots: self.frameRoots.length(), fullBoxes: self.fullBoxes.length(), fullIndices: self.fullIndices.length(), scrollbars: self.scrollbarSnapshots.length(), gridGeometry: self.cache.gridGeometry.checkpoint() }
+    return PassCheckpoint { fragments: self.fragments.checkpoint(), resume: self.resumes.checkpoint(), frame: self.frame, parentFragment: self.fragmentParent, roots: self.frameRoots.length(), fullBoxes: self.fullBoxes.length(), fullIndices: self.fullIndices.length(), scrollbars: self.scrollbarSnapshots.length(), gridGeometry: self.cache.gridGeometry.checkpoint(), gridContexts: self.cache.gridContexts.checkpoint() }
   }
   pub fn restoreCheckpoint(self: &mut Self, checkpoint: PassCheckpoint) {
     self.fragments.rollback(checkpoint.fragments)
     self.resumes.restore(checkpoint.resume, &mut self.boxes)
     self.cache.gridGeometry.restore(checkpoint.gridGeometry)
+    self.cache.gridContexts.restore(checkpoint.gridContexts)
     self.frameRoots.truncate(checkpoint.roots)
     self.frameOffsets.truncate(checkpoint.roots)
     self.fullIndices.truncate(checkpoint.fullIndices)
@@ -693,6 +694,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   }
   effect fn reuseKept(self: &mut Self, nodes: &BoxTree, id: usize, input: &Input, level: u8, beside: bool) -> bool ! OutOfMemoryError ? &mut Allocator {
     if id >= self.reusable.length() || (self.reusable.get(id) & REUSE_LEVEL) < level { return false }
+    if input.gridContext != 0 && !self.cache.gridContexts.valid(id, input.gridContext) { return false }
     let mut slot = self.cache.keptRange(id)
     if !slot.valid || !LayoutCache.sameRequest(&self.cache.result(id).input, input) { return false }
     if beside && !self.cache.sameFloats(slot, self.floatContext.asSlice()) { return false }

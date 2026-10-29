@@ -11,6 +11,7 @@ import silk.collections.slice { Slice }
 import inline_prepared { KeptText }
 import flex { FlexMemos }
 import grid_geometry { GridGeometryStore }
+import grid_context { GridContextStore }
 import grid_scratch { GridMemos }
 
 const ABSENT: usize = usize.MAX
@@ -155,6 +156,7 @@ fn sameAvailable(a: &AvailableSpace, b: &AvailableSpace) -> bool {
   return a.kind == b.kind && (a.kind != AvailableKind.Definite || a.value == b.value)
 }
 fn sameInput(a: &Input, b: &Input) -> bool with Intrinsic.inlineAlways() {
+  if a.gridContext != b.gridContext { return false }
   if !sameAvailable(&a.availableWidth, &b.availableWidth) || !sameAvailable(&a.availableHeight, &b.availableHeight) || !sameOptional(&a.known, &b.known) { return false }
   if a.minimum.width != b.minimum.width || a.minimum.height != b.minimum.height { return false }
   if a.parentMaxSize.width != b.parentMaxSize.width || a.parentMaxSize.height != b.parentMaxSize.height || a.scrollportSize.width != b.scrollportSize.width || a.scrollportSize.height != b.scrollportSize.height { return false }
@@ -210,16 +212,18 @@ pub struct LayoutCache {
   pub flexMemos: FlexMemos,
   // Final content-relative tracks and names survive reuse without sizing scratch.
   pub gridGeometry: GridGeometryStore,
+  pub gridContexts: GridContextStore,
   pub gridMemos: GridMemos,
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, skipping: false, rangesReset: false, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make(), gridGeometry: GridGeometryStore.make(), gridMemos: GridMemos.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, skipping: false, rangesReset: false, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make(), gridGeometry: GridGeometryStore.make(), gridContexts: GridContextStore.make(), gridMemos: GridMemos.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
     self.flexMemos.clear()
     self.gridGeometry.clear()
+    self.gridContexts.clear()
     self.gridMemos.clear()
     self.heads.clear()
     self.entries.clear()
@@ -239,6 +243,7 @@ impl LayoutCache {
   pub effect fn rotateFinals(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
     self.flexMemos.rotate()
     self.gridGeometry.commit()
+    self.gridContexts.commit()
     self.generation = self.generation + 1
     self.rotatedTouched = self.previouslyTouched
     self.previouslyTouched = self.touched
@@ -415,6 +420,7 @@ impl LayoutCache {
   pub fn clearBox(self: &mut Self, id: usize) {
     self.flexMemos.dropBox(id)
     self.gridGeometry.dropBox(id)
+    self.gridContexts.dropBox(id)
     self.gridMemos.dropBox(id)
     if id < self.texts.length() { self.texts.asMutSlice()[id].clear() }
     if id < self.ranges.length() {
@@ -489,6 +495,7 @@ impl LayoutCache {
   }
   // The entry index of a cached result, or usize.MAX; read it with layoutAt.
   pub fn find(self: &mut Self, id: usize, input: &Input, kind: CacheKind) -> usize {
+    if input.gridContext != 0 && !self.gridContexts.valid(id, input.gridContext) { return ABSENT }
     if id >= self.heads.length() { return ABSENT }
     let mut index = self.heads.get(id)
     while index != ABSENT {
@@ -548,6 +555,7 @@ impl LayoutCache {
     self.flexMemos.clear()
     self.gridMemos.clear()
     run self.gridGeometry.remap(toOld, toNew)
+    run self.gridContexts.remap(toOld, toNew)
     let mut old: usize = 0
     while old < self.heads.length() {
       if old >= toNew.length || toNew[old] == ABSENT {

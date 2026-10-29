@@ -1,0 +1,55 @@
+{
+  "name": "grid-subgrid-without-parent-falls-back",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-listing"
+  ],
+  "derivation": "Without a parent grid, the used template is none. The lone item therefore occupies a37px implicit column and23px implicit row; the block grid itself keeps its specified101px width.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 101,
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": "subgrid",
+          "gridAutoColumns": [
+            37
+          ],
+          "gridAutoRows": [
+            23
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 101,
+        "height": 23
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 37,
+        "height": 23
+      }
+    ]
+  }
+}

@@ -210,6 +210,7 @@ pub effect fn prepareTemplate<'source>(
   run expandAxis(&template.columns, columnRepeat, template.areaColumns, &mut prepared.columns)
   run expandAxis(&template.rows, rowRepeat, template.areaRows, &mut prepared.rows)
   prepared.areas.clear()
+  prepared.baselineOffsets.clear()
   let mut boundedRows = false
   let mut boundedColumns = false
   match move contexts.get(id, input.gridContext) {
@@ -221,6 +222,11 @@ pub effect fn prepareTemplate<'source>(
       let mut at: usize = 0
       while at < value.areas.length() {
         run prepared.areas.append(value.areas.get(at))
+        at = at + 1
+      }
+      at = 0
+      while at < value.baselineOffsets.length() {
+        run prepared.baselineOffsets.append(value.baselineOffsets.get(at))
         at = at + 1
       }
     }

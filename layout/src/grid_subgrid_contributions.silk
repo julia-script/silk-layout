@@ -39,6 +39,19 @@ pub fn extra(layers: &[ContributionLayer], start: usize, end: usize) -> f32 {
   return result
 }
 
+pub fn edge(layers: &[ContributionLayer], line: usize, before: bool) -> f32 {
+  let mut result: f32 = 0.0
+  let mut index: usize = 0
+  while index < layers.length {
+    let layer = layers[index]
+    if before && line == layer.start { result = result + layer.low }
+    else if !before && line == layer.end { result = result + layer.high }
+    else { result = result + layer.gap }
+    index = index + 1
+  }
+  return result
+}
+
 pub effect fn store(result: &mut List<TrackContribution>, index: usize, value: TrackContribution) -> bool
   ! OutOfMemoryError ? &mut Allocator {
   if index < result.length() {

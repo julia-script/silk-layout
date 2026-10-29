@@ -9,6 +9,7 @@ import grid_baselines { GridBaselines }
 import grid_fragment_scratch { GridFragmentScratch }
 import grid_style { GridArea }
 import grid_subgrid_contributions { ContributionWork }
+import grid_context { BaselineOffset }
 
 pub struct GridAxisScratch {
   pub tracks: List<TrackState>,
@@ -40,6 +41,7 @@ pub struct GridTemplateScratch {
   pub rowRepeat: usize,
   pub gridContext: usize,
   pub areas: List<GridArea>,
+  pub baselineOffsets: List<BaselineOffset>,
 }
 
 impl GridTemplateScratch {
@@ -55,6 +57,7 @@ impl GridTemplateScratch {
       rowRepeat: 0,
       gridContext: 0,
       areas: List<GridArea>.make(),
+      baselineOffsets: List<BaselineOffset>.make(),
     }
   }
 }
@@ -112,6 +115,7 @@ pub struct GridMemos {
   // Continuous layout neither allocates nor moves fragment-item vectors.
   pub fragmentScratch: List<GridFragmentScratch>,
   pub subgridWork: List<ContributionWork>,
+  pub baselineOffsets: List<List<BaselineOffset>>,
 }
 
 impl GridMemos {
@@ -122,6 +126,7 @@ impl GridMemos {
       used: 0,
       fragmentScratch: List<GridFragmentScratch>.make(),
       subgridWork: List<ContributionWork>.make(),
+      baselineOffsets: List<List<BaselineOffset>>.make(),
     }
   }
 

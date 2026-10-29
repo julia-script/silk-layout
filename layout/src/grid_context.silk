@@ -1,11 +1,20 @@
 import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.collections.list { List }
+import silk.core.ownership { Copy }
 import silk.core.option { Option }
 import silk.num.usize
 import grid_tracks { TrackState }
 import grid_style { GridNamedLine, GridArea }
 import tree { NO_NODE }
 
+// Ancestor baseline groups are an inherited layout dependency, not a
+// post-layout translation: descendants must rebuild overflow and baselines.
+pub struct BaselineOffset {
+  pub id: usize,
+  pub horizontal: bool,
+  pub shift: f32,
+}
+impl Copy for BaselineOffset {}
 // Grid 2 §9. The parent algorithm supplies tracks and names already mapped
 // into the child's logical axes and local line space. Storage never places
 // items or reads Style; every inherited dependency is carried by this value.
@@ -39,10 +48,11 @@ pub struct GridContext {
   pub columns: InheritedAxis,
   pub rows: InheritedAxis,
   pub areas: List<GridArea>,
+  pub baselineOffsets: List<BaselineOffset>,
 }
 impl GridContext {
   pub fn make(vertical: bool) -> GridContext {
-    return GridContext { vertical: vertical, phase: 0, firstColumns: true, columns: InheritedAxis.make(), rows: InheritedAxis.make(), areas: List<GridArea>.make() }
+    return GridContext { vertical: vertical, phase: 0, firstColumns: true, columns: InheritedAxis.make(), rows: InheritedAxis.make(), areas: List<GridArea>.make(), baselineOffsets: List<BaselineOffset>.make() }
   }
   fn dimensions(self: &Self) -> usize {
     let mut bits: usize = 0
@@ -78,13 +88,21 @@ fn sameAxis(a: &InheritedAxis, b: &InheritedAxis) -> bool {
 fn sameContext(a: &GridContext, b: &GridContext) -> bool {
   if a.vertical != b.vertical || a.phase != b.phase || a.firstColumns != b.firstColumns
     || !sameAxis(&a.columns, &b.columns) || !sameAxis(&a.rows, &b.rows)
-    || a.areas.length() != b.areas.length() { return false }
+    || a.areas.length() != b.areas.length()
+    || a.baselineOffsets.length() != b.baselineOffsets.length() { return false }
   let mut at: usize = 0
   while at < a.areas.length() {
     let x = a.areas.get(at)
     let y = b.areas.get(at)
     if x.name != y.name || x.columnStart != y.columnStart || x.columnEnd != y.columnEnd
       || x.rowStart != y.rowStart || x.rowEnd != y.rowEnd { return false }
+    at = at + 1
+  }
+  at = 0
+  while at < a.baselineOffsets.length() {
+    let x = a.baselineOffsets.get(at)
+    let y = b.baselineOffsets.get(at)
+    if x.id != y.id || x.horizontal != y.horizontal || x.shift != y.shift { return false }
     at = at + 1
   }
   return true
@@ -124,6 +142,7 @@ impl GridContextStore {
     context.columns.clear()
     context.rows.clear()
     context.areas.clear()
+    context.baselineOffsets.clear()
     return move context
   }
   effect fn ensureFree(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
@@ -260,7 +279,11 @@ impl GridContextStore {
       if old != NO_NODE {
         let mut next = NO_NODE
         if old < toNew.length { next = toNew[old] }
-        if next == NO_NODE { self.release(at) }
+        // Member ids are local to the old box tree. Rebinding reconstructs the
+        // ancestor group rather than retaining a descriptor with stale members.
+        if next == NO_NODE || self.slots.asSlice()[at].context.baselineOffsets.length() != 0 {
+          self.release(at)
+        }
         else { let slots = self.slots.asMutSlice()
           slots[at].id = next
           self.heads.set(next, at) }

@@ -3,13 +3,13 @@ import silk.collections.list { List }
 import silk.num.i32
 import silk.num.usize
 import box_tree { BoxTree, BoxKind }
-import tree { Measurement }
+import tree { Measurement, NO_NODE }
 import style { Style, WritingMode, Direction, Dimension, DimensionKind }
 import geometry { max }
 import context { ResolvedBox, UNBOUNDED, resolve }
 import axes { Axes }
 import grid_style { GridTemplate, GridAxis, GridNamedLine, GridArea, GridTrack, GridBreadth, GridBreadthKind, MAX_GRID_TRACKS }
-import grid_context { GridContext, InheritedAxis, GridContextStore }
+import grid_context { GridContext, InheritedAxis, GridContextStore, BaselineOffset }
 import grid_placement { GridItem, GridBounds }
 import grid_scratch { GridTemplateScratch }
 import grid_template { ExpandedAxis, expandedLines, expandSubgridNames }
@@ -22,20 +22,23 @@ pub struct InheritanceSource<'a> {
   pub bounds: GridBounds,
   pub phase: usize,
   pub firstColumns: bool,
+  pub baselineOffsets: &'a [BaselineOffset],
 }
 
 pub fn source<'a>(template: &'a GridTemplate, prepared: &'a [GridTemplateScratch], bounds: GridBounds,
-  phase: usize, firstColumns: bool) -> InheritanceSource<'a> {
+  phase: usize, firstColumns: bool, emptyOffsets: &'a [BaselineOffset]) -> InheritanceSource<'a> {
   let mut columns = template.columns.lines.asSlice()
   let mut rows = template.rows.lines.asSlice()
   let mut areas = template.areas.asSlice()
+  let mut offsets = emptyOffsets
   if prepared.length != 0 {
     columns = expandedLines(&template.columns, &prepared[0].columns)
     rows = expandedLines(&template.rows, &prepared[0].rows)
     if prepared[0].gridContext != 0 { areas = prepared[0].areas.asSlice() }
+    offsets = prepared[0].baselineOffsets.asSlice()
   }
   return InheritanceSource { columns: columns, rows: rows, areas: areas, bounds: bounds,
-    phase: phase, firstColumns: firstColumns }
+    phase: phase, firstColumns: firstColumns, baselineOffsets: offsets }
 }
 
 pub fn eligible(nodes: &BoxTree, id: usize) -> bool with Intrinsic.inlineAlways() {
@@ -225,6 +228,14 @@ pub effect fn bind(
     }
   }
   run copyAreas(inherited.areas, inherited.bounds, item, sameAxes, reverseColumns, reverseRows, &mut result)
+  let mut at: usize = 0
+  while at < inherited.baselineOffsets.length {
+    let offset = inherited.baselineOffsets[at]
+    let mut ancestor = nodes.node(offset.id).parent
+    while ancestor != NO_NODE && ancestor != item.id { ancestor = nodes.node(ancestor).parent }
+    if ancestor == item.id { run result.baselineOffsets.append(offset) }
+    at = at + 1
+  }
   return run store.bind(item.id, move result)
 }
 
@@ -294,4 +305,14 @@ pub effect fn usedTracks(
     index = index + 1
   }
   return resolvedGap
+}
+
+pub fn baselineShift(offsets: &[BaselineOffset], id: usize, horizontal: bool, fallback: f32) -> f32 {
+  let mut at: usize = 0
+  while at < offsets.length {
+    let value = offsets[at]
+    if value.id == id && value.horizontal == horizontal { return value.shift }
+    at = at + 1
+  }
+  return fallback
 }

@@ -139,14 +139,14 @@ effect fn expectBounds(output: &mut LayoutTree, source: NodeId,
 
 effect fn layout(tree: &Tree, output: &mut LayoutTree, host: &mut TextHost)
   ! OutOfMemoryError | TextError | FragmentationError | InvalidNode ? &mut Allocator {
-  run compute(tree, output, host, OptionalSize.definite(300.0, 200.0))
+  run compute(tree, &mut output, &mut host, OptionalSize.definite(300.0, 200.0))
 }
 
 effect fn expectFresh(tree: &Tree, output: &mut LayoutTree, host: &mut TextHost, sources: &[NodeId])
   ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static>
   ? &mut Allocator {
   let mut fresh = LayoutTree.make()
-  run layout(tree, &mut fresh, host)
+  run layout(tree, &mut fresh, &mut host)
   let mut index: usize = 0
   while index < sources.length {
     let actual = run output.sourceBounds(sources[index])
@@ -167,7 +167,7 @@ effect fn inheritedTrackNameGapTransitions()
   ? &mut Allocator {
   let mut rootStyle = gridStyle()
   rootStyle.width = Dimension.px(100.0)
-  let mut tree = run Tree.make(rootStyle)
+  let mut tree = run Tree.make(move rootStyle)
   let root = tree.root()
   let name = run tree.internGridName("target")
   let subgrid = run tree.append(root, spanningStyle())
@@ -200,9 +200,10 @@ effect fn inheritedTrackNameGapTransitions()
     run tree.setGrid(root, move template)
     let mut gap: f32 = 0.0
     if stage >= 3 { gap = 10.0 }
+    let mut rootStyle = gridStyle()
     rootStyle.columnGap = Dimension.px(gap)
     rootStyle.width = Dimension.px(100.0 + gap)
-    run tree.setStyle(root, rootStyle)
+    run tree.setStyle(root, move rootStyle)
     if stage == 4 {
       let mut standalone = run columns(25.0, 75.0, 20.0)
       standalone.placement.columnStart = line(1)
@@ -246,7 +247,7 @@ effect fn descendantTextTransitions()
   ? &mut Allocator {
   let mut style = gridStyle()
   style.justifyContent = Align.Start
-  let mut tree = run Tree.make(style)
+  let mut tree = run Tree.make(move style)
   let root = tree.root()
   let mut template = GridTemplate.make()
   run template.columns.tracks.append(GridTrack.breadth(
@@ -302,9 +303,11 @@ effect fn baselinePeerTransitions()
   run tree.setGrid(subgrid, move template)
   let mut itemStyle = Style.make()
   itemStyle.alignSelf = Align.Baseline
-  let item = run tree.append(subgrid, itemStyle)
+  let item = run tree.append(subgrid, move itemStyle)
   let text = run tree.appendText(item, run String.copy("ab"))
-  let peer = run tree.append(root, itemStyle)
+  let mut peerStyle = Style.make()
+  peerStyle.alignSelf = Align.Baseline
+  let peer = run tree.append(root, move peerStyle)
   let peerText = run tree.appendText(peer, run String.copy("cd"))
   let sources = [root, subgrid, item, text, peer, peerText]
   let mut output = LayoutTree.make()
@@ -313,8 +316,10 @@ effect fn baselinePeerTransitions()
   let mut stage: usize = 0
   while stage < offsets.length {
     let offset = offsets[stage]
+    let mut itemStyle = Style.make()
+    itemStyle.alignSelf = Align.Baseline
     itemStyle.padding.top = Dimension.px(offset)
-    run tree.setStyle(peer, itemStyle)
+    run tree.setStyle(peer, move itemStyle)
     run layout(&tree, &mut output, &mut host)
     run expectBounds(&mut output, subgrid, 0.0, 0.0, 50.0, 40.0)
     run expectBounds(&mut output, item, 0.0, offset, 50.0, 10.0)
@@ -343,10 +348,10 @@ effect fn remappedSubgridTransitions()
   let root = tree.root()
   let mut prefixStyle = Style.make()
   prefixStyle.height = Dimension.px(10.0)
-  let prefix = run tree.append(root, prefixStyle)
+  let prefix = run tree.append(root, move prefixStyle)
   let mut parentStyle = gridStyle()
   parentStyle.width = Dimension.px(100.0)
-  let parent = run tree.append(root, parentStyle)
+  let parent = run tree.append(root, move parentStyle)
   run tree.setGrid(parent, run columns(30.0, 70.0, 20.0))
   let subgrid = run tree.append(parent, spanningStyle())
   run tree.setGrid(subgrid, run inheritedColumns(20.0))
@@ -360,16 +365,21 @@ effect fn remappedSubgridTransitions()
     if stage == 1 {
       let mut insertedStyle = Style.make()
       insertedStyle.height = Dimension.px(4.0)
-      let inserted = run tree.append(prefix, insertedStyle)
+      let inserted = run tree.append(prefix, move insertedStyle)
       drop inserted
     }
     if stage == 2 {
-      let mut hidden = prefixStyle
+      let mut hidden = Style.make()
+      hidden.height = Dimension.px(10.0)
       hidden.display = Display.None
-      run tree.setStyle(prefix, hidden)
+      run tree.setStyle(prefix, move hidden)
       run tree.setGrid(parent, run columns(60.0, 40.0, 20.0))
     }
-    if stage == 3 { run tree.setStyle(prefix, prefixStyle) }
+    if stage == 3 {
+      let mut shown = Style.make()
+      shown.height = Dimension.px(10.0)
+      run tree.setStyle(prefix, move shown)
+    }
     run layout(&tree, &mut output, &mut host)
     let mut y: f32 = 10.0
     if stage == 2 { y = 0.0 }

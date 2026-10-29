@@ -3,14 +3,14 @@ import silk.collections.list { List }
 import silk.core.ownership { Copy }
 import silk.num.i32
 import silk.num.usize
-import geometry { Layout, BaselineSet, FontRequest, Measure, Size, Point, max, min }
+import geometry { Layout, BaselineSet, FontRequest, Measure, Size, Point, ResolvedEdges, max, min }
 import style { Style, WritingMode, Direction, Align, Dimension, DimensionKind }
 import axes { Axes }
 import context { Input, UNBOUNDED }
 import box_tree { BoxTree }
 import tree { NO_NODE }
 import grid_placement { GridItem }
-import grid_tracks { TrackState, TrackContribution }
+import grid_tracks { TrackState, TrackContribution, spanSize }
 import grid_style { GridBreadthKind }
 import grid_contributions { ItemContribution, contributionBaselineInput }
 import grid_alignment { selfAlignment, oppositeSelfStart }
@@ -18,6 +18,8 @@ import layout_pass { LayoutPass, CacheKind }
 import engine { normalizeKey, probeFresh }
 import text { TextMeasure, TextError }
 import fragmentation { FragmentationError }
+import grid_subgrid as Subgrid
+import grid_context { BaselineOffset }
 
 struct Metrics {
   before: f32,
@@ -105,6 +107,11 @@ struct Entry {
   group: usize,
   last: bool,
   mirror: bool,
+  id: usize,
+  start: usize,
+  end: usize,
+  extraBefore: f32,
+  extraAfter: f32,
   previousMinimum: f32,
   previousMinContent: f32,
   comparePrevious: bool,
@@ -119,6 +126,11 @@ impl Entry {
       group: NO_NODE,
       last: false,
       mirror: false,
+      id: NO_NODE,
+      start: 0,
+      end: 0,
+      extraBefore: 0.0,
+      extraAfter: 0.0,
       previousMinimum: 0.0,
       previousMinContent: 0.0,
       comparePrevious: false,
@@ -131,11 +143,18 @@ pub struct BaselineAxis {
   entries: List<Entry>,
   groups: List<BaselineGroup>,
   index: List<usize>,
+  directCount: usize,
   mirrorOffset: f32
 }
 
 pub struct GridBaselines {
   columns: BaselineAxis,
+  // Geometry of the just-completed baseline probe. Ancestor traversal forces
+  // that probe: generic cached sizes do not promise descendant scratch state.
+  pub inset: ResolvedEdges,
+  pub margin: ResolvedEdges,
+  pub columnGap: f32,
+  pub rowGap: f32,
   rows: BaselineAxis
 }
 
@@ -145,6 +164,7 @@ impl BaselineAxis {
       entries: List<Entry>.make(),
       groups: List<BaselineGroup>.make(),
       index: List<usize>.make(),
+      directCount: 0,
       mirrorOffset: 0.0,
     }
   }
@@ -152,7 +172,8 @@ impl BaselineAxis {
 
 impl GridBaselines {
   pub fn make() -> GridBaselines {
-    return GridBaselines { columns: BaselineAxis.make(), rows: BaselineAxis.make() }
+    return GridBaselines { columns: BaselineAxis.make(), rows: BaselineAxis.make(),
+      inset: ResolvedEdges.zero(), margin: ResolvedEdges.zero(), columnGap: 0.0, rowGap: 0.0 }
   }
 
   pub fn any(self: &Self) -> bool {
@@ -316,6 +337,7 @@ effect fn prepareAxis<M: Measure>(
   state.entries.clear()
   state.groups.clear()
   state.index.clear()
+  state.directCount = items.length
   state.mirrorOffset = 0.0
   let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
   let contextMode = baselineMode(parent, parent.writingMode, horizontal)
@@ -329,7 +351,8 @@ effect fn prepareAxis<M: Measure>(
     if columns {
       span = item.column
     }
-    if (align == Align.Baseline || align == Align.LastBaseline) && !autoMargins(style, horizontal)
+    if !Subgrid.inherits(nodes, item.id, horizontal)
+      && (align == Align.Baseline || align == Align.LastBaseline) && !autoMargins(style, horizontal)
       && !cyclicSize(
         style,
         horizontal,
@@ -512,6 +535,8 @@ fn capture(
       after = margin.left + extent - distance
     }
   }
+  before = before + entry.extraBefore
+  after = after + entry.extraAfter
   entry.samples[kind] = Sample { before: before, after: after, start: start, present: true }
   state.groups.asMutSlice()[entry.group].include(kind, before, after, start, area)
 }
@@ -862,5 +887,97 @@ pub fn containerBaselines<M: Measure>(
       result.hasFirstBaseline = true
     }
     pass = pass + 1
+  }
+}
+
+// §9: a participant crosses every intervening subgrid on this axis. Its
+// placement stays local; only the owning grid's baseline group is shared.
+pub effect fn registerDescendant<M: Measure>(
+  nodes: &BoxTree, measurer: &mut M, root: &Style, parent: &Style,
+  id: usize, start: usize, end: usize, extraBefore: f32, extraAfter: f32,
+  tracks: &[TrackState], definite: bool, columns: bool, contributionIndex: usize,
+  scratch: &mut GridBaselines,
+) -> usize ! OutOfMemoryError ? &mut Allocator {
+  let horizontal = columns != (root.writingMode != WritingMode.HorizontalTb)
+  let style = nodes.style(id)
+  let localColumns = horizontal == (parent.writingMode == WritingMode.HorizontalTb)
+  let align = selfAlignment(style, parent, localColumns)
+  if Subgrid.inherits(nodes, id, horizontal) || autoMargins(style, horizontal)
+    || (align != Align.Baseline && align != Align.LastBaseline)
+    || cyclicSize(style, horizontal, tracks, start, end, definite) { return NO_NODE }
+  let state = axisStateMut(&mut scratch, columns)
+  let mut index = contributionIndex
+  if index == NO_NODE {
+    index = state.directCount
+    while index < state.entries.length() && state.entries.get(index).id != id { index = index + 1 }
+  }
+  while state.entries.length() <= index { run state.entries.append(Entry.empty()) }
+  if state.index.length() == 0 { run state.index.appendRepeated(NO_NODE, tracks.length * 2) }
+  let last = align == Align.LastBaseline
+  let groupEnd = groupEnd(style, root, columns, last)
+  let mut track = start
+  if last { track = end - 1 }
+  let mut group = track * 2
+  if groupEnd { group = group + 1 }
+  let mut mapped = state.index.get(group)
+  if mapped == NO_NODE {
+    mapped = state.groups.length()
+    state.index.set(group, mapped)
+    run state.groups.append(BaselineGroup.make(groupEnd))
+  }
+  let contextMode = baselineMode(root, root.writingMode, horizontal)
+  let mirror = lineOverReverse(baselineMode(style, root.writingMode, horizontal))
+    != lineOverReverse(contextMode)
+  if mirror {
+    let font = Measure.font(&mut measurer, FontRequest { key: root.fontKey,
+      writingMode: root.writingMode, textOrientation: root.textOrientation,
+      direction: root.usedDirection() })
+    state.mirrorOffset = 2.0 * (font.baselines.central
+      - font.baselines.forContext(root.writingMode, root.textOrientation))
+    if reverseAxis(root, columns) != lineOverReverse(contextMode) {
+      state.mirrorOffset = -state.mirrorOffset
+    }
+  }
+  let entries = state.entries.asMutSlice()
+  entries[index].group = mapped
+  entries[index].last = last
+  entries[index].mirror = mirror
+  entries[index].id = id
+  entries[index].start = start
+  entries[index].end = end
+  entries[index].extraBefore = extraBefore
+  entries[index].extraAfter = extraAfter
+  return index
+}
+
+pub fn captureDescendant(scratch: &mut GridBaselines, index: usize, columns: bool,
+  style: &Style, root: &Style, layout: &Layout, start: f32, area: f32) {
+  capture(axisStateMut(&mut scratch, columns), index, columns, 3, style, root, layout, start, area)
+}
+
+pub effect fn descendantOffsets(nodes: &BoxTree, output: &LayoutPass, root: &Style,
+  tracks: &[TrackState], columns: bool, scratch: &GridBaselines,
+  inherited: &[BaselineOffset], result: &mut List<BaselineOffset>,
+) ! OutOfMemoryError ? &mut Allocator {
+  let state = axisState(scratch, columns)
+  let horizontal = columns != (root.writingMode != WritingMode.HorizontalTb)
+  let mut index: usize = 0
+  while index < state.entries.length() {
+    let entry = state.entries.get(index)
+    if entry.id != NO_NODE && entry.group != NO_NODE && entry.samples[3].present {
+      let mut value = shift(scratch, index, columns, 0.0)
+      let parent = nodes.style(nodes.node(entry.id).parent)
+      let localColumns = horizontal == (parent.writingMode == WritingMode.HorizontalTb)
+      if Subgrid.reversed(parent, localColumns) != Subgrid.reversed(root, columns) {
+        let layout = &output.boxes[entry.id]
+        let mut margin = layout.usedMargin.vertical()
+        if horizontal { margin = layout.usedMargin.horizontal() }
+        value = spanSize(tracks, entry.start, entry.end) - entry.extraBefore - entry.extraAfter
+          - axisSize(layout.size, horizontal) - margin - value
+      }
+      value = Subgrid.baselineShift(inherited, entry.id, horizontal, value)
+      run result.append(BaselineOffset { id: entry.id, horizontal: horizontal, shift: value })
+    }
+    index = index + 1
   }
 }

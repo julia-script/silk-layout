@@ -87,7 +87,7 @@ impl BoxWrites {
   }
 }
 
-pub enum CacheKind { IndependentBox, IntrinsicContents, FlexAllocation }
+pub enum CacheKind { IndependentBox, IntrinsicContents, ContainerAllocation }
 pub struct CachedProbe { pub input: Input, pub layout: Layout }
 impl Copy for CachedProbe {}
 pub const AGES_NONE: u8 = 0
@@ -456,7 +456,7 @@ impl LayoutCache {
     let mut index = self.heads.get(id)
     while index != ABSENT {
       let entry = self.entries.get(index)
-      if entry.kind == CacheKind.FlexAllocation { return false }
+      if entry.kind == CacheKind.ContainerAllocation { return false }
       if entry.kind == CacheKind.IndependentBox {
         if entry.generation < generation { return false }
         run result.append(CachedProbe { input: self.inputs.asSlice()[index], layout: self.layouts.asSlice()[index] })

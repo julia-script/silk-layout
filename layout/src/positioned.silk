@@ -992,13 +992,13 @@ fn containingExisting(nodes: &BoxTree, output: &LayoutPass, cb: usize, frame: us
   return NO_NODE
 }
 
-// A flex item's allocation belongs to its parent's sizing algorithm. Cache the
-// size-only allocations together so sibling continuations do not repeat it.
-effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, parent: usize, initial: OptionalSize) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+// A flex or grid item's allocation belongs to its parent's sizing algorithm.
+// Cache the complete probe results together so sibling continuations reuse them.
+effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, parent: usize, initial: OptionalSize) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let parentBox = output.fragments.values.get(parent).box
   let metadata = match output.fragmentFullBox(parent) {
     Option<FullBoxGeometry>.Some { value } => value
-    Option<FullBoxGeometry>.None => { fail FragmentationError { frame: output.frame, message: "Flex continuation has no full containing-block geometry" } }
+    Option<FullBoxGeometry>.None => { fail FragmentationError { frame: output.frame, message: "Container continuation has no full containing-block geometry" } }
   }
   let mut input = usedInput(nodes, &output, parentBox, initial)
   input.parent = metadata.parent
@@ -1009,8 +1009,10 @@ effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &
   input.indefiniteWidth = !metadata.content.widthDefinite
   input.indefiniteHeight = !metadata.content.heightDefinite
   input.performLayout = false
+  // Both algorithms need their final item placement pass, not just track/line sizes.
+  input.baselines = true
   input.fragmentation = FragmentInput.continuous()
-  match output.lookup(id, &input, CacheKind.FlexAllocation) {
+  match output.lookup(id, &input, CacheKind.ContainerAllocation) {
     Option<Layout>.Some { value } => { return value }
     Option<Layout>.None => {}
   }
@@ -1023,7 +1025,7 @@ effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &
       let mut allocation = output.boxes[child]
       allocation.location.x = allocation.location.x - box.inset.left
       allocation.location.y = allocation.location.y - box.inset.top
-      run output.remember(child, &input, CacheKind.FlexAllocation, &allocation)
+      run output.remember(child, &input, CacheKind.ContainerAllocation, &allocation)
     }
     child = nodes.node(child).nextSibling
   }
@@ -1076,26 +1078,26 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
         Option<FullBoxGeometry>.None => {}
       }
     }
+    let allocatedItem = parentBox != NO_NODE && (nodes.node(parentBox).kind == BoxKind.Flex || nodes.node(parentBox).kind == BoxKind.Grid) && !outOfFlow(nodes.style(id))
     if output.frames.writingMode == WritingMode.HorizontalTb {
       input.parent.width = parentContent.width
       input.parent.widthDefinite = true
       input.availableWidth = AvailableSpace.definite(parentContent.width)
-      if !outOfFlow(nodes.style(id)) && (parentBox == NO_NODE || nodes.node(parentBox).kind != BoxKind.Flex) { input.known.widthDefinite = false }
+      if !outOfFlow(nodes.style(id)) && !allocatedItem { input.known.widthDefinite = false }
     } else {
       input.parent.height = parentContent.height
       input.parent.heightDefinite = true
       input.availableHeight = AvailableSpace.definite(parentContent.height)
-      if !outOfFlow(nodes.style(id)) && (parentBox == NO_NODE || nodes.node(parentBox).kind != BoxKind.Flex) { input.known.heightDefinite = false }
+      if !outOfFlow(nodes.style(id)) && !allocatedItem { input.known.heightDefinite = false }
     }
     if parentBox != NO_NODE {
       input.parentWritingMode = nodes.style(parentBox).writingMode
       input.parentJustifyItems = nodes.style(parentBox).justifyItems
       input.parentJustifyItemsSafety = nodes.style(parentBox).justifyItemsSafety
     }
-    let flexItem = parentBox != NO_NODE && nodes.node(parentBox).kind == BoxKind.Flex && !outOfFlow(nodes.style(id))
     let mut allocation = Layout.zero()
-    if flexItem {
-      allocation = run flexShellAllocation(nodes, &mut output, &mut measurer, id, parent, initial)
+    if allocatedItem {
+      allocation = run containerShellAllocation(nodes, &mut output, &mut measurer, id, parent, initial)
       input.known = OptionalSize.definite(allocation.size.width, allocation.size.height)
       input.indefiniteWidth = !allocation.widthDefinite
       input.indefiniteHeight = !allocation.heightDefinite
@@ -1119,7 +1121,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     let mut point = axes.physicalPoint(Point { x: offset, y: 0.0 }, size, parentSize)
     point.x = point.x + parentContent.x
     point.y = point.y + parentContent.y
-    if flexItem { point = allocation.location }
+    if allocatedItem { point = allocation.location }
     if outOfFlow(nodes.style(id)) {
       let containing = run frameContainingRect(nodes, &output, parentBox, parent, frame)
       let desired = flowPosition(&output, first)

@@ -126,8 +126,8 @@ pub fn finish(style: &Style, input: &Input, full: &ResolvedBox, current: &Resolv
   let fullSize = max(0.0, original.size.height - original.inset.vertical())
   let fullMin = max(0.0, original.min.height - original.inset.vertical())
   let fullMax = max(0.0, original.max.height - original.inset.vertical())
-  let fixed = original.size.heightDefinite && !input.fragmentation.flexAutoExtent
-  let allottedMinimum = original.size.heightDefinite && input.fragmentation.flexAutoExtent
+  let fixed = original.size.heightDefinite && !input.fragmentation.allocatedAutoExtent
+  let allottedMinimum = original.size.heightDefinite && input.fragmentation.allocatedAutoExtent
   let hadNormalEnd = state.normalComplete
   let mut used: f32 = 0.0
   if !hadNormalEnd {

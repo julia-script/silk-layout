@@ -30,7 +30,7 @@ pub struct FragmentInput {
   // Source adjacency is separate from propagated parent break controls.
   pub sourceAdjacent: bool, pub sourceBoundary: BreakBoundary,
   pub contextKinds: BreakKinds, pub boundaryKinds: BreakKinds,
-  pub flexAutoExtent: bool,
+  pub allocatedAutoExtent: bool,
   pub boundaryProbe: BoundaryProbe,
   pub relaxation: BreakRelaxation,
   pub kind: FragmentainerKind, pub rectoOnRight: bool,
@@ -45,7 +45,7 @@ impl FragmentInput {
       marginStart: false, marginEnd: false,
       marginEndChosen: false,
       sourceAdjacent: false, sourceBoundary: BreakBoundary.none(),
-      flexAutoExtent: false, boundaryProbe: BoundaryProbe.None,
+      allocatedAutoExtent: false, boundaryProbe: BoundaryProbe.None,
       relaxation: BreakRelaxation.Strict, kind: FragmentainerKind.Page, rectoOnRight: true,
     }
   }
@@ -275,6 +275,10 @@ pub union FlowCursor {
     pub lineDirection: Direction,
   },
   Flex { pub line: usize, pub progress: FractionalProgress, pub gap: FractionalProgress },
+  Grid {
+    pub row: usize, pub progress: FractionalProgress, pub gap: FractionalProgress,
+    pub columnRepeat: usize, pub rowRepeat: usize,
+  },
 }
 impl Copy for FlowCursor {}
 pub struct StaticAnchor {
@@ -306,7 +310,7 @@ pub struct ResumeState {
   pub size: FractionalProgress,
   pub minimum: FractionalProgress,
   pub maximum: FractionalProgress,
-  pub flexLeading: FractionalProgress, pub flexTrailing: FractionalProgress,
+  pub alignmentLeading: FractionalProgress, pub flexTrailing: FractionalProgress,
   // Parallel overflow and float flows belong to their generated parent.
   pub pendingFirst: usize, pub pendingLast: usize, pub nextPending: usize,
   pub pendingOwner: usize,
@@ -330,7 +334,7 @@ impl ResumeState {
       endDecorationDone: false, flexLine: NO_NODE,
       frameLines: 0, lineBreak: false,
       size: FractionalProgress.make(), minimum: FractionalProgress.make(), maximum: FractionalProgress.make(),
-      flexLeading: FractionalProgress.make(), flexTrailing: FractionalProgress.make(),
+      alignmentLeading: FractionalProgress.make(), flexTrailing: FractionalProgress.make(),
       pendingFirst: NO_NODE, pendingLast: NO_NODE, nextPending: NO_NODE,
       pendingOwner: NO_NODE,
       fragmentainer: NO_NODE, fragment: NO_NODE, emissionStart: NO_NODE,

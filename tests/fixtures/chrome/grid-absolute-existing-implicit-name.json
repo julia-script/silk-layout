@@ -1,0 +1,69 @@
+{
+  "name": "grid-absolute-existing-implicit-name-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "Column4 creates three 20px implicit tracks after the40px explicit track. The first implicit line beyond the explicit boundary has every missing name: logical line2 at x=10+40+10+20+10=90. Its one-track span is20px.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 160,
+          "height": 180,
+          "paddingLeft": 10,
+          "paddingRight": 20,
+          "paddingTop": 30,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            40
+          ],
+          "gridTemplateRows": [
+            30
+          ],
+          "columnGap": 10,
+          "rowGap": 20,
+          "gridAutoColumns": [
+            20
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 4
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": 0,
+            "right": 0,
+            "top": 0,
+            "bottom": 0
+          },
+          "gridColumnStart": "missing",
+          "gridColumnEnd": {
+            "span": 1
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "name": "grid-absolute-retained-named-span-chrome",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#static-position",
+    "https://drafts.csswg.org/css-position-3/#static-position-rect"
+  ],
+  "derivation": "Named middle/last and second/bottom delimit the second column and row. The named forward span reaches last. Gutters put their origin at (10+40+10,30+30+20).",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 160,
+          "height": 180,
+          "paddingLeft": 10,
+          "paddingRight": 20,
+          "paddingTop": 30,
+          "paddingBottom": 10,
+          "gridTemplateColumns": [
+            {
+              "names": [
+                "first"
+              ]
+            },
+            40,
+            {
+              "names": [
+                "middle"
+              ]
+            },
+            60,
+            {
+              "names": [
+                "last"
+              ]
+            }
+          ],
+          "gridTemplateRows": [
+            {
+              "names": [
+                "top"
+              ]
+            },
+            30,
+            {
+              "names": [
+                "second"
+              ]
+            },
+            50,
+            {
+              "names": [
+                "bottom"
+              ]
+            }
+          ],
+          "columnGap": 10,
+          "rowGap": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": 0,
+            "right": 0,
+            "top": 0,
+            "bottom": 0
+          },
+          "gridColumnStart": "middle",
+          "gridColumnEnd": {
+            "span": 1,
+            "name": "last"
+          },
+          "gridRowStart": "second",
+          "gridRowEnd": "bottom"
+        }
+      }
+    ]
+  }
+}

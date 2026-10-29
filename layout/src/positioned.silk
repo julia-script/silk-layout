@@ -22,6 +22,7 @@ import fragment_fit { WidowCheck, WidowDecision, collectWidows, validateWidows }
 import axes { Axes }
 import block { inlineOffset }
 import bfc { BfcState }
+import grid_positioned as GridPositioned
 
 // Fragment ancestry, generated ancestry and source ancestry are deliberately
 // separate. In particular an interrupted inline does not own its lifted blocks.
@@ -331,7 +332,8 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
   if positioned { parent = absoluteContainingBlock(nodes, id) }
   let mut input = Input.make(viewport)
   if positioned && parent != NO_NODE {
-    let rect = containingRect(nodes, output, parent, viewport)
+    let mut rect = containingRect(nodes, output, parent, viewport)
+    if GridPositioned.isContainer(nodes, parent) { rect = GridPositioned.containingRect(nodes, output, parent, id, rect) }
     input.parent = OptionalSize.definite(rect.width, rect.height)
   } else if parent != NO_NODE {
     let rect = output.boxes[parent].contentRect()
@@ -589,7 +591,8 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   // Unfragmented siblings with this containing block share its rectangle,
   // children input, limits and their parent's scroll ancestor, which
   // positionTree keeps with absoluteInputOwner.
-  let shared = !fragmented && cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline
+  let gridContaining = cb != NO_NODE && GridPositioned.isContainer(nodes, cb)
+  let shared = !fragmented && cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline && !gridContaining
   let cached = shared && output.absoluteInputOwner == cb
   let mut cbRect = output.absoluteRect
   if !cached { cbRect = containingRect(nodes, &output, cb, viewport) }
@@ -628,6 +631,8 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       }
     }
   }
+  let originalRect = cbRect
+  if gridContaining { cbRect = GridPositioned.containingRect(nodes, &output, cb, id, cbRect) }
   let mut containing = viewport
   if cb != NO_NODE || fragmented { containing = OptionalSize.definite(cbRect.width, cbRect.height) }
   let origin = Point { x: cbRect.x, y: cbRect.y }
@@ -638,7 +643,7 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       let cbInput = usedInput(nodes, &output, cb, viewport)
       let cbBox = withGutter(&shapedBox(&output, cbStyle, cb, &cbInput), output.boxes[cb].scrollbarGutter)
       input = usedChildrenInputOf(nodes, &output, cb, &cbInput, &cbBox, containing)
-      if !fragmented {
+      if shared {
         output.absoluteInputOwner = cb
         output.absoluteInput = input
         output.absoluteBox = cbBox
@@ -648,14 +653,14 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       }
     }
   }
-  let mut limits = ResolvedEdges { left: cbRect.x, right: cbRect.x + cbRect.width, top: cbRect.y, bottom: cbRect.y + cbRect.height }
+  let mut limits = ResolvedEdges { left: originalRect.x, right: originalRect.x + originalRect.width, top: originalRect.y, bottom: originalRect.y + originalRect.height }
   if style.position != Position.Fixed && shared && output.absoluteLimitsSet {
     limits = output.absoluteLimits
   } else if style.position != Position.Fixed {
     // A scrollable original CB can expose abspos overflow in each reachable
     // direction. Fixed boxes without anchor positioning retain finite limits.
     let viewportContaining = cb == NO_NODE || cb == 0
-    let reachable = reachableLimits(cbStyle, cbRect, cbRect, viewportContaining)
+    let reachable = reachableLimits(cbStyle, originalRect, originalRect, viewportContaining)
     if viewportContaining || scrollable(usedOverflowForAxis(cbStyle, true)) {
       if reachable.left == -UNBOUNDED { limits.left = -UNBOUNDED }
       if reachable.right == UNBOUNDED { limits.right = UNBOUNDED }
@@ -819,6 +824,20 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
         x = absoluteAlignment(x, x + innerWidth, result.size.width + box.margin.horizontal(), limits.left, limits.right, xReverse, reverseX, crossAlign, crossSafety, startReverse(style, true), true)
         y = y + alignmentOffset(ps.justifyContent, innerHeight - result.size.height - box.margin.vertical(), yReverse, reverseY, startReverse(style, false), false, ps.justifyContentSafety == OverflowAlignment.Safe)
       }
+    } else if parent != NO_NODE && GridPositioned.isContainer(nodes, parent) {
+      // Position 3 §3.5.3: the sole item's static rectangle is its grid
+      // area when this parent is also its actual CB; otherwise content.
+      if parent == cb && cb != NO_NODE {
+        x = cbRect.x
+        y = cbRect.y
+        innerWidth = cbRect.width
+        innerHeight = cbRect.height
+      }
+      let horizontal = ps.writingMode == WritingMode.HorizontalTb
+      let alignX = GridPositioned.staticAlignment(style, ps, horizontal)
+      let alignY = GridPositioned.staticAlignment(style, ps, !horizontal)
+      x = absoluteAlignment(x, x + innerWidth, result.size.width + box.margin.horizontal(), limits.left, limits.right, reverseX, reverseX, alignX.value, alignX.safety, startReverse(style, true), true)
+      y = absoluteAlignment(y, y + innerHeight, result.size.height + box.margin.vertical(), limits.top, limits.bottom, reverseY, reverseY, alignY.value, alignY.safety, startReverse(style, false), false)
     } else {
       physicalStatic = true
       // Position 3 §3.5.3: zero block thickness, spanning the inline

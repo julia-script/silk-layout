@@ -1,0 +1,26 @@
+{
+  "name": "grid-subgrid-nested-last-baseline-sharing",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "baseline"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrids", "https://drafts.csswg.org/css-grid-2/#grid-baselines", "https://drafts.csswg.org/css-align-3/#align-by-baseline"],
+  "derivation": "A 30px direct item has a 7px bottom margin; a 10px leaf beneath two row-subgrids has none. Both synthesize last baselines at their border bottoms and share the parent's last-row baseline group. Its descent is 7, placing the common baseline at 50-7=43. The direct item starts at 43-30=13 and the nested leaf at 43-10=33, not the y=40 it would get from independent end alignment. Wrappers stretch to the full 50px row.",
+  "input": {
+    "viewport": {"width": 200, "height": 120},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 80, "gridTemplateColumns": [40, 40], "gridTemplateRows": [50]}},
+      {"parent": 0, "style": {"width": 20, "height": 30, "marginBottom": 7, "gridColumnStart": 1, "gridRowStart": 1, "alignSelf": "last baseline"}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": [40], "gridTemplateRows": "subgrid", "gridColumnStart": 2, "gridRowStart": 1}},
+      {"parent": 2, "style": {"display": "grid", "gridTemplateColumns": [40], "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridRowStart": 1}},
+      {"parent": 3, "style": {"width": 20, "height": 10, "gridColumnStart": 1, "gridRowStart": 1, "alignSelf": "last baseline"}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 80, "height": 50},
+      {"x": 0, "y": 13, "width": 20, "height": 30},
+      {"x": 40, "y": 0, "width": 40, "height": 50},
+      {"x": 0, "y": 0, "width": 40, "height": 50},
+      {"x": 0, "y": 33, "width": 20, "height": 10}
+    ]
+  }
+}

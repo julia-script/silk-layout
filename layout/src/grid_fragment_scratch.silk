@@ -4,6 +4,7 @@ import silk.core.ownership { Copy }
 import silk.num.i32
 import geometry { Size, Point, OptionalSize, ResolvedEdges }
 import grid_placement { GridItem }
+import grid_tracks { TrackState }
 import tree { NO_NODE }
 
 // Cursor/adjacency rows are frame-traversal ordinals; placement and tracks
@@ -37,6 +38,8 @@ pub struct FragmentItem {
   pub margin: ResolvedEdges,
   pub known: OptionalSize,
   pub minimum: Size,
+  // Immutable inherited geometry shared by boundary probes and accepted retries.
+  pub gridContext: usize,
   pub nextStart: usize,
   pub nextEnd: usize,
 }
@@ -49,6 +52,7 @@ impl FragmentItem {
       margin: ResolvedEdges.zero(),
       known: OptionalSize.none(),
       minimum: Size { width: 0.0, height: 0.0 },
+      gridContext: 0,
       nextStart: NO_NODE,
       nextEnd: NO_NODE,
     }
@@ -70,6 +74,7 @@ impl Copy for FragmentRow {}
 pub struct GridFragmentScratch {
   pub items: List<FragmentItem>,
   pub rows: List<FragmentRow>,
+  pub baselineRows: List<TrackState>,
   pub reversed: bool,
 }
 
@@ -78,6 +83,7 @@ impl GridFragmentScratch {
     return GridFragmentScratch {
       items: List<FragmentItem>.make(),
       rows: List<FragmentRow>.make(),
+      baselineRows: List<TrackState>.make(),
       reversed: false,
     }
   }
@@ -87,6 +93,7 @@ impl GridFragmentScratch {
     ? &mut Allocator {
     self.items.clear()
     self.rows.clear()
+    self.baselineRows.clear()
     self.reversed = reversed
     run self.items.reserve(items.length)
     let mut index: usize = 0

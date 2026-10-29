@@ -1,0 +1,77 @@
+{
+  "name": "grid-subgrid-edge-recursive-columns",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "intrinsic-tracks"],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-size-contribution",
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing"
+  ],
+  "derivation": "Column introspection crosses both column-subgrid levels: max(23,17)=23 and max(41,31)=41, plus the inherited 7px gap gives 71px. Rows are standalone at both levels: the inner row is 11px, the outer second row is 13px, and its local 3px gap makes the outer and root heights 27px. All descendant coordinates are parent-border-box relative.",
+  "input": {
+    "viewport": {"width": 240, "height": 160},
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": ["auto", "auto"],
+          "gridTemplateRows": ["auto"],
+          "columnGap": 7
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": ["auto", "auto"],
+          "columnGap": "normal",
+          "rowGap": 3,
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": ["auto"],
+          "columnGap": "normal",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 2,
+        "style": {"gridColumnStart": 1, "gridRowStart": 1, "width": 23, "height": 11}
+      },
+      {
+        "parent": 2,
+        "style": {"gridColumnStart": 2, "gridRowStart": 1, "width": 41, "height": 11}
+      },
+      {
+        "parent": 1,
+        "style": {"gridColumnStart": 1, "gridRowStart": 2, "width": 17, "height": 13}
+      },
+      {
+        "parent": 1,
+        "style": {"gridColumnStart": 2, "gridRowStart": 2, "width": 31, "height": 13}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 71, "height": 27},
+      {"x": 0, "y": 0, "width": 71, "height": 27},
+      {"x": 0, "y": 0, "width": 71, "height": 11},
+      {"x": 0, "y": 0, "width": 23, "height": 11},
+      {"x": 30, "y": 0, "width": 41, "height": 11},
+      {"x": 0, "y": 14, "width": 17, "height": 13},
+      {"x": 30, "y": 14, "width": 31, "height": 13}
+    ]
+  }
+}

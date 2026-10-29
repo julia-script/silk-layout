@@ -284,8 +284,8 @@ pub enum GridRepeatKind {
   AutoFit
 }
 
-// A repeat references one unexpanded pattern in GridAxis.tracks. Named lines
-// use those same unexpanded line offsets; adjacent groups share an offset.
+// A repeat references one unexpanded track pattern, or line-name groups on a
+// subgrid. Unlike track boundaries, adjacent subgrid groups have distinct slots.
 pub struct GridRepeat {
   pub start: usize,
   pub length: usize,
@@ -296,6 +296,9 @@ pub struct GridRepeat {
 impl Copy for GridRepeat {}
 
 pub struct GridAxis {
+  pub subgrid: bool,
+  // Unexpanded local groups, including empty groups; zero on standalone axes.
+  pub lineCount: usize,
   pub tracks: List<GridTrack>,
   pub lines: List<GridNamedLine>,
   pub repeats: List<GridRepeat>
@@ -304,13 +307,91 @@ pub struct GridAxis {
 impl GridAxis {
   pub fn make() -> GridAxis {
     return GridAxis {
+      subgrid: false,
+      lineCount: 0,
       tracks: List<GridTrack>.make(),
       lines: List<GridNamedLine>.make(),
       repeats: List<GridRepeat>.make(),
     }
   }
 
+  // Auto-repeat contributes no lines when determining an automatic span.
+  pub fn subgridSpan(self: &Self) -> usize {
+    let mut groups = self.lineCount
+    let repeats = self.repeats.asSlice()
+    let mut index: usize = 0
+    while index < repeats.length {
+      let repeat = repeats[index]
+      if repeat.kind == GridRepeatKind.Count {
+        groups = groups + repeat.length * (repeat.count - 1)
+      } else {
+        groups = groups - repeat.length
+      }
+      index = index + 1
+    }
+    if groups <= 1 { return 1 }
+    if groups > MAX_GRID_TRACKS { return MAX_GRID_TRACKS }
+    return groups - 1
+  }
+
+  fn validSubgrid(self: &Self, names: usize) -> bool {
+    if self.tracks.length() != 0 || self.lineCount > MAX_GRID_TRACKS + 1 {
+      return false
+    }
+    let repeats = self.repeats.asSlice()
+    let mut expanded = self.lineCount
+    let mut end: usize = 0
+    let mut automatic = false
+    let mut index: usize = 0
+    while index < repeats.length {
+      let repeat = repeats[index]
+      if repeat.start < end || repeat.start > self.lineCount || repeat.length == 0
+        || repeat.length > self.lineCount - repeat.start
+        || repeat.count == 0 || repeat.count > MAX_GRID_TRACKS
+        || repeat.kind == GridRepeatKind.AutoFit {
+        return false
+      }
+      if repeat.kind == GridRepeatKind.AutoFill {
+        if automatic || repeat.count != 1 { return false }
+        automatic = true
+      }
+      let extra = repeat.length * (repeat.count - 1)
+      if extra > MAX_GRID_TRACKS + 1 - expanded { return false }
+      expanded = expanded + extra
+      end = repeat.start + repeat.length
+      index = index + 1
+    }
+    let lines = self.lines.asSlice()
+    index = 0
+    while index < lines.length {
+      let line = lines[index]
+      if line.line >= self.lineCount || line.name == 0 || line.name >= names
+        || line.repeat > repeats.length {
+        return false
+      }
+      if line.repeat != 0 {
+        let repeat = repeats[line.repeat - 1]
+        if line.line < repeat.start || line.line - repeat.start >= repeat.length {
+          return false
+        }
+      } else {
+        let mut at: usize = 0
+        while at < repeats.length {
+          let repeat = repeats[at]
+          if line.line >= repeat.start && line.line - repeat.start < repeat.length {
+            return false
+          }
+          at = at + 1
+        }
+      }
+      index = index + 1
+    }
+    return true
+  }
+
   pub fn valid(self: &Self, names: usize) -> bool {
+    if self.subgrid { return self.validSubgrid(names) }
+    if self.lineCount != 0 { return false }
     let tracks = self.tracks.asSlice()
     if tracks.length > MAX_GRID_TRACKS {
       return false
@@ -428,6 +509,8 @@ impl GridTemplate {
 
   pub fn isInitial(self: &Self) -> bool {
     return self.rows.tracks.length() == 0 && self.columns.tracks.length() == 0
+      && !self.rows.subgrid && !self.columns.subgrid
+      && self.rows.lineCount == 0 && self.columns.lineCount == 0
       && self.rows.lines.length() == 0
       && self.columns.lines.length() == 0
       && self.rows.repeats.length() == 0

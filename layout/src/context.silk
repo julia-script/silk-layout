@@ -29,6 +29,9 @@ pub struct Input {
   // Without it, a horizontal flex container may skip sizing its items' cross
   // sizes, which only its height depends on.
   pub fullSize: bool,
+  // Immutable inherited Grid geometry identity; zero means a standalone box.
+  // Child requests reset it unless their Grid parent explicitly binds them.
+  pub gridContext: usize,
   pub fragmentation: FragmentInput,
 }
 impl Copy for Input {}
@@ -38,7 +41,7 @@ impl Input {
     let mut height = AvailableSpace.maxContent()
     if parent.widthDefinite { width = AvailableSpace.definite(parent.width) }
     if parent.heightDefinite { height = AvailableSpace.definite(parent.height) }
-    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), minimum: Size { width: 0.0, height: 0.0 }, availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, baselines: true, fullSize: true, fragmentation: FragmentInput.continuous() }
+    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), minimum: Size { width: 0.0, height: 0.0 }, availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, baselines: true, fullSize: true, gridContext: 0, fragmentation: FragmentInput.continuous() }
   }
   pub fn effectiveMinimum(self: &Self) -> Size with Intrinsic.inlineAlways() {
     let mut result = self.minimum

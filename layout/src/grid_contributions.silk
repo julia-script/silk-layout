@@ -269,7 +269,7 @@ effect fn probe<'pass, 'source, M: Measure + TextMeasure>(
 // The caller supplies physical-axis requests and fixed-only track caps. Neither
 // known stretch sizes nor an estimated area establishes a specified suggestion.
 // Masks omit unused intrinsic contributions, not the minimum needed by §12.5.
-pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
+pub effect fn measureContributionEdges<'pass, 'source, M: Measure + TextMeasure>(
   nodes: &BoxTree<'source>,
   output: &mut LayoutPass<'pass, 'source>,
   measurer: &mut M,
@@ -281,6 +281,8 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
   crossFixedMaximum: f32,
   needMinContent: bool,
   needMaxContent: bool,
+  extraMargin: f32,
+  extraCrossMargin: f32,
 ) -> ItemContribution
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
@@ -302,8 +304,8 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
   let box = shapedBox(&output, style, id, &propertyInput)
   let inset = edges(box.inset, horizontal)
   let crossInset = edges(box.inset, !horizontal)
-  let margin = edges(box.margin, horizontal)
-  let crossMargin = edges(box.margin, !horizontal)
+  let margin = edges(box.margin, horizontal) + extraMargin
+  let crossMargin = edges(box.margin, !horizontal) + extraCrossMargin
   let mut add = inset
   let mut crossAdd = crossInset
   if style.boxSizing == BoxSizing.BorderBox {
@@ -557,4 +559,24 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
     usedMinimum: usedMinimum,
   }
   return result
+}
+
+pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  id: usize,
+  input: &Input,
+  horizontal: bool,
+  autoMinimumAllowed: bool,
+  fixedMaximum: f32,
+  crossFixedMaximum: f32,
+  needMinContent: bool,
+  needMaxContent: bool,
+) -> ItemContribution
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
+  return run measureContributionEdges(nodes, &mut output, &mut measurer, id, input,
+    horizontal, autoMinimumAllowed, fixedMaximum, crossFixedMaximum,
+    needMinContent, needMaxContent, 0.0, 0.0)
 }

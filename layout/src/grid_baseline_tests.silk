@@ -1,9 +1,20 @@
 import silk.testing.testing { Testing, AssertionError }
-import geometry { Layout, Size, BaselineSet, OptionalSize, AvailableKind }
-import style { Style, WritingMode, Direction, Dimension }
-import grid_tracks { TrackState }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.collections.list { List }
+import geometry {
+  Layout, Size, Point, Rect, BaselineSet, OptionalSize, AvailableKind,
+  Measure, MeasureRequest, Measured, NaturalDimensions,
+  FontRequest, FontMetrics, ScrollbarRequest, ScrollbarMetrics
+}
+import style {
+  Style, WritingMode, Direction, Dimension, Align,
+  Display, DisplayOutside, DisplayInside
+}
+import grid_tracks { TrackState, TrackContribution }
 import grid_baselines {
   BaselineGroup,
+  GridBaselines,
   physicalBaselines,
   baselineMode,
   cyclicSize,
@@ -12,7 +23,17 @@ import grid_baselines {
   gridBefore
 }
 import context { Input }
-import grid_contributions { contributionBaselineInput }
+import grid_contributions { contributionBaselineInput, ItemContribution }
+import grid_baselines as Baselines
+import grid_placement { GridItem }
+import grid_style { GridTemplate, GridError }
+import tree { Tree, LayoutTree, InvalidNode }
+import box_tree as Boxes
+import layout_pass { LayoutPass }
+import fragmentation { FragmentationError }
+import text {
+  TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun
+}
 
 // Grid 2 §12.5: minimum, min-content and max-content shims are independent.
 test effect fn gridBaselineContributionShimsAreIndependent()
@@ -161,4 +182,264 @@ test effect fn gridBaselineCapturePreservesIntrinsicContexts()
     !fixed.intrinsicWidth && !fixed.known.widthDefinite,
     "definite authored size remains active without forcing a capped size",
   )
+}
+
+struct BaselineMeasure {}
+
+impl Measure for BaselineMeasure {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    return FontMetrics.zero()
+  }
+
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop provider
+    drop request
+    return ScrollbarMetrics.zero()
+  }
+
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop provider
+    drop key
+    drop request
+    return Measured {
+      size: Size.zero(),
+      scrollableOverflow: Rect.zero(),
+      contentBlockSize: 0.0,
+      firstBaselines: BaselineSet.zero(),
+      lastBaselines: BaselineSet.zero(),
+      hasBaseline: false,
+      hasLineBoxes: false,
+    }
+  }
+}
+
+impl TextMeasure for BaselineMeasure {
+  fn beginTextLayout(provider: &mut Self) { drop provider }
+
+  effect fn analyze(provider: &mut Self, context: TextContext, output: &mut List<TextBreak>)
+    -> TextAnalysis
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    drop context
+    drop output
+    fail TextError { source: 0, message: "baseline fixture contains no text" }
+  }
+
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>)
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    drop request
+    drop output
+    fail TextError { source: 0, message: "baseline fixture contains no text" }
+  }
+}
+
+fn baselineLayout(value: f32) -> Layout {
+  let mut layout = Layout.zero()
+  layout.size = Size { width: 20.0, height: 20.0 }
+  layout.hasFirstBaseline = true
+  layout.hasLastBaseline = true
+  layout.firstBaselines = BaselineSet.uniform(value)
+  layout.lastBaselines = BaselineSet.uniform(value)
+  return layout
+}
+
+effect fn hoistedBaselineMembers(reverse: bool, last: bool)
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static>
+  ? &mut Allocator {
+  let mut parent = Style.make()
+  parent.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  parent.alignItems = Align.Baseline
+  if last { parent.alignItems = Align.LastBaseline }
+  let mut tree = run Tree.make(move parent)
+  let root = tree.root()
+  let first = run tree.append(root, Style.make())
+  let second = run tree.append(root, Style.make())
+  let mut nestedStyle = Style.make()
+  nestedStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  nestedStyle.writingMode = WritingMode.VerticalLr
+  nestedStyle.alignItems = Align.Start
+  nestedStyle.justifyItems = Align.Baseline
+  if last { nestedStyle.justifyItems = Align.LastBaseline }
+  let nested = run tree.append(root, move nestedStyle)
+  let descendant = run tree.append(nested, Style.make())
+  let boxes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(),
+    tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let rootId = boxes.firstBySource.get(root.index)
+  let firstId = boxes.firstBySource.get(first.index)
+  let secondId = boxes.firstBySource.get(second.index)
+  let descendantId = boxes.firstBySource.get(descendant.index)
+  let parentStyle = boxes.style(rootId)
+  let immediate = boxes.style(boxes.firstBySource.get(nested.index))
+  let mut items = [GridItem.make(firstId), GridItem.make(secondId)]
+  items[1].row.start = 1
+  items[1].row.end = 2
+  let tracks = [TrackState.fixed(40.0), TrackState.fixed(40.0)]
+  let mut scratch = GridBaselines.make()
+  let mut measurer = BaselineMeasure {}
+  run Baselines.prepare(&boxes, &mut measurer, &items, parentStyle,
+    &tracks, &tracks, true, true, &mut scratch)
+  let mut member = GridItem.make(descendantId)
+  member.row.end = 2
+  run Baselines.appendMember(&boxes, &mut measurer, &mut scratch, 4, false,
+    &member, parentStyle, immediate, &tracks, true, reverse)
+  run Testing.expect(Baselines.active(&scratch, 4, false),
+    "hoisted orthogonal child uses immediate justify-items on the owner's row axis")
+  run Testing.expect(!Baselines.active(&scratch, 3, false),
+    "growing to a contribution index fills absent entries")
+  let mut output = LayoutTree.make()
+  run output.prepare(boxes.boxes.length())
+  let mut pass = run LayoutPass.make(output.boxes.asMutSlice(), &mut output.fragments, boxes.sources)
+  let request = Input.make(OptionalSize.none())
+  let measured = ItemContribution { minimum: 1.0, minContent: 2.0, maxContent: 3.0, usedMinimum: 0.0 }
+  let empty: [TrackContribution; 0] = []
+  Baselines.reset(&mut scratch, false, &empty)
+  run Baselines.captureContribution(&boxes, &mut pass, &mut measurer, &mut scratch,
+    0, false, firstId, &request, &measured, parentStyle)
+  run Baselines.captureContribution(&boxes, &mut pass, &mut measurer, &mut scratch,
+    1, false, secondId, &request, &measured, parentStyle)
+  run Baselines.captureContributionEdges(&boxes, &mut pass, &mut measurer, &mut scratch,
+    4, false, descendantId, &request, &measured, parentStyle, 7.0, 5.0)
+  drop pass
+  let mut contributions = [
+    TrackContribution.make(0, 1, 1.0, 2.0, 3.0),
+    TrackContribution.make(1, 2, 1.0, 2.0, 3.0),
+    TrackContribution.make(0, 1, 0.0, 0.0, 0.0),
+    TrackContribution.make(0, 1, 0.0, 0.0, 0.0),
+    TrackContribution.make(0, 2, 1.0, 2.0, 3.0),
+  ]
+  let changed = Baselines.applyShims(&scratch, false, &mut contributions)
+  drop changed
+  let mut matching: usize = 0
+  if last != reverse { matching = 1 }
+  let mut edgeShim: f32 = 7.0
+  if last { edgeShim = 5.0 }
+  run Testing.expect(contributions[matching].minimum == 1.0 + edgeShim
+    && contributions[matching].minContent == 2.0 + edgeShim
+    && contributions[matching].maxContent == 3.0 + edgeShim,
+    "edge offsets affect all baseline channels without forcing capped probe sizes")
+  run Testing.expect(contributions[4].minimum == 1.0
+    && contributions[4].minContent == 2.0 && contributions[4].maxContent == 3.0,
+    "ancestor margins are not added a second time to member contributions")
+  let firstLayout = baselineLayout(4.0)
+  let secondLayout = baselineLayout(9.0)
+  let memberLayout = baselineLayout(6.0)
+  Baselines.captureFinal(&mut scratch, 0, boxes.style(firstId), parentStyle,
+    &firstLayout, Point { x: 0.0, y: 0.0 }, Size { width: 40.0, height: 40.0 })
+  Baselines.captureFinal(&mut scratch, 1, boxes.style(secondId), parentStyle,
+    &secondLayout, Point { x: 0.0, y: 0.0 }, Size { width: 40.0, height: 40.0 })
+  Baselines.captureFinalMember(&mut scratch, 4, false, boxes.style(descendantId),
+    parentStyle, &memberLayout, 0.0, 40.0, 7.0, 5.0)
+  let mut expectedFirst: f32 = 0.0
+  let mut expectedSecond: f32 = 4.0
+  if !reverse {
+    expectedFirst = 9.0
+    expectedSecond = 0.0
+  }
+  if last {
+    expectedFirst = 20.0
+    expectedSecond = 12.0
+    if reverse {
+      expectedFirst = 17.0
+      expectedSecond = 20.0
+    }
+  }
+  run Testing.expect(Baselines.shift(&scratch, 0, false, -1.0) == expectedFirst,
+    "mapped preference and low/high edge margins preserve the first direct group")
+  run Testing.expect(Baselines.shift(&scratch, 1, false, -1.0) == expectedSecond,
+    "reversed spanning preference selects the matching owner endpoint")
+  let mut expectedMember: f32 = 0.0
+  if last { expectedMember = 8.0 }
+  run Testing.expect(Baselines.shift(&scratch, 4, false, -1.0) == expectedMember,
+    "member shift excludes accumulated edge margins")
+  Baselines.truncateMembers(&mut scratch, false, 2)
+  run Testing.expect(!Baselines.active(&scratch, 4, false)
+    && Baselines.active(&scratch, 0, false) && Baselines.active(&scratch, 1, false),
+    "truncation removes only descendant membership")
+  Baselines.resetFinal(&mut scratch)
+  run Baselines.appendMember(&boxes, &mut measurer, &mut scratch, 4, false,
+    &member, parentStyle, immediate, &tracks, true, reverse)
+  Baselines.captureFinalMember(&mut scratch, 4, false, boxes.style(descendantId),
+    parentStyle, &memberLayout, 0.0, 40.0, 7.0, 5.0)
+  Baselines.captureFinal(&mut scratch, 0, boxes.style(firstId), parentStyle,
+    &firstLayout, Point { x: 0.0, y: 0.0 }, Size { width: 40.0, height: 40.0 })
+  Baselines.captureFinal(&mut scratch, 1, boxes.style(secondId), parentStyle,
+    &secondLayout, Point { x: 0.0, y: 0.0 }, Size { width: 40.0, height: 40.0 })
+  run Testing.expect(Baselines.shift(&scratch, 0, false, -1.0) == expectedFirst
+    && Baselines.shift(&scratch, 1, false, -1.0) == expectedSecond,
+    "recollection reuses the original direct group index")
+  let mut nonbaseline = Style.make()
+  nonbaseline.alignItems = Align.Start
+  run Baselines.appendMember(&boxes, &mut measurer, &mut scratch, 4, false,
+    &member, parentStyle, &nonbaseline, &tracks, true, reverse)
+  run Testing.expect(!Baselines.active(&scratch, 4, false),
+    "a nonbaseline replacement clears old contribution membership")
+}
+
+test effect fn gridHoistedBaselineMembersKeepDirectGroupsAndMappedEdges()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run hoistedBaselineMembers(false, false) |> Effect.provideMut<Allocator>(&mut allocator)
+  run hoistedBaselineMembers(true, false) |> Effect.provideMut<Allocator>(&mut allocator)
+  run hoistedBaselineMembers(false, true) |> Effect.provideMut<Allocator>(&mut allocator)
+  run hoistedBaselineMembers(true, true) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn hoistedBaselineEligibility()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static>
+  ? &mut Allocator {
+  let mut parent = Style.make()
+  parent.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  parent.alignItems = Align.Baseline
+  let mut tree = run Tree.make(move parent)
+  let root = tree.root()
+  let mut nestedStyle = Style.make()
+  nestedStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  nestedStyle.alignItems = Align.Baseline
+  let nested = run tree.append(root, move nestedStyle)
+  let mut template = GridTemplate.make()
+  template.rows.subgrid = true
+  run tree.setGrid(nested, move template)
+  let mut childStyle = Style.make()
+  childStyle.height = Dimension.pct(0.5)
+  let child = run tree.append(nested, move childStyle)
+  let boxes = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(),
+    tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
+  let parentStyle = boxes.style(boxes.firstBySource.get(root.index))
+  let nestedId = boxes.firstBySource.get(nested.index)
+  let items = [GridItem.make(nestedId)]
+  let tracks = [TrackState.fixed(40.0), TrackState.flexible(0.0, 1.0)]
+  let mut scratch = GridBaselines.make()
+  let mut measurer = BaselineMeasure {}
+  run Baselines.prepare(&boxes, &mut measurer, &items, parentStyle,
+    &tracks, &tracks, false, false, &mut scratch)
+  run Testing.expect(!Baselines.active(&scratch, 0, false),
+    "the effective subgrid itself does not join its inherited baseline axis")
+  let mut member = GridItem.make(boxes.firstBySource.get(child.index))
+  run Baselines.appendMember(&boxes, &mut measurer, &mut scratch, 1, false,
+    &member, parentStyle, boxes.style(nestedId), &tracks, false, false)
+  run Testing.expect(Baselines.active(&scratch, 1, false),
+    "percentage descendants in a fixed owner track are eligible")
+  member.row.start = 1
+  member.row.end = 2
+  run Baselines.appendMember(&boxes, &mut measurer, &mut scratch, 2, false,
+    &member, parentStyle, boxes.style(nestedId), &tracks, false, false)
+  run Testing.expect(!Baselines.active(&scratch, 2, false),
+    "cyclic eligibility uses the mapped owner track, not local subgrid tracks")
+}
+
+test effect fn gridHoistedBaselineEligibilityUsesOwnerTracks()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run hoistedBaselineEligibility() |> Effect.provideMut<Allocator>(&mut allocator)
 }

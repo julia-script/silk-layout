@@ -16,7 +16,7 @@ import geometry {
   clamp
 }
 import style { Style, Dimension, DimensionKind, Direction, Align, Position }
-import context { Input, ResolvedBox, UNBOUNDED, childrenInput, resolveBox, resolve }
+import context { Input, ResolvedBox, UNBOUNDED, childrenInput, resolve }
 import box_tree { BoxTree }
 import layout_pass { LayoutPass }
 import engine { layoutNode, layoutNodeInPlace, probeNode, shapedBox }
@@ -31,12 +31,15 @@ import grid_placement { GridItem, collectItems }
 import grid_style { GridTrack, GridBreadthKind }
 import grid_scratch { GridAxisScratch }
 import grid_lines { LineNames }
-import grid_template { expandedTracks }
+import grid_template { expandedTracks, expandedLines }
 import grid_preparation { needsPreparation, prepareTemplate, preferredSizes }
 import grid_contributions { ItemContribution, measureContribution }
 import grid_alignment { selfAlignment, alignTracks, alignItem }
 import grid_baselines as Baselines
 import grid_baselines { GridBaselines }
+import grid_subgrid as Subgrid
+import grid_subgrid { SubgridContext, GridSource }
+import grid_subgrid_sizing as SubgridSizing
 import grid_tracks {
   TrackState,
   TrackContribution,
@@ -50,7 +53,21 @@ import grid_tracks {
   spanSize
 }
 
-fn needsBaselines(nodes: &BoxTree, items: &[GridItem], parent: &Style) -> bool {
+fn nestedBaselines(nodes: &BoxTree, id: usize) -> bool {
+  let parent = nodes.style(id)
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    let style = nodes.style(child)
+    let inline = selfAlignment(style, parent, true)
+    let block = selfAlignment(style, parent, false)
+    if inline == Align.Baseline || inline == Align.LastBaseline
+      || block == Align.Baseline || block == Align.LastBaseline { return true }
+    if Subgrid.eligible(nodes, child) && nestedBaselines(nodes, child) { return true }
+    child = nodes.node(child).nextSibling
+  }
+  return false
+}
+pub fn needsBaselines(nodes: &BoxTree, items: &[GridItem], parent: &Style) -> bool {
   let mut index: usize = 0
   while index < items.length {
     let style = nodes.style(items[index].id)
@@ -58,6 +75,9 @@ fn needsBaselines(nodes: &BoxTree, items: &[GridItem], parent: &Style) -> bool {
     let block = selfAlignment(style, parent, false)
     if inline == Align.Baseline || inline == Align.LastBaseline || block == Align.Baseline
       || block == Align.LastBaseline {
+      return true
+    }
+    if Subgrid.eligible(nodes, items[index].id) && nestedBaselines(nodes, items[index].id) {
       return true
     }
     index = index + 1
@@ -71,7 +91,7 @@ fn stretchContent(value: Align) -> bool {
 
 // Grid §6.2: the area supplies both available space and the percentage basis.
 // Only stretch fixes an auto preferred size; other values use fit-content.
-fn itemInput(
+pub fn itemInput(
   output: &LayoutPass,
   id: usize,
   base: &Input,
@@ -81,6 +101,7 @@ fn itemInput(
   area: OptionalSize,
 ) -> Input with Intrinsic.inlineAlways() {
   let mut request = base.*
+  request.gridContext = 0
   request.blockify = true
   request.blockRoot = true
   request.shrinkToFit = true
@@ -121,13 +142,13 @@ fn itemInput(
   return request
 }
 
-struct TrackPolicy {
-  automatic: bool,
-  fixed: bool,
-  cap: f32,
-  intrinsic: bool,
-  needMin: bool,
-  needMax: bool,
+pub struct TrackPolicy {
+  pub automatic: bool,
+  pub fixed: bool,
+  pub cap: f32,
+  pub intrinsic: bool,
+  pub needMin: bool,
+  pub needMax: bool,
 }
 
 // Grid §12.5 only grows intrinsic bounds; §12.7's definite flex fraction
@@ -141,7 +162,7 @@ fn needsContribution(
       && (track.maximum != GridBreadthKind.Flex || constraint != AvailableKind.Definite))
 }
 
-fn trackPolicy(
+pub fn trackPolicy(
   tracks: &[TrackState],
   start: usize,
   end: usize,
@@ -183,21 +204,22 @@ fn trackPolicy(
   return move result
 }
 
-struct AxisSizing {
-  columns: bool,
-  origin: i32,
-  count: usize,
-  definite: bool,
-  baselineDefinite: bool,
-  size: f32,
-  minimum: f32,
-  maximum: f32,
-  available: AvailableSpace,
-  gap: Dimension,
-  usedGap: f32,
-  stretch: bool,
-  resolveCyclic: bool,
-  resolvedCyclic: bool,
+pub struct AxisSizing {
+  pub columns: bool,
+  pub origin: i32,
+  pub count: usize,
+  pub definite: bool,
+  pub baselineDefinite: bool,
+  pub size: f32,
+  pub minimum: f32,
+  pub maximum: f32,
+  pub available: AvailableSpace,
+  pub gap: Dimension,
+  pub usedGap: f32,
+  pub stretch: bool,
+  pub resolveCyclic: bool,
+  pub resolvedCyclic: bool,
+  pub inherited: bool,
 }
 
 fn gridSpace(definite: bool, size: f32, available: AvailableSpace) -> AvailableSpace {
@@ -238,6 +260,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   measurer: &mut M,
   items: &[GridItem],
   base: &Input,
+  source: &GridSource,
   parent: &Style,
   axis: &Axes,
   own: &mut GridAxisScratch,
@@ -259,10 +282,18 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
     intrinsic = intrinsic || needsContribution(&tracks[index], constraint.kind)
     index = index + 1
   }
-  if !intrinsic {
+  let mut descendants = false
+  index = 0
+  while source.subgridChildren && !descendants && index < items.length {
+    descendants = descendants || Subgrid.inherits(nodes, items[index].id, parent, sizing.columns)
+    index = index + 1
+  }
+  if !intrinsic && !descendants {
     own.contributions.clear()
+    own.members.clear()
     return false
   }
+  Baselines.truncateMembers(&mut baselines, sizing.columns, items.length)
   Baselines.reset(&mut baselines, sizing.columns, own.contributions.asSlice())
   let mut changed = false
   index = 0
@@ -288,7 +319,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
     )
     let mut contribution = TrackContribution.make(start, end, 0.0, 0.0, 0.0)
     let aligned = Baselines.active(&baselines, index, sizing.columns)
-    if policy.intrinsic || aligned {
+    if (!descendants || !Subgrid.inherits(nodes, item.id, parent, sizing.columns)) && (policy.intrinsic || aligned) {
       let mut crossSize = crossPolicy.cap
       let crossDefinite = crossFinal || crossPolicy.fixed
       if crossFinal {
@@ -304,7 +335,22 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
           area.widthDefinite = true
         }
       }
-      let request = itemInput(&output, item.id, base, nodes.style(item.id), parent, axis, area)
+      let mut request = itemInput(&output, item.id, base, nodes.style(item.id), parent, axis, area)
+      if source.subgridChildren && Subgrid.eligible(nodes, item.id) {
+        let mut inherited = output.cache.subgrids.takeBuilder()
+        if sizing.columns {
+          run Subgrid.makeContext(nodes, item, parent, source, tracks, crossTracks,
+            sizing.usedGap, crossSizing.usedGap, &mut inherited)
+        } else {
+          run Subgrid.makeContext(nodes, item, parent, source, crossTracks, tracks,
+            crossSizing.usedGap, sizing.usedGap, &mut inherited)
+        }
+        inherited.stage = 1
+        if sizing.columns { inherited.stage = inherited.stage + 1 }
+        if crossFinal { inherited.stage = inherited.stage + 2 }
+        if checkOnly { inherited.stage = inherited.stage + 4 }
+        request.gridContext = run output.cache.subgrids.intern(item.id, move inherited)
+      }
       let mut measured = ItemContribution {
         minimum: 0.0,
         minContent: 0.0,
@@ -356,8 +402,43 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
     } else {
       run own.contributions.append(contribution)
     }
+    if descendants {
+      if index < own.members.length() { own.members.set(index, item.*) }
+      else { run own.members.append(item.*) }
+    }
     index = index + 1
   }
+  if !descendants { own.members.clear() }
+  let mut cursor = items.length
+  index = 0
+  while descendants && index < items.length {
+    let item = &items[index]
+    if Subgrid.inherits(nodes, item.id, parent, sizing.columns) {
+      let mut span = item.row
+      let mut columns = crossTracks
+      let mut rows = tracks
+      let mut columnGap = crossSizing.usedGap
+      let mut rowGap = sizing.usedGap
+      if sizing.columns {
+        span = item.column
+        columns = tracks
+        rows = crossTracks
+        columnGap = sizing.usedGap
+        rowGap = crossSizing.usedGap
+      }
+      let nestedChanged = run SubgridSizing.collect(nodes, &mut output, &mut measurer,
+        item, base, parent, source, columns, rows, columnGap, rowGap,
+        parent, tracks, sizing, i32.toUsize(span.start), i32.toUsize(span.end),
+        Subgrid.reversed(parent, nodes.style(item.id), sizing.columns), 0.0, 0.0,
+        crossFinal, checkOnly, &mut own.contributions, &mut own.members, &mut cursor, &mut baselines)
+      changed = changed || nestedChanged
+    }
+    index = index + 1
+  }
+  changed = changed || own.contributions.length() != cursor
+  own.contributions.truncate(cursor)
+  own.members.truncate(cursor)
+  Baselines.truncateMembers(&mut baselines, sizing.columns, cursor)
   let shimChanged = Baselines.applyShims(&baselines, sizing.columns, own.contributions.asMutSlice())
   return changed || shimChanged
 }
@@ -394,12 +475,13 @@ effect fn finishTracks(
 
 // Cyclic percentages contribute zero/auto to the intrinsic size, then resolve
 // against that size for layout. Their overflow must not enlarge the container.
-effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
+pub effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
   nodes: &BoxTree<'source>,
   output: &mut LayoutPass<'pass, 'source>,
   measurer: &mut M,
   items: &[GridItem],
   base: &Input,
+  source: &GridSource,
   parent: &Style,
   axis: &Axes,
   own: &mut GridAxisScratch,
@@ -416,6 +498,21 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
 )
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
+  if sizing.inherited {
+    own.contributions.clear()
+    own.members.clear()
+    own.tracks.clear()
+    let mut at: usize = 0
+    while at < own.inherited.length() {
+      run own.tracks.append(own.inherited.get(at))
+      at = at + 1
+    }
+    if prepareBaselines {
+      run Baselines.prepare(nodes, &mut measurer, items, parent, own.tracks.asSlice(),
+        cross.tracks.asSlice(), sizing.baselineDefinite, crossSizing.baselineDefinite, &mut baselines)
+    }
+    return
+  }
   sizing.resolvedCyclic = false
   sizing.usedGap = max(0.0, resolve(sizing.gap, sizing.size, sizing.definite, sizing.gap.value))
   run initializeTracks(
@@ -428,6 +525,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     &mut own.tracks,
   )
   collapseTracks(own.tracks.asMutSlice(), collapsed)
+  drop positionTracks(own.tracks.asMutSlice(), sizing.usedGap)
   if prepareBaselines {
     run Baselines.prepare(
       nodes,
@@ -447,6 +545,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     &mut measurer,
     items,
     base,
+    source,
     parent,
     axis,
     &mut own,
@@ -482,6 +581,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
       &mut measurer,
       items,
       base,
+      source,
       parent,
       axis,
       &mut own,
@@ -524,6 +624,7 @@ pub effect fn requestItem<'pass, 'source, M: Measure + TextMeasure>(
   measurer: &mut M,
   item: &GridItem,
   base: &Input,
+  source: &GridSource,
   parent: &Style,
   axis: &Axes,
   columns: &[TrackState],
@@ -536,6 +637,20 @@ pub effect fn requestItem<'pass, 'source, M: Measure + TextMeasure>(
   ? &mut Allocator with Intrinsic.inlineAlways() {
   let style = nodes.style(item.id)
   let mut request = itemInput(&output, item.id, base, style, parent, axis, area)
+  let inheritColumns = source.subgridChildren && Subgrid.inherits(nodes, item.id, parent, true)
+  let inheritRows = source.subgridChildren && Subgrid.inherits(nodes, item.id, parent, false)
+  if inheritColumns || inheritRows {
+    let mut inherited = output.cache.subgrids.takeBuilder()
+    run Subgrid.makeContext(nodes, item, parent, source, columns, rows, columnGap, rowGap, &mut inherited)
+    request.gridContext = run output.cache.subgrids.intern(item.id, move inherited)
+    let edges = axis.edges(shapedBox(&output, style, item.id, &request).margin)
+    if inheritColumns && area.widthDefinite {
+      Subgrid.forceSize(&mut request, parent, true, max(0.0, area.width - edges.horizontal()))
+    }
+    if inheritRows && area.heightDefinite {
+      Subgrid.forceSize(&mut request, parent, false, max(0.0, area.height - edges.vertical()))
+    }
+  }
   let columnPolicy = trackPolicy(
     columns,
     i32.toUsize(item.column.start),
@@ -556,7 +671,7 @@ pub effect fn requestItem<'pass, 'source, M: Measure + TextMeasure>(
     inlineMinimum = style.minHeight
     blockMinimum = style.minWidth
   }
-  if columnPolicy.automatic && inlineMinimum.kind == DimensionKind.Auto {
+  if !inheritColumns && columnPolicy.automatic && inlineMinimum.kind == DimensionKind.Auto {
     let measured = run measureContribution(
       nodes,
       &mut output,
@@ -572,7 +687,7 @@ pub effect fn requestItem<'pass, 'source, M: Measure + TextMeasure>(
     )
     applyMinimum(&mut request, !axis.vertical, measured.usedMinimum)
   }
-  if rowPolicy.automatic && blockMinimum.kind == DimensionKind.Auto {
+  if !inheritRows && rowPolicy.automatic && blockMinimum.kind == DimensionKind.Auto {
     let measured = run measureContribution(
       nodes,
       &mut output,
@@ -614,7 +729,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   limitsInput.minimum = input.effectiveMinimum()
   limitsInput.intrinsicWidth = false
   limitsInput.intrinsicHeight = false
-  let limits = axis.box(resolveBox(style, &limitsInput))
+  let limits = axis.box(shapedBox(&output, style, id, &limitsInput))
   let mut inlineAvailable = input.availableWidth
   let mut blockAvailable = input.availableHeight
   if axis.vertical {
@@ -625,6 +740,12 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   base.performLayout = false
   base.baselines = false
   let mut lease = run output.cache.gridMemos.take(id, nodes.boxes.length())
+  let emptyInherited = SubgridContext.make()
+  let mut inherited = &emptyInherited
+  if input.gridContext != 0 { inherited = output.cache.subgrids.get(input.gridContext) }
+  let inheritedColumns = inherited.columns.active
+  let inheritedRows = inherited.rows.active
+  let initialStage = inherited.stage == 1 || inherited.stage == 2
   let prepared = needsPreparation(template)
   if prepared {
     let mut columnOverride = usize.MAX
@@ -665,6 +786,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       columnOverride,
       rowOverride,
       &mut lease.value,
+      inherited,
     )
   } else if lease.fresh {
     let emptyNames = LineNames.make()
@@ -691,8 +813,32 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     collapsedColumns = value.collapsedColumns.asSlice()
     collapsedRows = value.collapsedRows.asSlice()
   }
-  let bounds = lease.value.bounds
+  let mut columnLines = template.columns.lines.asSlice()
+  let mut rowLines = template.rows.lines.asSlice()
+  let mut areas = template.areas.asSlice()
+  let noAreaMasks: [usize; 0] = []
+  let mut areaMasks: &[usize] = &noAreaMasks
+  if prepared {
+    let value = &lease.value.template.asSlice()[0]
+    columnLines = expandedLines(&template.columns, &value.columns)
+    rowLines = expandedLines(&template.rows, &value.rows)
+    areas = value.areas.asSlice()
+    areaMasks = value.areaMasks.asSlice()
+  }
   let items = lease.value.items.asSlice()
+  let mut subgridChildren = false
+  let mut childIndex: usize = 0
+  while !subgridChildren && childIndex < items.length {
+    subgridChildren = Subgrid.eligible(nodes, items[childIndex].id)
+    childIndex = childIndex + 1
+  }
+  let source = GridSource {
+    columns: columnLines, rows: rowLines, areas: areas,
+    areaMasks: areaMasks,
+    columnOrigin: lease.value.bounds.columnOrigin, rowOrigin: lease.value.bounds.rowOrigin,
+    subgridChildren: subgridChildren,
+  }
+  let bounds = lease.value.bounds
   let baselineRequested = needsBaselines(nodes, items, style)
   let mut emptyBaselines = GridBaselines.make()
   let mut baselines = &mut emptyBaselines
@@ -702,8 +848,16 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     }
     baselines = &mut lease.value.baselines.asMutSlice()[0]
   }
-  let inlineSize = max(0.0, logical.size.width - logical.inset.horizontal())
-  let blockSize = max(0.0, logical.size.height - logical.inset.vertical())
+  let mut inlineSize = max(0.0, logical.size.width - logical.inset.horizontal())
+  let mut blockSize = max(0.0, logical.size.height - logical.inset.vertical())
+  if inheritedColumns {
+    inlineSize = max(0.0, spanSize(inherited.columns.tracks.asSlice(), 0, inherited.columns.tracks.length())
+      - logical.margin.horizontal() - logical.inset.horizontal())
+  }
+  if inheritedRows {
+    blockSize = max(0.0, spanSize(inherited.rows.tracks.asSlice(), 0, inherited.rows.tracks.length())
+      - logical.margin.vertical() - logical.inset.vertical())
+  }
   let mut columnSizing = AxisSizing {
     columns: true,
     origin: bounds.columnOrigin,
@@ -722,6 +876,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     stretch: stretchContent(style.justifyContent),
     resolveCyclic: !input.intrinsicWidth && !input.intrinsicHeight,
     resolvedCyclic: false,
+    inherited: inheritedColumns,
   }
   let mut rowSizing = AxisSizing {
     columns: false,
@@ -741,9 +896,29 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     stretch: stretchContent(style.alignContent),
     resolveCyclic: !input.intrinsicWidth && !input.intrinsicHeight,
     resolvedCyclic: false,
+    inherited: inheritedRows,
   }
   columnSizing.maximum = max(columnSizing.minimum, columnSizing.maximum)
   rowSizing.maximum = max(rowSizing.minimum, rowSizing.maximum)
+  if inheritedColumns {
+    if style.columnGap.kind == DimensionKind.Normal { columnSizing.usedGap = inherited.columns.gap }
+    let mut low = logical.inset.left + logical.margin.left
+    let mut high = logical.inset.right + logical.margin.right
+    if style.usedDirection() == Direction.Rtl {
+      low = logical.inset.right + logical.margin.right
+      high = logical.inset.left + logical.margin.left
+    }
+    run Subgrid.installTracks(&inherited.columns, columnSizing.usedGap, style.columnGap.kind == DimensionKind.Normal,
+      low, high, &mut lease.value.columns.inherited)
+    columnSizing.definite = true
+  }
+  if inheritedRows {
+    if style.rowGap.kind == DimensionKind.Normal { rowSizing.usedGap = inherited.rows.gap }
+    run Subgrid.installTracks(&inherited.rows, rowSizing.usedGap, style.rowGap.kind == DimensionKind.Normal,
+      logical.inset.top + logical.margin.top, logical.inset.bottom + logical.margin.bottom,
+      &mut lease.value.rows.inherited)
+    rowSizing.definite = true
+  }
   if baselineRequested {
     // A content-derived used size does not turn indefinite fr tracks into
     // definite tracks for the frozen baseline-cycle decision (§11.3–11.4).
@@ -763,12 +938,24 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &mut lease.value.rows.tracks,
   )
   collapseTracks(lease.value.rows.tracks.asMutSlice(), collapsedRows)
+  if subgridChildren && !inheritedRows {
+    SubgridSizing.estimate(lease.value.rows.tracks.asMutSlice(), &rowSizing, style)
+  }
+  if inheritedRows {
+    lease.value.rows.tracks.clear()
+    let mut at: usize = 0
+    while at < lease.value.rows.inherited.length() {
+      run lease.value.rows.tracks.append(lease.value.rows.inherited.get(at))
+      at = at + 1
+    }
+  }
   run sizeAxis(
     nodes,
     &mut output,
     &mut measurer,
     items,
     &base,
+    &source,
     style,
     &axis,
     &mut lease.value.columns,
@@ -789,6 +976,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &mut measurer,
     items,
     &base,
+    &source,
     style,
     &axis,
     &mut lease.value.rows,
@@ -798,17 +986,20 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     rowTemplate,
     template.autoRows.asSlice(),
     collapsedRows,
-    true,
+    !initialStage,
     &mut lease.value.trackWork,
     &mut baselines,
     false,
   )
-  let columnsChanged = run collectContributions(
+  let mut columnsChanged = false
+  if !initialStage && !inheritedColumns {
+    columnsChanged = run collectContributions(
     nodes,
     &mut output,
     &mut measurer,
     items,
     &base,
+    &source,
     style,
     &axis,
     &mut lease.value.columns,
@@ -819,6 +1010,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     true,
     &mut baselines,
   )
+  }
   if columnsChanged {
     run sizeAxis(
       nodes,
@@ -826,6 +1018,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       &mut measurer,
       items,
       &base,
+      &source,
       style,
       &axis,
       &mut lease.value.columns,
@@ -846,6 +1039,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       &mut measurer,
       items,
       &base,
+      &source,
       style,
       &axis,
       &mut lease.value.rows,
@@ -856,13 +1050,14 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       true,
       &mut baselines,
     )
-    if rowsChanged {
+    if rowsChanged && !inheritedRows {
       run sizeAxis(
         nodes,
         &mut output,
         &mut measurer,
         items,
         &base,
+        &source,
         style,
         &axis,
         &mut lease.value.rows,
@@ -879,6 +1074,8 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       )
     }
   }
+  lease.value.columnGap = columnSizing.usedGap
+  lease.value.rowGap = rowSizing.usedGap
   let mut result = Layout.zero()
   result.size = axis.size(
     Size {
@@ -951,6 +1148,9 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
         blockDefinite: rowSizing.definite,
         columnRepeat: columnRepeat,
         rowRepeat: rowRepeat,
+        source: source,
+        columnMembers: lease.value.columns.members.asSlice(),
+        rowMembers: lease.value.rows.members.asSlice(),
       }
       run Fragments.layoutGridFragment(
         nodes,
@@ -993,6 +1193,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
           &mut measurer,
           item,
           &base,
+          &source,
           style,
           &axis,
           columns,
@@ -1028,7 +1229,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
           Size { width: areaWidth, height: areaHeight },
         )
       }
-      if !sharing || pass > 0 {
+      if !sharing || pass > 0 || Subgrid.eligible(nodes, item.id) {
         let size = axis.size(output.boxes[item.id].size)
         let aligned = alignItem(
           itemStyle,
@@ -1045,6 +1246,8 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
           inlineShift = Baselines.shift(&baselines, index, true, inlineShift)
           blockShift = Baselines.shift(&baselines, index, false, blockShift)
         }
+        if subgridChildren && Subgrid.inherits(nodes, item.id, style, true) { inlineShift = 0.0 }
+        if subgridChildren && Subgrid.inherits(nodes, item.id, style, false) { blockShift = 0.0 }
         let mut inlineOffset = logical.inset.left + columns[column].position + margin.left
           + inlineShift
         if rtl {
@@ -1065,7 +1268,19 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       }
       index = index + 1
     }
+    if sharing && pass == 0 {
+      SubgridSizing.captureFinal(nodes, &output, id, logical.inset, lease.value.columns.members.asSlice(),
+        items.length, columns, true, &mut baselines)
+      SubgridSizing.captureFinal(nodes, &output, id, logical.inset, lease.value.rows.members.asSlice(),
+        items.length, rows, false, &mut baselines)
+    }
     pass = pass + 1
+  }
+  if sharing && !fragmented {
+    run SubgridSizing.placeFinal(nodes, &mut output, id, result.size, logical.inset, lease.value.columns.members.asSlice(),
+      items.length, columns, true, &baselines, input.performLayout)
+    run SubgridSizing.placeFinal(nodes, &mut output, id, result.size, logical.inset, lease.value.rows.members.asSlice(),
+      items.length, rows, false, &baselines, input.performLayout)
   }
   if input.baselines && !fragmented {
     Baselines.containerBaselines(
@@ -1102,7 +1317,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     )
     run output.resumes.set(id, state)
   }
-  if input.performLayout && style.position != Position.Static {
+  if input.performLayout && (style.position != Position.Static || input.gridContext != 0) {
     let emptyNames = LineNames.make()
     let mut columnNames = &emptyNames
     let mut rowNames = &emptyNames
@@ -1126,6 +1341,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       rowExplicit,
       rowNames,
     )
+    output.cache.gridGeometry.setContext(id, input.gridContext)
     if output.frame != NO_NODE {
       let fragment = output.publication(id)
       run output.cache.gridGeometry.setFragment(
@@ -1140,6 +1356,51 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
         - 1]
       output.cache.gridGeometry.captureRows(id, scratch)
     }
+  }
+  output.cache.gridMemos.put(move lease)
+  return result
+}
+
+// A speculative containing-block replay owns its freshly sized memo until its
+// checkpoint is restored. Reconstruct the child binding from that geometry,
+// never from the most recently interned context of an unrelated probe.
+pub effect fn shellContext(
+  nodes: &BoxTree, output: &mut LayoutPass, parentBox: usize, child: usize,
+) -> usize ! OutOfMemoryError ? &mut Allocator {
+  if !Subgrid.eligible(nodes, child) { return 0 }
+  let lease = run output.cache.gridMemos.take(parentBox, nodes.boxes.length())
+  let parent = nodes.style(parentBox)
+  let template = &nodes.grids[parent.grid]
+  let mut columnLines = template.columns.lines.asSlice()
+  let mut rowLines = template.rows.lines.asSlice()
+  let mut areas = template.areas.asSlice()
+  let noAreaMasks: [usize; 0] = []
+  let mut areaMasks: &[usize] = &noAreaMasks
+  if lease.value.template.length() != 0 {
+    let prepared = &lease.value.template.asSlice()[0]
+    columnLines = expandedLines(&template.columns, &prepared.columns)
+    rowLines = expandedLines(&template.rows, &prepared.rows)
+    areas = prepared.areas.asSlice()
+    areaMasks = prepared.areaMasks.asSlice()
+  }
+  let source = GridSource {
+    columns: columnLines, rows: rowLines, areas: areas,
+    areaMasks: areaMasks,
+    columnOrigin: lease.value.bounds.columnOrigin, rowOrigin: lease.value.bounds.rowOrigin,
+    subgridChildren: true,
+  }
+  let mut result: usize = 0
+  let mut at: usize = 0
+  while at < lease.value.items.length() {
+    let item = &lease.value.items.asSlice()[at]
+    if item.id == child {
+      let mut context = output.cache.subgrids.takeBuilder()
+      run Subgrid.makeContext(nodes, item, parent, &source, lease.value.columns.tracks.asSlice(),
+        lease.value.rows.tracks.asSlice(), lease.value.columnGap, lease.value.rowGap, &mut context)
+      result = run output.cache.subgrids.intern(child, move context)
+      break
+    }
+    at = at + 1
   }
   output.cache.gridMemos.put(move lease)
   return result

@@ -12,6 +12,7 @@ import inline_prepared { KeptText }
 import flex { FlexMemos }
 import grid_geometry { GridGeometryStore }
 import grid_scratch { GridMemos }
+import grid_subgrid { SubgridPool }
 
 const ABSENT: usize = usize.MAX
 // Reuse levels of a subtree's kept layout; see Incremental.markSubtrees.
@@ -155,6 +156,7 @@ fn sameAvailable(a: &AvailableSpace, b: &AvailableSpace) -> bool {
   return a.kind == b.kind && (a.kind != AvailableKind.Definite || a.value == b.value)
 }
 fn sameInput(a: &Input, b: &Input) -> bool with Intrinsic.inlineAlways() {
+  if a.gridContext != b.gridContext { return false }
   if !sameAvailable(&a.availableWidth, &b.availableWidth) || !sameAvailable(&a.availableHeight, &b.availableHeight) || !sameOptional(&a.known, &b.known) { return false }
   if a.minimum.width != b.minimum.width || a.minimum.height != b.minimum.height { return false }
   if a.parentMaxSize.width != b.parentMaxSize.width || a.parentMaxSize.height != b.parentMaxSize.height || a.scrollportSize.width != b.scrollportSize.width || a.scrollportSize.height != b.scrollportSize.height { return false }
@@ -211,16 +213,19 @@ pub struct LayoutCache {
   // Final content-relative tracks and names survive reuse without sizing scratch.
   pub gridGeometry: GridGeometryStore,
   pub gridMemos: GridMemos,
+  // Immutable inherited-axis descriptors outlive every retained Input.
+  pub subgrids: SubgridPool,
 }
 impl LayoutCache {
   pub fn make() -> LayoutCache {
-    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, skipping: false, rangesReset: false, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make(), gridGeometry: GridGeometryStore.make(), gridMemos: GridMemos.make() }
+    return LayoutCache { heads: List<usize>.make(), entries: List<Entry>.make(), inputs: List<Input>.make(), layouts: List<Layout>.make(), spare: List<Entry>.make(), spareInputs: List<Input>.make(), spareLayouts: List<Layout>.make(), dead: 0, generation: 0, touched: 0, previouslyTouched: 0, results: List<FinalResult>.make(), ranges: List<BoxRanges>.make(), rotatedTouched: 0, rotatedFloats: false, stamped: 0, skipping: false, rangesReset: false, floats: List<FloatBox>.make(), floatsCompacted: 0, texts: List<List<KeptText>>.make(), flexMemos: FlexMemos.make(), gridGeometry: GridGeometryStore.make(), gridMemos: GridMemos.make(), subgrids: SubgridPool.make() }
   }
   pub fn length(self: &Self) -> usize { return self.entries.length() - self.dead }
   pub fn clear(self: &mut Self) {
     self.flexMemos.clear()
     self.gridGeometry.clear()
     self.gridMemos.clear()
+    self.subgrids.clear()
     self.heads.clear()
     self.entries.clear()
     self.inputs.clear()
@@ -239,6 +244,24 @@ impl LayoutCache {
   pub effect fn rotateFinals(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
     self.flexMemos.rotate()
     self.gridGeometry.commit()
+    if self.subgrids.beginCollection() {
+      let mut at: usize = 0
+      while at < self.inputs.length() {
+        self.subgrids.mark(self.inputs.asSlice()[at].gridContext)
+        at = at + 1
+      }
+      at = 0
+      while at < self.ranges.length() {
+        let ranges = &self.ranges.asSlice()[at]
+        if ranges.range.valid || ranges.kept.valid {
+          self.subgrids.mark(self.results.asSlice()[at].input.gridContext)
+        }
+        at = at + 1
+      }
+      self.gridMemos.markContexts(&mut self.subgrids)
+      self.gridGeometry.markContexts(&mut self.subgrids)
+      self.subgrids.finishCollection()
+    }
     self.generation = self.generation + 1
     self.rotatedTouched = self.previouslyTouched
     self.previouslyTouched = self.touched
@@ -547,6 +570,9 @@ impl LayoutCache {
   pub effect fn remap(self: &mut Self, toOld: &[usize], toNew: &[usize]) ! OutOfMemoryError ? &mut Allocator {
     self.flexMemos.clear()
     self.gridMemos.clear()
+    // Stored Inputs retain their immutable identities; only owner-indexed
+    // lookup buckets become invalid when generated box indices change.
+    self.subgrids.resetOwners()
     run self.gridGeometry.remap(toOld, toNew)
     let mut old: usize = 0
     while old < self.heads.length() {

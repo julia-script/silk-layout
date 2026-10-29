@@ -1,0 +1,24 @@
+{
+  "name": "grid-subgrid-inherited-axis-constraints",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "alignment"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrids"],
+  "derivation": "The subgrid spans the complete 86x64 parent area: columns 30+6+50 and rows 20+4+40. On both inherited axes its preferred sizes (8,9), oversized minimums (120,100), undersized maximums (12,13), self alignment and content alignment are ignored. It therefore remains at (0,0), sized 86x64, with unchanged track origins (0,0) and (36,24), rather than moving or resizing to satisfy its own constraints.",
+  "input": {
+    "viewport": {"width": 200, "height": 160},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 86, "gridTemplateColumns": [30, 50], "gridTemplateRows": [20, 40], "columnGap": 6, "rowGap": 4}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 1, "gridRowEnd": 3, "width": 8, "height": 9, "minWidth": 120, "maxWidth": 12, "minHeight": 100, "maxHeight": 13, "justifySelf": "end", "alignSelf": "center", "justifyContent": "center", "alignContent": "end"}},
+      {"parent": 1, "style": {"gridColumnStart": 1, "gridRowStart": 1}},
+      {"parent": 1, "style": {"gridColumnStart": 2, "gridRowStart": 2}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 86, "height": 64},
+      {"x": 0, "y": 0, "width": 86, "height": 64},
+      {"x": 0, "y": 0, "width": 30, "height": 20},
+      {"x": 36, "y": 24, "width": 50, "height": 40}
+    ]
+  }
+}

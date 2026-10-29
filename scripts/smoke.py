@@ -28,7 +28,7 @@ def main():
     # Grid 2 §7.2–7.7 and §8.3: structured longhands only; reject invalid
     # track grammar, nonrectangular named areas, and zero placement indices.
     grid_invalid = [
-        ("gridTemplateColumns", "subgrid"), ("gridTemplateRows", "10px 1fr"),
+        ("gridTemplateRows", "10px 1fr"),
         ("gridTemplateColumns", []), ("gridTemplateColumns", [-1]),
         ("gridTemplateColumns", [{"fr": -1}]),
         ("gridTemplateColumns", [{"minmax": [{"fr": 1}, 20]}]),
@@ -43,6 +43,22 @@ def main():
         ("gridTemplateColumns", [{"repeat": {"count": "auto-fill", "tracks": [{"fr": 1}]}}]),
         ("gridTemplateColumns", [{"repeat": {"count": "auto-fit", "tracks": [10]}},
                                  {"repeat": {"count": "auto-fill", "tracks": [20]}}]),
+        ("gridTemplateColumns", {"subgrid": [10]}),
+        ("gridTemplateColumns", {"subgrid": [{"names": ["a"]}, {"fr": 1}]}),
+        ("gridTemplateColumns", {"subgrid": [], "tracks": [10]}),
+        ("gridTemplateColumns", {"subgrid": [{"names": ["auto"]}]}),
+        ("gridTemplateColumns", {"subgrid": [{"repeat": 2, "tracks": [{"names": ["a"]}]}]}),
+        ("gridTemplateColumns", {"subgrid": [{"repeat": {"count": "auto-fit", "tracks": [{"names": []}]}}]}),
+        ("gridTemplateColumns", {"subgrid": [{"repeat": {"count": "auto-fill", "tracks": [{"names": []}]}},
+                                             {"repeat": {"count": "auto-fill", "tracks": [{"names": ["b"]}]}}]}),
+        ("gridTemplateColumns", {"subgrid": [{"repeat": {"count": 2, "tracks": []}}]}),
+        ("gridTemplateColumns", {"subgrid": [{"repeat": {"count": 2, "tracks": [10]}}]}),
+        ("gridTemplateColumns", {"subgrid": [{"repeat": {"count": 0, "tracks": [{"names": []}]}}]}),
+        ("gridTemplateColumns", {"subgrid": [{"repeat": {"count": 10000, "tracks": [{"names": []}, {"names": []}]}}]}),
+        ("gridTemplateColumns", {"subgrid": [{"repeat": {"count": 2, "tracks": [
+            {"repeat": {"count": 2, "tracks": [{"names": ["a"]}]}}]}}]}),
+        ("gridTemplateColumns", ["subgrid", {"names": ["a"]}]),
+        ("gridAutoColumns", "subgrid"), ("width", "normal"), ("padding", "normal"),
         ("gridAutoRows", []), ("gridAutoColumns", [{"names": ["a"]}]),
         ("gridAutoRows", {"repeat": {"count": 2, "tracks": [10]}}),
         ("gridTemplateAreas", [["a", "a"], ["a", "."]]),

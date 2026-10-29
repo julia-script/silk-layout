@@ -8,16 +8,18 @@ import context { Input, ResolvedBox, resolves, effectiveDisplay, blockJustificat
 import geometry { OptionalSize, AvailableKind, max, clamp }
 import style { Style, DimensionKind, DisplayOutside, Float, Align, WritingMode }
 import grid_style { GridTemplate }
-import grid_lines { prepareLineNames }
-import grid_template { RepeatSizing, repeatCount, expandAxis, expandedLines }
-import grid_placement { GridItem, collectItems }
+import grid_lines { prepareLineNamesMasked }
+import grid_template { RepeatSizing, repeatCount, expandAxis, expandSubgridAxis, expandedLines }
+import grid_placement { GridItem, collectSubgridItems }
 import grid_scratch { GridScratch, GridTemplateScratch }
+import grid_subgrid { SubgridContext }
 
 pub fn needsPreparation(template: &GridTemplate) -> bool with Intrinsic.inlineAlways() {
   return template.rows.repeats.length() != 0 || template.columns.repeats.length() != 0
     || template.rows.lines.length() != 0
     || template.columns.lines.length() != 0
     || template.areaRows != 0
+    || template.rows.subgrid || template.columns.subgrid
 }
 
 // A shrink-to-fit or min/max relayout gives the engine a used size, not a new
@@ -161,6 +163,7 @@ pub effect fn prepareTemplate<'source>(
   columnOverride: usize,
   rowOverride: usize,
   scratch: &mut GridScratch,
+  inherited: &SubgridContext,
 )
   ! OutOfMemoryError
   ? &mut Allocator {
@@ -198,32 +201,67 @@ pub effect fn prepareTemplate<'source>(
     run scratch.template.append(GridTemplateScratch.make())
   }
   let prepared = &mut scratch.template.asMutSlice()[0]
-  if !fresh && columnRepeat == prepared.columnRepeat && rowRepeat == prepared.rowRepeat {
+  if !fresh && columnRepeat == prepared.columnRepeat && rowRepeat == prepared.rowRepeat
+    && input.gridContext == prepared.context {
     return
   }
   run expandAxis(&template.columns, columnRepeat, template.areaColumns, &mut prepared.columns)
   run expandAxis(&template.rows, rowRepeat, template.areaRows, &mut prepared.rows)
-  run prepareLineNames(
+  if inherited.columns.active {
+    run expandSubgridAxis(&template.columns, inherited.columns.tracks.length(), &mut prepared.columns)
+    let mut at: usize = 0
+    while at < inherited.columns.lines.length() {
+      run prepared.columns.lines.append(inherited.columns.lines.get(at))
+      at = at + 1
+    }
+  }
+  if inherited.rows.active {
+    run expandSubgridAxis(&template.rows, inherited.rows.tracks.length(), &mut prepared.rows)
+    let mut at: usize = 0
+    while at < inherited.rows.lines.length() {
+      run prepared.rows.lines.append(inherited.rows.lines.get(at))
+      at = at + 1
+    }
+  }
+  prepared.areas.clear()
+  prepared.areaMasks.clear()
+  let mut at: usize = 0
+  while at < template.areas.length() {
+    run prepared.areas.append(template.areas.get(at))
+    run prepared.areaMasks.append(3)
+    at = at + 1
+  }
+  at = 0
+  while at < inherited.areas.length() {
+    run prepared.areas.append(inherited.areas.get(at))
+    run prepared.areaMasks.append(inherited.areaMasks.get(at))
+    at = at + 1
+  }
+  run prepareLineNamesMasked(
     expandedLines(&template.columns, &prepared.columns),
-    template.areas.asSlice(),
+    prepared.areas.asSlice(),
+    prepared.areaMasks.asSlice(),
     nodes.gridNames,
     true,
     &mut prepared.columnNames,
   )
-  run prepareLineNames(
+  run prepareLineNamesMasked(
     expandedLines(&template.rows, &prepared.rows),
-    template.areas.asSlice(),
+    prepared.areas.asSlice(),
+    prepared.areaMasks.asSlice(),
     nodes.gridNames,
     false,
     &mut prepared.rowNames,
   )
-  scratch.bounds = run collectItems(
+  scratch.bounds = run collectSubgridItems(
     nodes,
     id,
     prepared.rows.explicitTracks,
     prepared.columns.explicitTracks,
     &prepared.rowNames,
     &prepared.columnNames,
+    inherited.rows.active,
+    inherited.columns.active,
     &mut scratch.items,
     &mut scratch.placement,
   )
@@ -247,4 +285,5 @@ pub effect fn prepareTemplate<'source>(
   )
   prepared.columnRepeat = columnRepeat
   prepared.rowRepeat = rowRepeat
+  prepared.context = input.gridContext
 }

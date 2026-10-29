@@ -18,6 +18,7 @@ import layout_pass { LayoutPass, CacheKind }
 import engine { normalizeKey, probeFresh }
 import text { TextMeasure, TextError }
 import fragmentation { FragmentationError }
+import grid_subgrid as Subgrid
 
 struct Metrics {
   before: f32,
@@ -108,6 +109,8 @@ struct Entry {
   previousMinimum: f32,
   previousMinContent: f32,
   comparePrevious: bool,
+  extraLow: f32,
+  extraHigh: f32,
   samples: [Sample; 4]
 }
 
@@ -122,6 +125,8 @@ impl Entry {
       previousMinimum: 0.0,
       previousMinContent: 0.0,
       comparePrevious: false,
+      extraLow: 0.0,
+      extraHigh: 0.0,
       samples: [Sample.empty(), Sample.empty(), Sample.empty(), Sample.empty()],
     }
   }
@@ -131,7 +136,8 @@ pub struct BaselineAxis {
   entries: List<Entry>,
   groups: List<BaselineGroup>,
   index: List<usize>,
-  mirrorOffset: f32
+  mirrorOffset: f32,
+  mirrorReady: bool
 }
 
 pub struct GridBaselines {
@@ -146,6 +152,7 @@ impl BaselineAxis {
       groups: List<BaselineGroup>.make(),
       index: List<usize>.make(),
       mirrorOffset: 0.0,
+      mirrorReady: false,
     }
   }
 }
@@ -299,6 +306,89 @@ fn autoMargins(style: &Style, horizontal: bool) -> bool {
     || style.margin.bottom.kind == DimensionKind.Auto
 }
 
+// Registration uses the immediate grid's alignment defaults, but the owning
+// track collection determines cyclic eligibility and baseline coordinates.
+effect fn registerMember<M: Measure>(
+  nodes: &BoxTree,
+  measurer: &mut M,
+  state: &mut BaselineAxis,
+  index: usize,
+  columns: bool,
+  item: &GridItem,
+  parent: &Style,
+  immediate: &Style,
+  tracks: &[TrackState],
+  definite: bool,
+  reverse: bool,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
+  let localColumns = horizontal == (immediate.writingMode == WritingMode.HorizontalTb)
+  let style = nodes.style(item.id)
+  let align = selfAlignment(style, immediate, localColumns)
+  if (align != Align.Baseline && align != Align.LastBaseline)
+    || autoMargins(style, horizontal) || Subgrid.inherits(nodes, item.id, parent, columns) {
+    return
+  }
+  let mut span = item.row
+  if columns {
+    span = item.column
+  }
+  if cyclicSize(style, horizontal, tracks, i32.toUsize(span.start), i32.toUsize(span.end), definite) {
+    return
+  }
+  while state.entries.length() <= index {
+    run state.entries.append(Entry.empty())
+  }
+  if state.index.length() < tracks.length * 2 {
+    let additional = tracks.length * 2 - state.index.length()
+    run state.index.appendRepeated(NO_NODE, additional)
+  }
+  let last = align == Align.LastBaseline
+  let end = groupEnd(style, parent, columns, last)
+  let mut track = i32.toUsize(span.start)
+  // A reversed inherited axis maps its first line to the owner's end line.
+  if last != reverse {
+    track = i32.toUsize(span.end) - 1
+  }
+  let mut group = track * 2
+  if end {
+    group = group + 1
+  }
+  let mut mapped = state.index.get(group)
+  if mapped == NO_NODE {
+    mapped = state.groups.length()
+    state.index.set(group, mapped)
+    run state.groups.append(BaselineGroup.make(end))
+  }
+  let contextMode = baselineMode(parent, parent.writingMode, horizontal)
+  let mirror = lineOverReverse(baselineMode(style, parent.writingMode, horizontal))
+    != lineOverReverse(contextMode)
+  let entry = &mut state.entries.asMutSlice()[index]
+  entry.group = mapped
+  entry.last = last
+  entry.mirror = mirror
+  if mirror && !state.mirrorReady {
+    let font = Measure.font(
+      &mut measurer,
+      FontRequest {
+        key: parent.fontKey,
+        writingMode: parent.writingMode,
+        textOrientation: parent.textOrientation,
+        direction: parent.usedDirection(),
+      },
+    )
+    state.mirrorOffset = 2.0
+      * (font.baselines.central
+        - font.baselines.forContext(parent.writingMode, parent.textOrientation))
+    if reverseAxis(parent, columns) != lineOverReverse(contextMode) {
+      state.mirrorOffset = -state.mirrorOffset
+    }
+    state.mirrorReady = true
+  }
+}
+
 // Call exactly once with the initially initialized tracks. Eligibility is retained
 // across cyclic-percentage reruns, even when their used track sizes become definite.
 effect fn prepareAxis<M: Measure>(
@@ -317,81 +407,54 @@ effect fn prepareAxis<M: Measure>(
   state.groups.clear()
   state.index.clear()
   state.mirrorOffset = 0.0
-  let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
-  let contextMode = baselineMode(parent, parent.writingMode, horizontal)
-  let mut hasMirror = false
+  state.mirrorReady = false
   let mut index: usize = 0
   while index < items.length {
-    let item = &items[index]
-    let style = nodes.style(item.id)
-    let align = selfAlignment(style, parent, columns)
-    let mut span = item.row
-    if columns {
-      span = item.column
-    }
-    if (align == Align.Baseline || align == Align.LastBaseline) && !autoMargins(style, horizontal)
-      && !cyclicSize(
-        style,
-        horizontal,
-        tracks,
-        i32.toUsize(span.start),
-        i32.toUsize(span.end),
-        definite,
-      ) {
-      if state.entries.length() == 0 {
-        let mut fill: usize = 0
-        while fill < items.length {
-          run state.entries.append(Entry.empty())
-          fill = fill + 1
-        }
-        run state.index.appendRepeated(NO_NODE, tracks.length * 2)
-      }
-      let last = align == Align.LastBaseline
-      let end = groupEnd(style, parent, columns, last)
-      let mut track = i32.toUsize(span.start)
-
-      // Align §9.2: computed preference selects the spanning context;
-      // physical fallback direction selects the compatible group within it.
-      if last {
-        track = i32.toUsize(span.end) - 1
-      }
-      let mut group = track * 2
-      if end {
-        group = group + 1
-      }
-      let mut mapped = state.index.get(group)
-      if mapped == NO_NODE {
-        mapped = state.groups.length()
-        state.index.set(group, mapped)
-        run state.groups.append(BaselineGroup.make(end))
-      }
-      group = mapped
-      let mirror = lineOverReverse(baselineMode(style, parent.writingMode, horizontal))
-        != lineOverReverse(contextMode)
-      hasMirror = hasMirror || mirror
-      let entry = &mut state.entries.asMutSlice()[index]
-      entry.group = group
-      entry.last = last
-      entry.mirror = mirror
-    }
+    run registerMember(nodes, &mut measurer, &mut state, index, columns, &items[index],
+      parent, parent, tracks, definite, false)
     index = index + 1
   }
-  if hasMirror {
-    let font = Measure.font(
-      &mut measurer,
-      FontRequest {
-        key: parent.fontKey,
-        writingMode: parent.writingMode,
-        textOrientation: parent.textOrientation,
-        direction: parent.usedDirection(),
-      },
-    )
-    state.mirrorOffset = 2.0
-      * (font.baselines.central
-        - font.baselines.forContext(parent.writingMode, parent.textOrientation))
-    if reverseAxis(parent, columns) != lineOverReverse(contextMode) {
-      state.mirrorOffset = -state.mirrorOffset
-    }
+  if state.entries.length() != 0 {
+    let additional = items.length - state.entries.length()
+    run state.entries.appendRepeated(Entry.empty(), additional)
+  }
+}
+
+pub effect fn appendMember<M: Measure>(
+  nodes: &BoxTree,
+  measurer: &mut M,
+  scratch: &mut GridBaselines,
+  index: usize,
+  columns: bool,
+  item: &GridItem,
+  parent: &Style,
+  immediate: &Style,
+  tracks: &[TrackState],
+  definite: bool,
+  reverse: bool,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  let state = axisStateMut(&mut scratch, columns)
+  while state.entries.length() <= index {
+    run state.entries.append(Entry.empty())
+  }
+  // Keep comparison data seeded by reset, but never reuse a previous member.
+  let entry = &mut state.entries.asMutSlice()[index]
+  entry.group = NO_NODE
+  entry.samples = [Sample.empty(), Sample.empty(), Sample.empty(), Sample.empty()]
+  run registerMember(nodes, &mut measurer, &mut state, index, columns, item,
+    parent, immediate, tracks, definite, reverse)
+}
+
+// Collection resets the metrics separately. Retaining the direct index and
+// groups allows newly hoisted descendants to join the original sharing groups.
+pub fn truncateMembers(scratch: &mut GridBaselines, columns: bool, count: usize) {
+  let state = axisStateMut(&mut scratch, columns)
+  let mut index = count
+  while index < state.entries.length() {
+    state.entries.set(index, Entry.empty())
+    index = index + 1
   }
 }
 
@@ -485,6 +548,8 @@ fn capture(
   layout: &Layout,
   start: f32,
   area: f32,
+  low: f32,
+  high: f32,
 ) {
   let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
   let entry = &mut state.entries.asMutSlice()[index]
@@ -512,6 +577,8 @@ fn capture(
       after = margin.left + extent - distance
     }
   }
+  before = before + low
+  after = after + high
   entry.samples[kind] = Sample { before: before, after: after, start: start, present: true }
   state.groups.asMutSlice()[entry.group].include(kind, before, after, start, area)
 }
@@ -532,9 +599,34 @@ pub effect fn captureContribution<'pass, 'source, M: Measure + TextMeasure>(
 )
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
+  run captureContributionEdges(nodes, &mut output, &mut measurer, &mut scratch,
+    index, columns, id, request, measured, parent, 0.0, 0.0)
+}
+
+// Ancestor edge contributions act as additional margins, not probe constraints.
+pub effect fn captureContributionEdges<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  scratch: &mut GridBaselines,
+  index: usize,
+  columns: bool,
+  id: usize,
+  request: &Input,
+  measured: &ItemContribution,
+  parent: &Style,
+  low: f32,
+  high: f32,
+)
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
   if !active(&scratch, index, columns) {
     return
   }
+  let state = axisStateMut(&mut scratch, columns)
+  let entry = &mut state.entries.asMutSlice()[index]
+  entry.extraLow = low
+  entry.extraHigh = high
   let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
   let mut kind: usize = 0
   while kind < 3 {
@@ -563,9 +655,17 @@ pub effect fn captureContribution<'pass, 'source, M: Measure + TextMeasure>(
       layout,
       0.0,
       contribution,
+      low,
+      high,
     )
     kind = kind + 1
   }
+}
+
+pub fn extraMargins(scratch: &GridBaselines, index: usize, columns: bool) -> Size {
+  if !active(scratch, index, columns) { return Size.zero() }
+  let entry = &axisState(scratch, columns).entries.asSlice()[index]
+  return Size { width: entry.extraLow, height: entry.extraHigh }
 }
 
 pub fn applyShims(
@@ -617,11 +717,27 @@ pub fn captureFinal(
   start: Point,
   area: Size,
 ) {
-  if active(&scratch, index, true) {
-    capture(&mut scratch.columns, index, true, 3, style, parent, layout, start.x, area.width)
-  }
-  if active(&scratch, index, false) {
-    capture(&mut scratch.rows, index, false, 3, style, parent, layout, start.y, area.height)
+  captureFinalMember(&mut scratch, index, true, style, parent, layout,
+    start.x, area.width, 0.0, 0.0)
+  captureFinalMember(&mut scratch, index, false, style, parent, layout,
+    start.y, area.height, 0.0, 0.0)
+}
+
+pub fn captureFinalMember(
+  scratch: &mut GridBaselines,
+  index: usize,
+  columns: bool,
+  style: &Style,
+  parent: &Style,
+  layout: &Layout,
+  start: f32,
+  area: f32,
+  low: f32,
+  high: f32,
+) {
+  if active(&scratch, index, columns) {
+    capture(axisStateMut(&mut scratch, columns), index, columns, 3, style,
+      parent, layout, start, area, low, high)
   }
 }
 

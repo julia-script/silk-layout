@@ -108,6 +108,9 @@ fn countingSize(track: &GridTrack, basis: f32, definite: bool) -> f32 {
 // CSS Grid 2 §7.2.3.2. Count complete multi-track patterns, including fixed
 // siblings and integer repeats, without allocating or expanding the template.
 pub fn repeatCount(axis: &GridAxis, sizing: &RepeatSizing) -> usize {
+  if axis.subgrid {
+    return 0
+  }
   let limit = automaticLimit(axis)
   if limit == 0 {
     return 0
@@ -242,6 +245,10 @@ pub effect fn expandAxis(
   result.boundaries.clear()
   result.autoFitStart = 0
   result.autoFitEnd = 0
+  if axis.subgrid {
+    result.explicitTracks = 0
+    return
+  }
   result.explicitTracks = axis.tracks.length()
   if areaTracks > result.explicitTracks {
     result.explicitTracks = areaTracks
@@ -345,6 +352,113 @@ pub effect fn expandAxis(
   }
 }
 
+// Subgrid repeats consume whole line-name groups, including empty groups.
+// Auto-fill may repeat zero times; any names beyond the inherited last line
+// are discarded. No independent tracks are created on the inherited axis.
+pub effect fn expandSubgridAxis(axis: &GridAxis, count: usize, result: &mut ExpandedAxis)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  result.tracks.clear()
+  result.lines.clear()
+  result.boundaries.clear()
+  result.autoFitStart = 0
+  result.autoFitEnd = 0
+  result.explicitTracks = count
+  let repeats = axis.repeats.asSlice()
+  let mut fixedGroups = axis.lineCount
+  let mut automaticLength: usize = 0
+  let mut index: usize = 0
+  while index < repeats.length {
+    let repeat = repeats[index]
+    if repeat.kind == GridRepeatKind.Count {
+      fixedGroups = fixedGroups + repeat.length * (repeat.count - 1)
+    } else {
+      fixedGroups = fixedGroups - repeat.length
+      automaticLength = repeat.length
+    }
+    index = index + 1
+  }
+  let mut automatic: usize = 0
+  if automaticLength != 0 && fixedGroups <= count {
+    automatic = (count - fixedGroups) / automaticLength + 1
+  }
+  run result.boundaries.reserve(axis.lineCount)
+  let mut repeatIndex: usize = 0
+  let mut nextLine: usize = 0
+  index = 0
+  while index < axis.lineCount {
+    if repeatIndex < repeats.length && repeats[repeatIndex].start == index {
+      let repeat = repeats[repeatIndex]
+      let mut offset: usize = 0
+      while offset < repeat.length {
+        run result.boundaries.append(nextLine + offset)
+        offset = offset + 1
+      }
+      nextLine = nextLine + repeat.length * repetitions(&repeat, automatic)
+      index = index + repeat.length
+      repeatIndex = repeatIndex + 1
+    } else {
+      run result.boundaries.append(nextLine)
+      nextLine = nextLine + 1
+      index = index + 1
+    }
+  }
+  let boundaries = result.boundaries.asSlice()
+  let lines = axis.lines.asSlice()
+  let mut nameCount: usize = 0
+  index = 0
+  while index < lines.length {
+    let line = lines[index]
+    let amount = subgridNameCount(&line, repeats, automatic, boundaries[line.line], count)
+    if amount > usize.MAX - nameCount {
+      fail OutOfMemoryError {}
+    }
+    nameCount = nameCount + amount
+    index = index + 1
+  }
+  run result.lines.reserve(nameCount)
+  index = 0
+  while index < lines.length {
+    let line = lines[index]
+    let start = boundaries[line.line]
+    let amount = subgridNameCount(&line, repeats, automatic, start, count)
+    let mut step: usize = 0
+    if line.repeat != 0 {
+      step = repeats[line.repeat - 1].length
+    }
+    let mut iteration: usize = 0
+    while iteration < amount {
+      run result.lines.append(
+        GridNamedLine { line: start + iteration * step, name: line.name, repeat: 0 },
+      )
+      iteration = iteration + 1
+    }
+    index = index + 1
+  }
+}
+
+fn subgridNameCount(
+  line: &GridNamedLine,
+  repeats: &[GridRepeat],
+  automatic: usize,
+  start: usize,
+  last: usize,
+) -> usize {
+  if start > last {
+    return 0
+  }
+  if line.repeat == 0 {
+    return 1
+  }
+  let repeat = repeats[line.repeat - 1]
+  let amount = repetitions(&repeat, automatic)
+  let available = (last - start) / repeat.length + 1
+  if amount > available {
+    return available
+  }
+  return amount
+}
+
 pub fn expandedTracks<'a>(axis: &'a GridAxis, expanded: &'a ExpandedAxis) -> &'a [GridTrack] {
   if axis.repeats.length() == 0 {
     return axis.tracks.asSlice()
@@ -353,7 +467,7 @@ pub fn expandedTracks<'a>(axis: &'a GridAxis, expanded: &'a ExpandedAxis) -> &'a
 }
 
 pub fn expandedLines<'a>(axis: &'a GridAxis, expanded: &'a ExpandedAxis) -> &'a [GridNamedLine] {
-  if axis.repeats.length() == 0 {
+  if !axis.subgrid && axis.repeats.length() == 0 {
     return axis.lines.asSlice()
   }
   return expanded.lines.asSlice()

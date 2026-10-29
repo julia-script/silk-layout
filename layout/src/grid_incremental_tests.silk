@@ -32,7 +32,7 @@ import text {
   TextShapeRequest,
   TextRun
 }
-import grid_style { GridTemplate, GridTrack, GridBreadth, GridError, GridRepeat, GridRepeatKind }
+import grid_style { GridTemplate, GridTrack, GridBreadth, GridError, GridRepeat, GridRepeatKind, GridLine, GridLineKind }
 import tree { Tree, LayoutTree, NodeId, InvalidNode }
 import engine { compute }
 
@@ -393,4 +393,52 @@ test effect fn gridPlacementInvalidatesAfterOrderTemplateAndBoxChanges()
     | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run placementInvalidation() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 2 §9: equal total area is not equal inherited track geometry. Exercise
+// repeated cache collection, generated-box remapping and a complete invalidation.
+effect fn inheritedTrackUpdates()
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(gridStyle())
+  let root = tree.root()
+  let subgrid = run tree.append(root, gridStyle())
+  let mut inherited = GridTemplate.make()
+  inherited.columns.subgrid = true
+  inherited.rows.subgrid = true
+  inherited.placement.columnStart = GridLine { kind: GridLineKind.Line, number: 1, name: 0 }
+  inherited.placement.columnEnd = GridLine { kind: GridLineKind.Line, number: 3, name: 0 }
+  run tree.setGrid(subgrid, move inherited)
+  let first = run tree.append(subgrid, Style.make())
+  let second = run tree.append(subgrid, Style.make())
+  let mut secondPlacement = GridTemplate.make()
+  secondPlacement.placement.columnStart = GridLine { kind: GridLineKind.Line, number: 2, name: 0 }
+  run tree.setGrid(second, move secondPlacement)
+  let mut output = LayoutTree.make()
+  let mut host = TextHost {}
+  let mut step: usize = 0
+  while step < 96 {
+    let width = 20.0 + usize.toF32(step % 61)
+    let mut template = GridTemplate.make()
+    run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(width)))
+    run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(100.0 - width)))
+    run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+    run tree.setGrid(root, move template)
+    let hidden = step % 3 == 1
+    let mut firstStyle = Style.make()
+    if hidden { firstStyle.display = Display.None }
+    run tree.setStyle(first, move firstStyle)
+    if step == 48 { output.invalidate() }
+    run compute(&tree, &mut output, &mut host, OptionalSize.definite(100.0, 100.0))
+    run expectBounds(&mut output, subgrid, 0.0, 0.0, 100.0, 20.0)
+    run expectBounds(&mut output, second, width, 0.0, 100.0 - width, 20.0)
+    if !hidden { run expectBounds(&mut output, first, 0.0, 0.0, width, 20.0) }
+    step = step + 1
+  }
+}
+
+test effect fn subgridRetainedTracksFollowRedistributionRemappingAndInvalidation()
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run inheritedTrackUpdates() |> Effect.provideMut<Allocator>(&mut allocator)
 }

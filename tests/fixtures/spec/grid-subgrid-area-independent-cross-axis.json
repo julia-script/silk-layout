@@ -1,0 +1,22 @@
+{
+  "name": "grid-subgrid-area-independent-cross-axis",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "areas", "nested", "axis-specific"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-area-names"],
+  "derivation": "The parent's info area projects onto the column-subgridded axis. Its row coordinates do not constrain the child's independent three-row grid. A second subgrid in that independent grid's third row therefore still inherits info-start and info-end across both columns, while no ancestor row aliases are introduced through the independent row boundary.",
+  "input": {
+    "viewport": {"width": 100, "height": 60},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 50, "gridTemplateColumns": [20, 30], "gridTemplateRows": [30], "gridTemplateAreas": [["info", "info"]]}},
+      {"parent": 0, "style": {"display": "grid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridTemplateColumns": "subgrid", "gridTemplateRows": [5, 7, 9]}},
+      {"parent": 1, "style": {"display": "grid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 3, "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid"}},
+      {"parent": 2, "style": {"gridColumnStart": "info-start", "gridColumnEnd": "info-end"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 50, "height": 30},
+    {"x": 0, "y": 0, "width": 50, "height": 30},
+    {"x": 0, "y": 12, "width": 50, "height": 9},
+    {"x": 0, "y": 0, "width": 50, "height": 9}
+  ]}
+}

@@ -1,0 +1,73 @@
+{
+  "name": "grid-subgrid-edge-nested-insets-gap-deltas",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "intrinsic-tracks"],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-gaps",
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing"
+  ],
+  "derivation": "Outer start/end margin+border+padding sums are 6/12; inner sums are 7/6, giving additive edge insets 13/18. Gap changes 10 to 18 to 6 contribute +4 then -6 on each interior side, net -2. Thus the 23px and 37px leaves size the root columns to 23+13-2=34 and 37+18-2=53; root width is 34+10+53=97. Outer border box is x=2,width=91; its content starts at local x=4 and is 79px wide. Inner margins put its border box at outer-local x=5,width=75. Its border+padding left inset is 6, so leaves start at inner-local x=6 and 6+23+6=35. Their root starts are 13 and 42, keeping both changed gaps centered on the root gutter midpoint x=39.",
+  "input": {
+    "viewport": {"width": 240, "height": 160},
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": ["auto", "auto"],
+          "gridTemplateRows": [17],
+          "columnGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [17],
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1,
+          "columnGap": 18,
+          "margin": {"left": 2, "right": 4},
+          "border": {"left": 1, "right": 3},
+          "padding": {"left": 3, "right": 5}
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [17],
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1,
+          "columnGap": 6,
+          "margin": {"left": 1, "right": 3},
+          "border": {"left": 2, "right": 1},
+          "padding": {"left": 4, "right": 2}
+        }
+      },
+      {
+        "parent": 2,
+        "style": {"gridColumnStart": 1, "gridRowStart": 1, "width": 23, "height": 17}
+      },
+      {
+        "parent": 2,
+        "style": {"gridColumnStart": 2, "gridRowStart": 1, "width": 37, "height": 17}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 97, "height": 17},
+      {"x": 2, "y": 0, "width": 91, "height": 17},
+      {"x": 5, "y": 0, "width": 75, "height": 17},
+      {"x": 6, "y": 0, "width": 23, "height": 17},
+      {"x": 35, "y": 0, "width": 37, "height": 17}
+    ]
+  }
+}

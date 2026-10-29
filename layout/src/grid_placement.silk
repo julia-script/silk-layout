@@ -3,12 +3,13 @@ import silk.collections.list { List }
 import silk.core.ownership { Copy }
 import silk.num.i32
 import silk.num.usize
-import box_tree { BoxTree }
-import context { outOfFlow }
-import grid_style { GridAutoFlow, MAX_GRID_TRACKS }
+import box_tree { BoxTree, BoxKind }
+import context { outOfFlow, isGrid }
+import style { WritingMode }
+import grid_style { GridAutoFlow, GridAxis, GridLine, GridLineKind, MAX_GRID_TRACKS }
 import grid_lines { GridSpan, LineNames, resolveSpan }
 import grid_occupancy { Occupancy }
-import tree { NO_NODE }
+import tree { NO_NODE, Measurement }
 
 pub struct GridItem {
   pub id: usize,
@@ -169,6 +170,44 @@ fn finish(
   }
 }
 
+// Only an automatic span takes its size from the child's subgrid line list.
+// Definite endpoints and authored spans retain ordinary placement semantics.
+fn itemSpan(
+  start: &GridLine,
+  end: &GridLine,
+  explicitTracks: usize,
+  names: &LineNames,
+  axis: &GridAxis,
+  eligible: bool,
+) -> GridSpan {
+  if !eligible || !axis.subgrid || start.kind == GridLineKind.Span
+    || end.kind == GridLineKind.Span {
+    return resolveSpan(start, end, explicitTracks, names)
+  }
+  let hasStart = start.kind == GridLineKind.Line && (start.name != 0 || start.number != 0)
+  let mut hasEnd = end.kind == GridLineKind.Line && (end.name != 0 || end.number != 0)
+  if hasStart && hasEnd {
+    let resolved = resolveSpan(start, end, explicitTracks, names)
+    if resolved.end - resolved.start != 1 { return resolved }
+    // Equal resolved endpoints discard the end before determining the span.
+    // Distinct adjacent endpoints still specify an implicit one-track span.
+    let automatic = GridLine.auto()
+    let first = resolveSpan(start, &automatic, explicitTracks, names)
+    let last = resolveSpan(&automatic, end, explicitTracks, names)
+    if first.start != last.end { return resolved }
+    hasEnd = false
+  }
+  let span = GridLine {
+    kind: GridLineKind.Span,
+    number: boundedTracks(axis.subgridSpan()),
+    name: 0,
+  }
+  if hasEnd {
+    return resolveSpan(&span, end, explicitTracks, names)
+  }
+  return resolveSpan(start, &span, explicitTracks, names)
+}
+
 // Grid 2 §8.5. Internally row/column mean logical major/minor; column flow
 // transposes at the boundary rather than maintaining a second algorithm.
 pub effect fn collectItems<'source>(
@@ -183,6 +222,28 @@ pub effect fn collectItems<'source>(
 ) -> GridBounds
   ! OutOfMemoryError
   ? &mut Allocator {
+  return run collectSubgridItems(
+    nodes, id, explicitRows, explicitColumns, rowNames, columnNames,
+    false, false, &mut items, &mut work,
+  )
+}
+
+// Inherited axes cannot create implicit tracks. Bounds refer to the parent's
+// logical rows/columns, independently of its auto-flow direction.
+pub effect fn collectSubgridItems<'source>(
+  nodes: &BoxTree<'source>,
+  id: usize,
+  explicitRows: usize,
+  explicitColumns: usize,
+  rowNames: &LineNames,
+  columnNames: &LineNames,
+  boundedRows: bool,
+  boundedColumns: bool,
+  items: &mut List<GridItem>,
+  work: &mut PlacementScratch,
+) -> GridBounds
+  ! OutOfMemoryError
+  ? &mut Allocator {
   items.clear()
   work.occupancy.clear()
   let template = &nodes.grids[nodes.style(id).grid]
@@ -190,15 +251,26 @@ pub effect fn collectItems<'source>(
   let dense = template.dense
   let mut explicitMajor = boundedTracks(explicitRows)
   let mut explicitMinor = boundedTracks(explicitColumns)
+  let mut boundedMajor = boundedRows
+  let mut boundedMinor = boundedColumns
   if transpose {
     explicitMajor = boundedTracks(explicitColumns)
     explicitMinor = boundedTracks(explicitRows)
+    boundedMajor = boundedColumns
+    boundedMinor = boundedRows
   }
+  // A used subgrid span always contains at least one track.
+  if boundedMajor && explicitMajor == 0 { explicitMajor = 1 }
+  if boundedMinor && explicitMinor == 0 { explicitMinor = 1 }
+  let mut majorLimit = usize.toI32(MAX_GRID_TRACKS)
+  let mut minorLimit = usize.toI32(MAX_GRID_TRACKS)
+  if boundedMajor { majorLimit = explicitMajor }
+  if boundedMinor { minorLimit = explicitMinor }
   let mut majorOrigin: i32 = 0
   let mut minorOrigin: i32 = 0
   let mut majorEnd = explicitMajor
   let mut minorEnd = explicitMinor
-  let limit = usize.toI32(MAX_GRID_TRACKS)
+  let parentHorizontal = nodes.style(id).writingMode == WritingMode.HorizontalTb
 
   let mut count: usize = 0
   let mut child = nodes.node(id).firstChild
@@ -215,18 +287,36 @@ pub effect fn collectItems<'source>(
   while child != NO_NODE {
     let style = nodes.style(child)
     if !outOfFlow(style) {
-      let placement = &nodes.grids[style.grid].placement
-      let row = resolveSpan(&placement.rowStart, &placement.rowEnd, explicitRows, rowNames)
-      let column = resolveSpan(
-        &placement.columnStart,
-        &placement.columnEnd,
-        explicitColumns,
-        columnNames,
+      let childTemplate = &nodes.grids[style.grid]
+      let placement = &childTemplate.placement
+      let eligible = isGrid(style) && nodes.node(child).kind == BoxKind.Grid
+        && nodes.node(child).measurement != Measurement.Content && !style.replaced
+      let orthogonal = (style.writingMode == WritingMode.HorizontalTb) != parentHorizontal
+      let mut rowAxis = &childTemplate.rows
+      let mut columnAxis = &childTemplate.columns
+      if orthogonal {
+        rowAxis = &childTemplate.columns
+        columnAxis = &childTemplate.rows
+      }
+      let row = itemSpan(
+        &placement.rowStart, &placement.rowEnd, explicitRows, rowNames, rowAxis, eligible,
+      )
+      let column = itemSpan(
+        &placement.columnStart, &placement.columnEnd,
+        explicitColumns, columnNames, columnAxis, eligible,
       )
       let mut item = GridItem { id: child, row: row, column: column }
       if transpose {
         item.row = column
         item.column = row
+      }
+      // Clamp before collecting extents or reserving cells, so excluded
+      // definite placements still block their nearest inherited track.
+      if boundedMajor {
+        item.row = normalize(item.row, 0, majorLimit)
+      }
+      if boundedMinor {
+        item.column = normalize(item.column, 0, minorLimit)
       }
       if item.row.definite {
         if item.row.start < majorOrigin {
@@ -272,10 +362,10 @@ pub effect fn collectItems<'source>(
   let mut index: usize = 0
   while index < count {
     if values[index].row.definite {
-      values[index].row = normalize(values[index].row, majorOrigin, majorOrigin + limit)
+      values[index].row = normalize(values[index].row, majorOrigin, majorOrigin + majorLimit)
     }
     if values[index].column.definite {
-      values[index].column = normalize(values[index].column, minorOrigin, minorOrigin + limit)
+      values[index].column = normalize(values[index].column, minorOrigin, minorOrigin + minorLimit)
     }
     index = index + 1
   }
@@ -308,13 +398,13 @@ pub effect fn collectItems<'source>(
       if !dense {
         column = usize.toI32(work.occupancy.past(firstRow))
       }
-      while column < limit {
+      while column < minorLimit {
         let next = usize.toI32(
           work.occupancy.blockedEnd(
             firstRow,
             lastRow,
             i32.toUsize(column),
-            i32.toUsize(smaller(column + length, limit)),
+            i32.toUsize(smaller(column + length, minorLimit)),
           ),
         )
         if next == column {
@@ -325,7 +415,7 @@ pub effect fn collectItems<'source>(
       item.column = normalize(
         GridSpan { start: column, end: column + length, definite: false },
         0,
-        limit,
+        minorLimit,
       )
       if item.column.end > minorEnd {
         minorEnd = item.column.end
@@ -366,14 +456,14 @@ pub effect fn collectItems<'source>(
         cursorColumn = 0
       }
       if item.column.definite {
-        if !dense && item.column.start < cursorColumn && cursorRow < limit {
+        if !dense && item.column.start < cursorColumn && cursorRow < majorLimit {
           cursorRow = cursorRow + 1
         }
         cursorColumn = item.column.start
-        while cursorRow < limit {
+        while cursorRow < majorLimit {
           let next = work.occupancy.blockedEnd(
             i32.toUsize(cursorRow),
-            i32.toUsize(smaller(cursorRow + rowLength, limit)),
+            i32.toUsize(smaller(cursorRow + rowLength, majorLimit)),
             i32.toUsize(cursorColumn),
             i32.toUsize(item.column.end),
           )
@@ -383,7 +473,7 @@ pub effect fn collectItems<'source>(
           cursorRow = cursorRow + 1
         }
       } else {
-        while cursorRow < limit {
+        while cursorRow < majorLimit {
           if cursorColumn + columnLength > minorEnd {
             cursorRow = cursorRow + 1
             cursorColumn = 0
@@ -392,7 +482,7 @@ pub effect fn collectItems<'source>(
           let next = usize.toI32(
             work.occupancy.blockedEnd(
               i32.toUsize(cursorRow),
-              i32.toUsize(smaller(cursorRow + rowLength, limit)),
+              i32.toUsize(smaller(cursorRow + rowLength, majorLimit)),
               i32.toUsize(cursorColumn),
               i32.toUsize(cursorColumn + columnLength),
             ),
@@ -401,6 +491,9 @@ pub effect fn collectItems<'source>(
             break
           }
           cursorColumn = next
+        }
+        if boundedMajor && boundedMinor && cursorRow >= majorLimit {
+          cursorColumn = minorEnd - 1
         }
         item.column = normalize(
           GridSpan { start: cursorColumn, end: cursorColumn + columnLength, definite: false },
@@ -411,7 +504,7 @@ pub effect fn collectItems<'source>(
       item.row = normalize(
         GridSpan { start: cursorRow, end: cursorRow + rowLength, definite: false },
         0,
-        limit,
+        majorLimit,
       )
       if item.row.end > majorEnd {
         majorEnd = item.row.end

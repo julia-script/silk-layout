@@ -28,6 +28,9 @@ import grid_alignment { alignItem }
 import grid_baselines as Baselines
 import grid_baselines { GridBaselines }
 import grid_fragment_scratch { FragmentItem, GridFragmentScratch, logicalRow, startRow, endRow }
+import grid_subgrid_sizing as SubgridSizing
+import grid_subgrid as Subgrid
+import grid_subgrid { GridSource }
 
 pub struct FragmentGrid<'a> {
   pub items: &'a [GridItem],
@@ -39,8 +42,11 @@ pub struct FragmentGrid<'a> {
   pub columnGap: f32,
   pub rowGap: f32,
   pub blockDefinite: bool,
+  pub columnMembers: &'a [GridItem],
+  pub rowMembers: &'a [GridItem],
   pub columnRepeat: usize,
   pub rowRepeat: usize,
+  pub source: GridSource<'a>,
 }
 
 fn itemBoundary(
@@ -128,6 +134,7 @@ fn allocatedInput(
   request.availableHeight = AvailableSpace.definite(request.parent.height)
   request.known = allocation.known
   request.minimum = allocation.minimum
+  request.gridContext = allocation.gridContext
   request.performLayout = true
   return request
 }
@@ -173,6 +180,7 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
       &mut measurer,
       item,
       base,
+      &grid.source,
       style,
       &grid.axis,
       grid.columns,
@@ -189,6 +197,9 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
     let allocation = &mut scratch.items.asMutSlice()[index]
     allocation.known = request.known
     allocation.minimum = request.minimum
+    // requestItem binds this frame's parent tracks, not an earlier allocation.
+    // The interned context remains valid when allocation probes are restored.
+    allocation.gridContext = request.gridContext
     allocation.size = grid.axis.size(output.boxes[item.id].size)
     allocation.margin = output.boxes[item.id].usedMargin
     if sharing {
@@ -235,6 +246,12 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
     if sharing {
       inlineShift = Baselines.shift(&baselines, index, true, inlineShift)
       blockShift = Baselines.shift(&baselines, index, false, blockShift)
+    }
+    if Subgrid.inherits(nodes, item.id, style, true) {
+      inlineShift = 0.0
+    }
+    if Subgrid.inherits(nodes, item.id, style, false) {
+      blockShift = 0.0
     }
     let mut inlineOffset = grid.columns[column].position + margin.left + inlineShift
     if style.usedDirection() == Direction.Rtl {
@@ -318,6 +335,7 @@ effect fn fitItem<'pass, 'source, M: Measure + TextMeasure>(
   nodes: &BoxTree<'source>,
   output: &mut LayoutPass<'pass, 'source>,
   measurer: &mut M,
+  parent: &Style,
   input: &Input,
   base: &Input,
   grid: &FragmentGrid,
@@ -422,6 +440,7 @@ effect fn fitItem<'pass, 'source, M: Measure + TextMeasure>(
     preferred = style.width
   }
   request.fragmentation.allocatedAutoExtent = preferred.kind == DimensionKind.Auto
+    || Subgrid.inherits(nodes, item.id, parent, false)
   let checkpoint = output.checkpoint()
   let mut layout = run layoutNode(nodes, &mut output, &mut measurer, item.id, &request)
   let child = output.resumes.get(item.id)
@@ -597,6 +616,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
         nodes,
         &mut output,
         &mut measurer,
+        style,
         input,
         base,
         grid,
@@ -728,6 +748,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
         nodes,
         &mut output,
         &mut measurer,
+        style,
         input,
         base,
         grid,
@@ -951,6 +972,42 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
     y: overflowPoint.y,
     width: overflowSize.width,
     height: overflowSize.height,
+  }
+  if baselines.any() && (grid.columnMembers.length > grid.items.length || grid.rowMembers.length > grid.items.length) {
+    run scratch.baselineRows.appendRepeated(TrackState.fixed(0.0), grid.rows.length)
+    let mut ordinal: usize = 0
+    let mut reached: f32 = 0.0
+    while ordinal < scratch.rows.length() {
+      let geometry = scratch.rows.get(ordinal)
+      let mut start = reached
+      let mut end = reached
+      if geometry.accepted {
+        start = geometry.consumedStart - consumed
+        end = geometry.consumedEnd - consumed
+        reached = end
+      }
+      let mut track = TrackState.fixed(end - start)
+      track.position = opening - logical.inset.top + start
+      if scratch.reversed { track.position = ending - logical.inset.top + cursor - end }
+      scratch.baselineRows.set(logicalRow(ordinal, grid.rows.length, scratch.reversed), track)
+      ordinal = ordinal + 1
+    }
+    let baselineRows = scratch.baselineRows.asSlice()
+    Baselines.resetFinal(&mut baselines)
+    SubgridSizing.captureFinal(nodes, &output, id, logical.inset, grid.items, 0,
+      grid.columns, true, &mut baselines)
+    SubgridSizing.captureFinal(nodes, &output, id, logical.inset, grid.items, 0,
+      baselineRows, false, &mut baselines)
+    SubgridSizing.captureFinal(nodes, &output, id, logical.inset, grid.columnMembers,
+      grid.items.length, grid.columns, true, &mut baselines)
+    SubgridSizing.captureFinal(nodes, &output, id, logical.inset, grid.rowMembers,
+      grid.items.length, baselineRows, false, &mut baselines)
+    run SubgridSizing.placeFinal(nodes, &mut output, id, result.size, logical.inset, grid.items, 0, grid.columns, true, &baselines, true)
+    run SubgridSizing.placeFinal(nodes, &mut output, id, result.size, logical.inset, grid.items, 0, baselineRows, false, &baselines, true)
+    run SubgridSizing.placeFinal(nodes, &mut output, id, result.size, logical.inset, grid.columnMembers,
+      grid.items.length, grid.columns, true, &baselines, true)
+    run SubgridSizing.placeFinal(nodes, &mut output, id, result.size, logical.inset, grid.rowMembers,
+      grid.items.length, baselineRows, false, &baselines, true)
   }
   if input.baselines {
     Baselines.containerBaselines(

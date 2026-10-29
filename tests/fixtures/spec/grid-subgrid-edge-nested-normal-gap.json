@@ -1,0 +1,142 @@
+{
+  "name": "grid-subgrid-edge-nested-normal-gap",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-gaps",
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing"
+  ],
+  "derivation": "The outer subgrid changes the root gap from 10px to 18px; the inner normal gap inherits 18px even while intrinsic track estimates are zero and edge insets floor those estimates. Accumulated outside edges are 13/18px and interior extra margins are (18-10)/2=4px. Root tracks are 23+13+4=40 and 37+18+4=59, so total width is 109px. Outer and inner margin deductions leave border-box widths 103px and 87px. The inner leaves start at local x=6 and 6+23+18=47.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "auto",
+            "auto"
+          ],
+          "gridTemplateRows": [
+            17
+          ],
+          "columnGap": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            17
+          ],
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1,
+          "columnGap": 18,
+          "margin": {
+            "left": 2,
+            "right": 4
+          },
+          "border": {
+            "left": 1,
+            "right": 3
+          },
+          "padding": {
+            "left": 3,
+            "right": 5
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            17
+          ],
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1,
+          "columnGap": "normal",
+          "margin": {
+            "left": 1,
+            "right": 3
+          },
+          "border": {
+            "left": 2,
+            "right": 1
+          },
+          "padding": {
+            "left": 4,
+            "right": 2
+          }
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "width": 23,
+          "height": 17
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 1,
+          "width": 37,
+          "height": 17
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 109,
+        "height": 17
+      },
+      {
+        "x": 2,
+        "y": 0,
+        "width": 103,
+        "height": 17
+      },
+      {
+        "x": 5,
+        "y": 0,
+        "width": 87,
+        "height": 17
+      },
+      {
+        "x": 6,
+        "y": 0,
+        "width": 23,
+        "height": 17
+      },
+      {
+        "x": 47,
+        "y": 0,
+        "width": 37,
+        "height": 17
+      }
+    ]
+  }
+}

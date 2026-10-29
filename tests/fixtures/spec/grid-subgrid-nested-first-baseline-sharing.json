@@ -1,0 +1,26 @@
+{
+  "name": "grid-subgrid-nested-first-baseline-sharing",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "baseline"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrids", "https://drafts.csswg.org/css-grid-2/#grid-baselines", "https://drafts.csswg.org/css-align-3/#align-by-baseline"],
+  "derivation": "A 30px direct grid item and a 10px leaf beneath two row-subgrids share the same first-row baseline group. Empty block leaves synthesize their alphabetic baseline at their border bottom, so the shared first baseline is y=30: the direct item stays at y=0 and the nested leaf moves to y=20. Both intervening subgrids stretch over the unchanged 50px row; neither wrapper is itself baseline-aligned.",
+  "input": {
+    "viewport": {"width": 200, "height": 120},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 80, "gridTemplateColumns": [40, 40], "gridTemplateRows": [50]}},
+      {"parent": 0, "style": {"width": 20, "height": 30, "gridColumnStart": 1, "gridRowStart": 1, "alignSelf": "baseline"}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": [40], "gridTemplateRows": "subgrid", "gridColumnStart": 2, "gridRowStart": 1}},
+      {"parent": 2, "style": {"display": "grid", "gridTemplateColumns": [40], "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridRowStart": 1}},
+      {"parent": 3, "style": {"width": 20, "height": 10, "gridColumnStart": 1, "gridRowStart": 1, "alignSelf": "baseline"}}
+    ]
+  },
+  "expected": {
+    "sources": [
+      {"x": 0, "y": 0, "width": 80, "height": 50},
+      {"x": 0, "y": 0, "width": 20, "height": 30},
+      {"x": 40, "y": 0, "width": 40, "height": 50},
+      {"x": 0, "y": 0, "width": 40, "height": 50},
+      {"x": 0, "y": 20, "width": 20, "height": 10}
+    ]
+  }
+}

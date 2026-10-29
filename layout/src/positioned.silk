@@ -23,6 +23,8 @@ import axes { Axes }
 import block { inlineOffset }
 import bfc { BfcState }
 import grid_positioned as GridPositioned
+import grid { shellContext }
+import grid_subgrid as Subgrid
 
 // Fragment ancestry, generated ancestry and source ancestry are deliberately
 // separate. In particular an interrupted inline does not own its lifted blocks.
@@ -179,7 +181,7 @@ effect fn fragmentedInterruption(nodes: &BoxTree, output: &mut LayoutPass, id: u
         let emitted = run output.fragments.append(fragment)
         match output.fragmentFullBox(parent) {
           Option<FullBoxGeometry>.Some { value } => {
-            run output.rememberFragmentBox(id, emitted.index, FullBoxGeometry { parent: value.content, known: OptionalSize.none(), minimum: Size { width: 0.0, height: 0.0 }, content: OptionalSize.none() })
+            run output.rememberFragmentBox(id, emitted.index, FullBoxGeometry { parent: value.content, known: OptionalSize.none(), minimum: Size { width: 0.0, height: 0.0 }, content: OptionalSize.none(), gridContext: 0 })
           }
           Option<FullBoxGeometry>.None => {}
         }
@@ -331,6 +333,12 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
   let mut parent = generatedParent(nodes, id)
   if positioned { parent = absoluteContainingBlock(nodes, id) }
   let mut input = Input.make(viewport)
+  if !positioned {
+    input.gridContext = output.cache.gridGeometry.context(id)
+    if input.gridContext != 0 {
+      input.known = OptionalSize.definite(output.boxes[id].size.width, output.boxes[id].size.height)
+    }
+  }
   if positioned && parent != NO_NODE {
     let mut rect = containingRect(nodes, output, parent, viewport)
     if GridPositioned.isContainer(nodes, parent) { rect = GridPositioned.containingRect(nodes, output, parent, id, rect, output.fragments.first(parent), false) }
@@ -349,6 +357,7 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
         input.parent = value.parent
         input.known = value.known
         input.minimum = value.minimum
+        input.gridContext = value.gridContext
       }
       Option<FullBoxGeometry>.None => {}
     }
@@ -998,8 +1007,10 @@ fn containingExisting(nodes: &BoxTree, output: &LayoutPass, cb: usize, frame: us
 
 // A flex or grid item's allocation belongs to its parent's sizing algorithm.
 // Cache the complete probe results together so sibling continuations reuse them.
-effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, parent: usize, initial: OptionalSize) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, parent: usize, initial: OptionalSize, gridContext: &mut usize) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let parentBox = output.fragments.values.get(parent).box
+  let inherited = nodes.node(parentBox).kind == BoxKind.Grid && Subgrid.eligible(nodes, id)
+  gridContext.* = 0
   let metadata = match output.fragmentFullBox(parent) {
     Option<FullBoxGeometry>.Some { value } => value
     Option<FullBoxGeometry>.None => { fail FragmentationError { frame: output.frame, message: "Container continuation has no full containing-block geometry" } }
@@ -1008,6 +1019,7 @@ effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nod
   input.parent = metadata.parent
   input.known = metadata.known
   input.minimum = metadata.minimum
+  input.gridContext = metadata.gridContext
   let box = resolveBox(nodes.style(parentBox), &input)
   input.known = OptionalSize.definite(metadata.content.width + box.inset.horizontal(), metadata.content.height + box.inset.vertical())
   input.indefiniteWidth = !metadata.content.widthDefinite
@@ -1016,13 +1028,20 @@ effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nod
   // Both algorithms need their final item placement pass, not just track/line sizes.
   input.baselines = true
   input.fragmentation = FragmentInput.continuous()
-  match output.lookup(id, &input, CacheKind.ContainerAllocation) {
-    Option<Layout>.Some { value } => { return value }
-    Option<Layout>.None => {}
+  if !inherited {
+    match output.lookup(id, &input, CacheKind.ContainerAllocation) {
+      Option<Layout>.Some { value } => { return value }
+      Option<Layout>.None => {}
+    }
   }
   let checkpoint = output.checkpoint()
   let mut bfc = BfcState.make()
   drop run layoutInBfc(nodes, &mut output, &mut measurer, parentBox, &input, &mut bfc)
+  if inherited {
+    // Derive the child token from this frame's parent allocation, not from a
+    // first-frame descriptor or the latest speculative request for the child.
+    gridContext.* = run shellContext(nodes, &mut output, parentBox, id)
+  }
   let mut child = nodes.node(parentBox).firstChild
   while child != NO_NODE {
     if nodes.node(child).needsFragmentGeometry && !outOfFlow(nodes.style(child)) {
@@ -1042,16 +1061,19 @@ effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nod
 }
 
 effect fn prepareGridGeometry<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, fragment: usize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  if nodes.style(id).position == Position.Static || !GridPositioned.isContainer(nodes, id) || output.cache.gridGeometry.findFragment(id, fragment) != NO_NODE { return }
+  if !GridPositioned.isContainer(nodes, id) || output.cache.gridGeometry.findFragment(id, fragment) != NO_NODE { return }
+  if nodes.style(id).position == Position.Static && !Subgrid.eligible(nodes, id) { return }
   let metadata = match output.fragmentFullBox(fragment) {
     Option<FullBoxGeometry>.Some { value } => value
     Option<FullBoxGeometry>.None => { fail FragmentationError { frame: output.frame, message: "Grid continuation has no full containing-block geometry" } }
   }
+  if nodes.style(id).position == Position.Static && metadata.gridContext == 0 { return }
   let firstFrame = run output.requiredFrame(0)
   let mut input = usedInput(nodes, &output, id, OptionalSize.definite(firstFrame.rect.width, firstFrame.rect.height))
   input.parent = metadata.parent
   input.known = metadata.known
   input.minimum = metadata.minimum
+  input.gridContext = metadata.gridContext
   let box = resolveBox(nodes.style(id), &input)
   input.known = OptionalSize.definite(metadata.content.width + box.inset.horizontal(), metadata.content.height + box.inset.vertical())
   input.indefiniteWidth = !metadata.content.widthDefinite
@@ -1090,6 +1112,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
         input.parent = value.parent
         input.known = value.known
         input.minimum = value.minimum
+        input.gridContext = value.gridContext
       }
       Option<FullBoxGeometry>.None => {}
     }
@@ -1122,7 +1145,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     }
     let mut allocation = Layout.zero()
     if allocatedItem {
-      allocation = run containerShellAllocation(nodes, &mut output, &mut measurer, id, parent, initial)
+      allocation = run containerShellAllocation(nodes, &mut output, &mut measurer, id, parent, initial, &mut input.gridContext)
       input.known = OptionalSize.definite(allocation.size.width, allocation.size.height)
       input.indefiniteWidth = !allocation.widthDefinite
       input.indefiniteHeight = !allocation.heightDefinite
@@ -1166,6 +1189,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
         updated.parent = input.parent
         updated.known = input.known
         updated.minimum = input.effectiveMinimum()
+        updated.gridContext = input.gridContext
         if full.size.widthDefinite { updated.content.width = max(0.0, full.size.width - full.inset.horizontal()) }
         if full.size.heightDefinite { updated.content.height = max(0.0, full.size.height - full.inset.vertical()) }
         metadata = Option<FullBoxGeometry>.Some { value: updated }

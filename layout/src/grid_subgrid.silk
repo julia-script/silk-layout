@@ -1,0 +1,385 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.num.i32
+import silk.num.usize
+import axes { Axes }
+import box_tree { BoxTree, BoxKind }
+import context { Input, outOfFlow }
+import geometry { max }
+import style { Style, WritingMode, Direction, DisplayInside }
+import grid_style { GridNamedLine, GridArea, MAX_GRID_TRACKS }
+import grid_tracks { TrackState }
+import grid_placement { GridItem }
+import tree { Measurement }
+
+// Metadata is kept separate from generated area aliases. Every descendant clips
+// the rectangles again before generating its own implicit line names (§9).
+pub struct SubgridAxis {
+  pub active: bool,
+  pub gap: f32,
+  pub tracks: List<TrackState>,
+  pub lines: List<GridNamedLine>,
+}
+impl SubgridAxis {
+  pub fn make() -> SubgridAxis {
+    return SubgridAxis { active: false, gap: 0.0, tracks: List<TrackState>.make(), lines: List<GridNamedLine>.make() }
+  }
+  fn clear(self: &mut Self) {
+    self.active = false
+    self.gap = 0.0
+    self.tracks.clear()
+    self.lines.clear()
+  }
+}
+
+pub struct SubgridContext {
+  pub columns: SubgridAxis,
+  pub rows: SubgridAxis,
+  pub areas: List<GridArea>,
+  pub areaMasks: List<usize>,
+  pub stage: usize,
+}
+impl SubgridContext {
+  pub fn make() -> SubgridContext {
+    return SubgridContext { columns: SubgridAxis.make(), rows: SubgridAxis.make(), areas: List<GridArea>.make(), areaMasks: List<usize>.make(), stage: 0 }
+  }
+  fn clear(self: &mut Self) {
+    self.columns.clear()
+    self.rows.clear()
+    self.areas.clear()
+    self.areaMasks.clear()
+    self.stage = 0
+  }
+}
+
+fn sameAxis(a: &SubgridAxis, b: &SubgridAxis) -> bool {
+  if a.active != b.active || a.gap != b.gap || a.tracks.length() != b.tracks.length()
+    || a.lines.length() != b.lines.length() { return false }
+  let mut at: usize = 0
+  while at < a.tracks.length() {
+    let x = a.tracks.get(at)
+    let y = b.tracks.get(at)
+    if x.base != y.base || x.position != y.position || x.collapsed != y.collapsed { return false }
+    at = at + 1
+  }
+  at = 0
+  while at < a.lines.length() {
+    let x = a.lines.get(at)
+    let y = b.lines.get(at)
+    if x.line != y.line || x.name != y.name { return false }
+    at = at + 1
+  }
+  return true
+}
+fn sameContext(a: &SubgridContext, b: &SubgridContext) -> bool {
+  if !sameAxis(&a.columns, &b.columns) || !sameAxis(&a.rows, &b.rows)
+    || a.areas.length() != b.areas.length() || a.stage != b.stage { return false }
+  let mut at: usize = 0
+  while at < a.areas.length() {
+    let x = a.areas.get(at)
+    let y = b.areas.get(at)
+    if x.name != y.name || x.columnStart != y.columnStart || x.columnEnd != y.columnEnd
+      || x.rowStart != y.rowStart || x.rowEnd != y.rowEnd
+      || a.areaMasks.get(at) != b.areaMasks.get(at) { return false }
+    at = at + 1
+  }
+  return true
+}
+
+struct ContextSlot {
+  value: SubgridContext,
+  marked: bool,
+  occupied: bool,
+  nextFree: usize,
+}
+
+// IDs are immutable while any request or accepted geometry references them.
+// Reuse happens only at the between-compute root-tracing barrier. Candidate
+// lookup remains per box rather than scanning all inherited contexts.
+pub struct SubgridPool {
+  values: List<ContextSlot>,
+  latest: List<usize>,
+  builder: SubgridContext,
+  free: usize,
+}
+impl SubgridPool {
+  pub fn make() -> SubgridPool {
+    return SubgridPool {
+      values: List<ContextSlot>.make(), latest: List<usize>.make(),
+      builder: SubgridContext.make(), free: 0,
+    }
+  }
+  pub fn clear(self: &mut Self) {
+    self.values.clear()
+    self.latest.clear()
+    self.builder.clear()
+    self.free = 0
+  }
+
+  // Called only before constructing the next LayoutPass. Checkpoints retain
+  // probe requests, so collecting inside a pass would invalidate live IDs.
+  pub fn beginCollection(self: &mut Self) -> bool {
+    if self.values.length() == 0 { return false }
+    let mut at: usize = 0
+    while at < self.values.length() {
+      let slot = &mut self.values.asMutSlice()[at]
+      slot.marked = false
+      at = at + 1
+    }
+    at = 0
+    while at < self.latest.length() {
+      let id = self.latest.get(at)
+      self.mark(id)
+      at = at + 1
+    }
+    return true
+  }
+
+  pub fn mark(self: &mut Self, id: usize) {
+    if id != 0 {
+      let slot = &mut self.values.asMutSlice()[id - 1]
+      slot.marked = true
+    }
+  }
+
+  pub fn finishCollection(self: &mut Self) {
+    self.free = 0
+    let mut at = self.values.length()
+    while at > 0 {
+      at = at - 1
+      let slot = &mut self.values.asMutSlice()[at]
+      if slot.occupied && !slot.marked {
+        slot.value = SubgridContext.make()
+        slot.occupied = false
+      }
+      if !slot.occupied {
+        slot.nextFree = self.free
+        self.free = at + 1
+      }
+    }
+  }
+  pub fn resetOwners(self: &mut Self) { self.latest.clear() }
+  pub fn get(self: &Self, id: usize) -> &SubgridContext {
+    return &self.values.asSlice()[id - 1].value
+  }
+  pub fn physicalMask(self: &Self, id: usize, mode: WritingMode) -> usize with Intrinsic.inlineAlways() {
+    if id == 0 { return 0 }
+    let value = self.get(id)
+    let vertical = Axes.make(mode).vertical
+    let mut mask: usize = 0
+    if value.columns.active {
+      if vertical { mask = mask + 2 } else { mask = mask + 1 }
+    }
+    if value.rows.active {
+      if vertical { mask = mask + 1 } else { mask = mask + 2 }
+    }
+    return mask
+  }
+  pub fn takeBuilder(self: &mut Self) -> SubgridContext {
+    let mut result = Intrinsic.replace(self.builder, SubgridContext.make())
+    result.clear()
+    return move result
+  }
+  pub effect fn intern(self: &mut Self, owner: usize, value: SubgridContext) -> usize
+    ! OutOfMemoryError ? &mut Allocator {
+    let owners = self.latest.length()
+    if owners <= owner { run self.latest.appendRepeated(0, owner + 1 - owners) }
+    let previous = self.latest.get(owner)
+    if previous != 0 && sameContext(self.get(previous), &value) {
+      self.builder = move value
+      return previous
+    }
+    let mut id = self.free
+    if id != 0 {
+      let slot = &mut self.values.asMutSlice()[id - 1]
+      self.free = slot.nextFree
+      slot.value = move value
+      slot.occupied = true
+      slot.nextFree = 0
+    } else {
+      run self.values.append(ContextSlot { value: move value, marked: false, occupied: true, nextFree: 0 })
+      id = self.values.length()
+    }
+    self.latest.set(owner, id)
+    return id
+  }
+}
+
+// All fields are in the immediate parent's logical grid coordinates. Origins
+// relate normalized placement spans to authored explicit line zero.
+pub struct GridSource<'a> {
+  pub columns: &'a [GridNamedLine],
+  pub rows: &'a [GridNamedLine],
+  pub areas: &'a [GridArea],
+  pub areaMasks: &'a [usize],
+  pub columnOrigin: i32,
+  pub rowOrigin: i32,
+  // False proves that ordinary item walks need no inherited-context checks.
+  pub subgridChildren: bool,
+}
+impl Copy for GridSource {}
+
+pub fn eligible(nodes: &BoxTree, id: usize) -> bool {
+  if nodes.node(id).kind != BoxKind.Grid { return false }
+  let style = nodes.style(id)
+  let template = &nodes.grids[style.grid]
+  if !template.columns.subgrid && !template.rows.subgrid { return false }
+  return nodes.node(id).measurement != Measurement.Content && !style.replaced
+    && style.display.insideIs(DisplayInside.Grid) && !outOfFlow(style)
+}
+
+pub fn childColumns(parent: &Style, child: &Style, columns: bool) -> bool {
+  return columns == (Axes.make(parent.writingMode).vertical == Axes.make(child.writingMode).vertical)
+}
+fn backwards(style: &Style, columns: bool) -> bool {
+  let axis = Axes.make(style.writingMode)
+  if columns { return axis.reverseLine != (style.usedDirection() == Direction.Rtl) }
+  return axis.reverseBlock
+}
+pub fn reversed(parent: &Style, child: &Style, columns: bool) -> bool {
+  return backwards(parent, columns) != backwards(child, childColumns(parent, child, columns))
+}
+pub fn inherits(nodes: &BoxTree, id: usize, parent: &Style, columns: bool) -> bool {
+  if !eligible(nodes, id) { return false }
+  let template = &nodes.grids[nodes.style(id).grid]
+  if childColumns(parent, nodes.style(id), columns) { return template.columns.subgrid }
+  return template.rows.subgrid
+}
+
+// Copy line centers and track edges rather than recomputing positions from a
+// nominal gap: content-distributed parent gutters are part of the inheritance.
+effect fn inheritAxis(
+  tracks: &[TrackState], lines: &[GridNamedLine], start: usize, end: usize,
+  origin: i32, reverse: bool, gap: f32, result: &mut SubgridAxis,
+) ! OutOfMemoryError ? &mut Allocator {
+  result.active = true
+  result.gap = gap
+  let first = tracks[start].position
+  let last = tracks[end - 1].position + tracks[end - 1].base
+  let mut at = start
+  while at < end {
+    let mut index = at
+    if reverse { index = end - 1 - (at - start) }
+    let mut track = TrackState.fixed(tracks[index].base)
+    track.collapsed = tracks[index].collapsed
+    track.position = tracks[index].position - first
+    if reverse { track.position = last - tracks[index].position - tracks[index].base }
+    run result.tracks.append(track)
+    at = at + 1
+  }
+  at = 0
+  while at < lines.length {
+    let position = usize.toI32(lines[at].line) - origin
+    if position >= usize.toI32(start) && position <= usize.toI32(end) {
+      let mut local = i32.toUsize(position) - start
+      if reverse { local = end - start - local }
+      run result.lines.append(GridNamedLine { name: lines[at].name, line: local, repeat: 0 })
+    }
+    at = at + 1
+  }
+}
+
+pub effect fn makeContext(
+  nodes: &BoxTree, item: &GridItem, parent: &Style, source: &GridSource,
+  columns: &[TrackState], rows: &[TrackState], columnGap: f32, rowGap: f32,
+  result: &mut SubgridContext,
+) ! OutOfMemoryError ? &mut Allocator {
+  let child = nodes.style(item.id)
+  let template = &nodes.grids[child.grid]
+  let parallel = childColumns(parent, child, true)
+  let reverseColumns = reversed(parent, child, true)
+  let reverseRows = reversed(parent, child, false)
+  let cs = i32.toUsize(item.column.start)
+  let ce = i32.toUsize(item.column.end)
+  let rs = i32.toUsize(item.row.start)
+  let re = i32.toUsize(item.row.end)
+  if parallel {
+    if template.columns.subgrid { run inheritAxis(columns, source.columns, cs, ce, source.columnOrigin, reverseColumns, columnGap, &mut result.columns) }
+    if template.rows.subgrid { run inheritAxis(rows, source.rows, rs, re, source.rowOrigin, reverseRows, rowGap, &mut result.rows) }
+  } else {
+    if template.rows.subgrid { run inheritAxis(columns, source.columns, cs, ce, source.columnOrigin, reverseColumns, columnGap, &mut result.rows) }
+    if template.columns.subgrid { run inheritAxis(rows, source.rows, rs, re, source.rowOrigin, reverseRows, rowGap, &mut result.columns) }
+  }
+  let mut at: usize = 0
+  while at < source.areas.length {
+    let area = source.areas[at]
+    let mut parentMask: usize = 3
+    if source.areaMasks.length != 0 { parentMask = source.areaMasks[at] }
+    let mut columnArea = parentMask % 2 != 0
+    let mut rowArea = parentMask >= 2
+    if !parallel { let swap = columnArea
+      columnArea = rowArea
+      rowArea = swap }
+    let mut mask: usize = 0
+    if template.columns.subgrid && columnArea { mask = mask + 1 }
+    if template.rows.subgrid && rowArea { mask = mask + 2 }
+    let mut left = usize.toI32(area.columnStart) - source.columnOrigin
+    let mut right = usize.toI32(area.columnEnd) - source.columnOrigin
+    let mut top = usize.toI32(area.rowStart) - source.rowOrigin
+    let mut bottom = usize.toI32(area.rowEnd) - source.rowOrigin
+    if left < item.column.start { left = item.column.start }
+    if right > item.column.end { right = item.column.end }
+    if top < item.row.start { top = item.row.start }
+    if bottom > item.row.end { bottom = item.row.end }
+    if mask != 0 && left < right && top < bottom {
+      let mut firstColumn = i32.toUsize(left) - cs
+      let mut lastColumn = i32.toUsize(right) - cs
+      let mut firstRow = i32.toUsize(top) - rs
+      let mut lastRow = i32.toUsize(bottom) - rs
+      if reverseColumns { firstColumn = ce - i32.toUsize(right)
+        lastColumn = ce - i32.toUsize(left) }
+      if reverseRows { firstRow = re - i32.toUsize(bottom)
+        lastRow = re - i32.toUsize(top) }
+      let mut clipped = GridArea { name: area.name, columnStart: firstColumn, columnEnd: lastColumn, rowStart: firstRow, rowEnd: lastRow }
+      if !parallel {
+        clipped = GridArea { name: area.name, columnStart: firstRow, columnEnd: lastRow, rowStart: firstColumn, rowEnd: lastColumn }
+      }
+      if mask % 2 == 0 { clipped.columnStart = 0
+        clipped.columnEnd = MAX_GRID_TRACKS }
+      if mask < 2 { clipped.rowStart = 0
+        clipped.rowEnd = MAX_GRID_TRACKS }
+      run result.areas.append(clipped)
+      run result.areaMasks.append(mask)
+    }
+    at = at + 1
+  }
+}
+
+// Edge insets shorten only the outside tracks; explicit gaps move the two
+// adjacent edges symmetrically about each inherited gutter's center.
+pub effect fn installTracks(
+  source: &SubgridAxis, gap: f32, normal: bool, low: f32, high: f32, result: &mut List<TrackState>,
+) ! OutOfMemoryError ? &mut Allocator {
+  result.clear()
+  let tracks = source.tracks.asSlice()
+  let mut at: usize = 0
+  while at < tracks.length {
+    let mut before: f32 = 0.0
+    let mut after: f32 = 0.0
+    if !normal && at > 0 {
+      before = (gap - (tracks[at].position - tracks[at - 1].position - tracks[at - 1].base)) * 0.5
+    }
+    if !normal && at + 1 < tracks.length {
+      after = (gap - (tracks[at + 1].position - tracks[at].position - tracks[at].base)) * 0.5
+    }
+    if at == 0 { before = low }
+    if at + 1 == tracks.length { after = high }
+    let mut track = TrackState.fixed(max(0.0, tracks[at].base - before - after))
+    track.position = tracks[at].position + before - low
+    track.collapsed = tracks[at].collapsed
+    run result.append(track)
+    at = at + 1
+  }
+}
+
+pub fn forceSize(request: &mut Input, parent: &Style, columns: bool, extent: f32) {
+  let horizontal = columns != Axes.make(parent.writingMode).vertical
+  if horizontal { request.known.width = extent
+    request.known.widthDefinite = true
+    request.minimum.width = 0.0
+  } else { request.known.height = extent
+    request.known.heightDefinite = true
+    request.minimum.height = 0.0
+  }
+}

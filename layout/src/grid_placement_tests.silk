@@ -24,7 +24,7 @@ import grid_style {
   GridAutoFlow,
   GridError
 }
-import grid_placement { GridItem, PlacementScratch, collectItems }
+import grid_placement { GridItem, GridBounds, PlacementScratch, collectItems, collectSubgridItems }
 import grid_lines { LineNames }
 
 // Original fixtures derived from Grid 2 §8.5, not reference-engine tests.
@@ -37,6 +37,12 @@ struct Case {
   order: i32,
   slot: usize,
   collapsed: bool,
+  grid: bool,
+  orthogonal: bool,
+  rowLines: usize,
+  columnLines: usize,
+  rowEnd: i32,
+  columnEnd: i32,
   firstRow: i32,
   lastRow: i32,
   firstColumn: i32,
@@ -64,6 +70,12 @@ fn item(
     order: 0,
     slot: slot,
     collapsed: false,
+    grid: false,
+    orthogonal: false,
+    rowLines: 0,
+    columnLines: 0,
+    rowEnd: 0,
+    columnEnd: 0,
     firstRow: firstRow,
     lastRow: lastRow,
     firstColumn: firstColumn,
@@ -79,6 +91,7 @@ fn line(number: i32) -> GridLine {
 }
 
 fn span(number: i32) -> GridLine {
+  if number == 0 { return GridLine.auto() }
   return GridLine { kind: GridLineKind.Span, number: number, name: 0 }
 }
 
@@ -87,6 +100,25 @@ effect fn placementCase(
   rows: usize,
   columns: usize,
   dense: bool,
+  rowOrigin: i32,
+  columnOrigin: i32,
+  rowCount: usize,
+  columnCount: usize,
+)
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  run boundedPlacementCase(
+    cases, rows, columns, dense, false, false,
+    rowOrigin, columnOrigin, rowCount, columnCount,
+  )
+}
+
+effect fn boundedPlacementCase(
+  cases: &[Case],
+  rows: usize,
+  columns: usize,
+  dense: bool,
+  boundedMajor: bool,
+  boundedMinor: bool,
   rowOrigin: i32,
   columnOrigin: i32,
   rowCount: usize,
@@ -138,6 +170,12 @@ effect fn placementCase(
       let fixture = cases[at]
       let mut childStyle = Style.make()
       childStyle.order = fixture.order
+      if fixture.grid {
+        childStyle.display = Display.Box {
+          outside: DisplayOutside.Block, inside: DisplayInside.Grid,
+        }
+      }
+      if fixture.orthogonal { childStyle.writingMode = WritingMode.VerticalRl }
       if fixture.slot == NO_NODE {
         childStyle.position = Position.Absolute
       } else {
@@ -154,12 +192,32 @@ effect fn placementCase(
         childTemplate.placement.columnStart = line(fixture.r)
         childTemplate.placement.columnEnd = span(fixture.rs)
         childTemplate.placement.rowStart = line(fixture.c)
+        childTemplate.columns.subgrid = fixture.rowLines != 0
+        childTemplate.columns.lineCount = fixture.rowLines
+        childTemplate.rows.subgrid = fixture.columnLines != 0
+        childTemplate.rows.lineCount = fixture.columnLines
         childTemplate.placement.rowEnd = span(fixture.cs)
+        if fixture.rowEnd != 0 {
+          childTemplate.placement.columnEnd = line(fixture.rowEnd)
+        }
+        if fixture.columnEnd != 0 {
+          childTemplate.placement.rowEnd = line(fixture.columnEnd)
+        }
       } else {
         childTemplate.placement.rowStart = line(fixture.r)
         childTemplate.placement.rowEnd = span(fixture.rs)
         childTemplate.placement.columnStart = line(fixture.c)
         childTemplate.placement.columnEnd = span(fixture.cs)
+        childTemplate.rows.subgrid = fixture.rowLines != 0
+        childTemplate.rows.lineCount = fixture.rowLines
+        childTemplate.columns.subgrid = fixture.columnLines != 0
+        childTemplate.columns.lineCount = fixture.columnLines
+        if fixture.rowEnd != 0 {
+          childTemplate.placement.rowEnd = line(fixture.rowEnd)
+        }
+        if fixture.columnEnd != 0 {
+          childTemplate.placement.columnEnd = line(fixture.columnEnd)
+        }
       }
       run tree.setGrid(child, move childTemplate) |> Effect.provideMut<Allocator>(&mut allocator)
       at = at + 1
@@ -179,17 +237,28 @@ effect fn placementCase(
     let emptyNames = LineNames.make()
     let rootTemplate = &boxes.grids[boxes.style(boxes.firstBySource.get(root.index)).grid]
     while pass < 2 {
-      let bounds = run collectItems(
-        &boxes,
-        boxes.firstBySource.get(root.index),
-        rootTemplate.rows.tracks.length(),
-        rootTemplate.columns.tracks.length(),
-        &emptyNames,
-        &emptyNames,
-        &mut items,
-        &mut work,
-      )
-        |> Effect.provideMut<Allocator>(&mut allocator)
+      let mut bounds = GridBounds.empty()
+      if boundedMajor || boundedMinor {
+        let mut boundedRows = boundedMajor
+        let mut boundedColumns = boundedMinor
+        if transpose {
+          boundedRows = boundedMinor
+          boundedColumns = boundedMajor
+        }
+        bounds = run collectSubgridItems(
+          &boxes, boxes.firstBySource.get(root.index),
+          rootTemplate.rows.tracks.length(), rootTemplate.columns.tracks.length(),
+          &emptyNames, &emptyNames, boundedRows, boundedColumns, &mut items, &mut work,
+        )
+          |> Effect.provideMut<Allocator>(&mut allocator)
+      } else {
+        bounds = run collectItems(
+          &boxes, boxes.firstBySource.get(root.index),
+          rootTemplate.rows.tracks.length(), rootTemplate.columns.tracks.length(),
+          &emptyNames, &emptyNames, &mut items, &mut work,
+        )
+          |> Effect.provideMut<Allocator>(&mut allocator)
+      }
       run Testing.expect(items.length() == inFlow, "only in-flow children are collected")
       if transpose {
         run Testing.expect(
@@ -410,4 +479,109 @@ test effect fn gridPlacementLockedRowsUseFutureImplicitPrefix()
     item(1, 1, 0, 1, 2, 0, 1, 0, 1),
   ]
   run placementCase(&cases, 0, 2, false, 0, -2, 2, 4)
+}
+
+// §9: exhausted inherited grids overlap the nearest boundary cell instead
+// of extending either axis. Every fixture also runs with column flow.
+test effect fn gridSubgridPlacementOverfillAndDenseHoles()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 4] = [
+    item(0, 1, 0, 2, 0, 0, 1, 0, 2),
+    item(0, 1, 0, 2, 1, 1, 2, 0, 2),
+    item(0, 1, 0, 1, 2, 1, 2, 2, 3),
+    item(0, 1, 0, 1, 3, 1, 2, 2, 3),
+  ]
+  run boundedPlacementCase(&cases, 2, 3, false, true, true, 0, 0, 2, 3)
+  cases[2].firstRow = 0
+  cases[2].lastRow = 1
+  run boundedPlacementCase(&cases, 2, 3, true, true, true, 0, 0, 2, 3)
+}
+
+test effect fn gridSubgridPlacementClampsBeforeOccupancy()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let cases: [Case; 4] = [
+    item(-10, 8, -10, 8, 0, 0, 1, 0, 1),
+    item(10, 8, 10, 8, 1, 1, 2, 1, 2),
+    item(1, 1, 0, 8, 2, 0, 1, 1, 2),
+    item(0, 8, 1, 1, 3, 1, 2, 0, 1),
+  ]
+  run boundedPlacementCase(&cases, 2, 2, false, true, true, 0, 0, 2, 2)
+  run boundedPlacementCase(&cases, 2, 2, true, true, true, 0, 0, 2, 2)
+}
+
+test effect fn gridSubgridPlacementOnlyInheritedAxisIsBounded()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let minor: [Case; 3] = [
+    item(0, 1, 0, 8, 0, 0, 1, 0, 2),
+    item(0, 1, 0, 8, 1, 1, 2, 0, 2),
+    item(0, 1, 10, 1, 2, 2, 3, 1, 2),
+  ]
+  run boundedPlacementCase(&minor, 1, 2, false, false, true, 0, 0, 3, 2)
+  let major: [Case; 3] = [
+    item(10, 1, 0, 2, 0, 1, 2, 0, 2),
+    item(10, 1, 0, 2, 1, 1, 2, 2, 4),
+    item(0, 8, 0, 1, 2, 1, 2, 0, 1),
+  ]
+  run boundedPlacementCase(&major, 2, 1, false, true, false, 0, 0, 2, 4)
+}
+
+// An automatic span uses local line groups only for an in-flow grid child.
+// Orthogonal children map their own rows to parent columns and conversely.
+test effect fn gridSubgridItemAutomaticSpansAndOrthogonalAxes()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 5] = [
+    item(1, 0, 1, 0, 0, 0, 2, 0, 3),
+    item(1, 0, 1, 0, 1, 0, 3, 0, 2),
+    item(1, 0, 1, 0, 2, 0, 1, 0, 1),
+    item(1, 1, 1, 2, 3, 0, 1, 0, 2),
+    item(1, 0, 1, 0, NO_NODE, 0, 0, 0, 0),
+  ]
+  let mut index: usize = 0
+  while index < cases.length {
+    cases[index].grid = index != 2
+    cases[index].rowLines = 3
+    cases[index].columnLines = 4
+    index = index + 1
+  }
+  cases[1].orthogonal = true
+  run placementCase(&cases, 1, 1, false, 0, 0, 3, 3)
+}
+
+test effect fn gridSubgridItemAutomaticSpansClampToInheritedTracks()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 2] = [
+    item(0, 0, 0, 0, 0, 0, 2, 0, 2),
+    item(0, 0, 0, 0, 1, 1, 2, 1, 2),
+  ]
+  cases[0].grid = true
+  cases[0].rowLines = 8
+  cases[0].columnLines = 8
+  cases[1].grid = true
+  cases[1].rowLines = 8
+  cases[1].columnLines = 8
+  run boundedPlacementCase(&cases, 2, 2, false, true, true, 0, 0, 2, 2)
+  run boundedPlacementCase(&cases, 2, 2, true, true, true, 0, 0, 2, 2)
+}
+
+test effect fn gridSubgridItemAutomaticSpanEndpointConflicts()
+  ! OutOfMemoryError | InvalidNode | GridError | AssertionError<'static> {
+  let mut cases: [Case; 3] = [
+    item(1, 0, 1, 0, 0, 0, 2, 0, 2),
+    item(1, 0, 1, 0, 1, 0, 1, 0, 1),
+    item(0, 0, 0, 0, 2, 1, 3, 1, 3),
+  ]
+  let mut index: usize = 0
+  while index < cases.length {
+    cases[index].grid = true
+    cases[index].rowLines = 3
+    cases[index].columnLines = 3
+    index = index + 1
+  }
+  cases[0].rowEnd = 1
+  cases[0].columnEnd = 1
+  cases[1].rowEnd = 2
+  cases[1].columnEnd = 2
+  cases[2].rowEnd = 4
+  cases[2].columnEnd = 4
+  run placementCase(&cases, 3, 3, false, 0, 0, 3, 3)
 }

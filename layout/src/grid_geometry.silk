@@ -6,6 +6,7 @@ import grid_tracks { TrackState }
 import tree { NO_NODE }
 import geometry { Rect, max }
 import grid_fragment_scratch { GridFragmentScratch, logicalRow }
+import grid_subgrid { SubgridPool }
 
 struct Slot {
   geometry: GridGeometry,
@@ -15,8 +16,8 @@ struct Slot {
   nextFree: usize,
 }
 
-// Only positioned grids publish records. The box index is lazy; geometry and
-// name buffers stay in their pooled slots even after their versions are freed.
+// Positioned grids and effective subgrids publish accepted records. The box
+// index is lazy; geometry and name buffers stay pooled after versions are freed.
 pub struct GridGeometryStore {
   heads: List<usize>,
   fragments: List<usize>,
@@ -45,6 +46,29 @@ impl GridGeometryStore {
 
   pub fn get(self: &Self, slot: usize) -> &GridGeometry {
     return &self.slots.asSlice()[slot].geometry
+  }
+
+  // Written only on the new capture version before it is observed. The journal
+  // restores the previous version, including its inherited context identity.
+  pub fn setContext(self: &mut Self, id: usize, context: usize) {
+    let slot = self.find(id)
+    let geometry = &mut self.slots.asMutSlice()[slot].geometry
+    geometry.gridContext = context
+  }
+
+  pub fn context(self: &Self, id: usize) -> usize {
+    let slot = self.find(id)
+    if slot == NO_NODE { return 0 }
+    return self.slots.asSlice()[slot].geometry.gridContext
+  }
+
+  pub fn markContexts(self: &Self, pool: &mut SubgridPool) {
+    let mut at: usize = 0
+    while at < self.slots.length() {
+      let slot = &self.slots.asSlice()[at]
+      if slot.id != NO_NODE { pool.mark(slot.geometry.gridContext) }
+      at = at + 1
+    }
   }
 
   pub fn findFragment(self: &Self, id: usize, fragment: usize) -> usize {
@@ -241,6 +265,7 @@ impl GridGeometryStore {
     slot.geometry.content = Rect.zero()
     slot.geometry.padding = Rect.zero()
     slot.geometry.normalPadding = Rect.zero()
+    slot.geometry.gridContext = 0
     run self.journal.append(index)
     self.free = slot.nextFree
     slot.nextFree = NO_NODE
@@ -256,6 +281,7 @@ impl GridGeometryStore {
       self.fragments.set(fragment, NO_NODE)
     }
     slot.geometry.fragment = NO_NODE
+    slot.geometry.gridContext = 0
     slot.previousFragment = NO_NODE
     slot.id = NO_NODE
     slot.previous = NO_NODE

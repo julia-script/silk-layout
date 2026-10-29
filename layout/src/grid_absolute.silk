@@ -71,6 +71,7 @@ pub struct GridGeometry {
   pub fragment: usize,
   pub content: Rect,
   pub padding: Rect,
+  pub gridContext: usize,
 }
 
 impl GridGeometry {
@@ -82,6 +83,7 @@ impl GridGeometry {
       fragment: NO_NODE,
       content: Rect.zero(),
       padding: Rect.zero(),
+      gridContext: 0,
     }
   }
 }

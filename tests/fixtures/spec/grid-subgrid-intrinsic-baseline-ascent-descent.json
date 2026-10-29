@@ -1,0 +1,97 @@
+{
+  "name": "grid-subgrid-intrinsic-baseline-ascent-descent",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "baseline",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims"
+  ],
+  "derivation": "The descendant provider supplies a30px border box with a10px first baseline, leaving20px below. The direct20px empty peer synthesizes its baseline at20. Sharing therefore requires20px before plus20px after: the auto row is40px, not the largest unshimmed30px contribution. The descendant moves10px inside its stretched subgrid; the subgrid itself is not aligned as a separate member.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 78,
+          "gridTemplateColumns": [
+            31,
+            47
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            31
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 11,
+          "height": 30,
+          "alignSelf": "baseline"
+        },
+        "measure": {
+          "minWidth": 11,
+          "maxWidth": 11,
+          "height": 30,
+          "firstBaseline": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 17,
+          "height": 20,
+          "alignSelf": "baseline"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 78,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 31,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 10,
+        "width": 11,
+        "height": 30
+      },
+      {
+        "x": 31,
+        "y": 0,
+        "width": 17,
+        "height": 20
+      }
+    ]
+  }
+}

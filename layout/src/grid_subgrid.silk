@@ -37,6 +37,7 @@ pub struct InheritanceSource<'a> {
 pub fn source<'a>(
   template: &'a GridTemplate,
   prepared: &'a [GridTemplateScratch],
+  usePrepared: bool,
   bounds: GridBounds,
   phase: usize,
   firstColumns: bool,
@@ -46,7 +47,10 @@ pub fn source<'a>(
   let mut rows = template.rows.lines.asSlice()
   let mut areas = template.areas.asSlice()
   let mut offsets = emptyOffsets
-  if prepared.length != 0 {
+
+  // The lease retains allocation capacity after an inherited/named template
+  // becomes a plain grid. That old descriptor is no longer a request input.
+  if usePrepared && prepared.length != 0 {
     columns = expandedLines(&template.columns, &prepared[0].columns)
     rows = expandedLines(&template.rows, &prepared[0].rows)
     if prepared[0].gridContext != 0 {

@@ -432,6 +432,7 @@ effect fn baselinePeerTransitions()
     run expectFresh(&tree, &mut output, &mut host, &sources)
     stage = stage + 1
   }
+
   // Removing inheritance keeps the same 50x40 area, but ends the parent's
   // sharing group. Retained template capacity is not an active descriptor.
   let mut standalone = GridTemplate.make()

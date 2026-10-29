@@ -24,6 +24,7 @@ import style {
   DisplayOutside,
   DisplayInside,
   Position,
+  Overflow,
   BreakBetween,
   WritingMode,
   Direction
@@ -472,6 +473,8 @@ effect fn fixedGridPages()
   fixedStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
   fixedStyle.columnGap = Dimension.px(10.0)
   fixedStyle.rowGap = Dimension.px(20.0)
+  fixedStyle.overflowX = Overflow.Auto
+  fixedStyle.overflowY = Overflow.Auto
   let fixed = run tree.append(root, move fixedStyle)
   let mut template = GridTemplate.make()
   run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
@@ -479,8 +482,18 @@ effect fn fixedGridPages()
   run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
   run template.rows.tracks.append(GridTrack.breadth(GridBreadth.flex(1.0)))
   run tree.setGrid(fixed, move template)
+
+  // This normal-flow item is wholly outside the reachable inline interval;
+  // its 500px height must not enlarge the other axis's auto boundary.
+  let mut unreachableStyle = Style.make()
+  unreachableStyle.width = Dimension.px(10.0)
+  unreachableStyle.height = Dimension.px(500.0)
+  unreachableStyle.margin.left = Dimension.px(-200.0)
+  let unreachable = run tree.append(fixed, move unreachableStyle)
+  drop unreachable
   let child = run tree.append(fixed, absoluteStyle())
   run place(&mut tree, child, 2, 2)
+  let cover = run tree.append(fixed, absoluteStyle())
   let pages = [
     Rect { x: 0.0, y: 0.0, width: 100.0, height: 60.0 },
     Rect { x: 0.0, y: 200.0, width: 160.0, height: 80.0 },
@@ -515,6 +528,25 @@ effect fn fixedGridPages()
     count = count + 1
   }
   run Testing.expect(count == 2, "the absolute grid child repeats on both differently sized pages")
+  let mut covers = run output.sourceRects(cover)
+  count = 0
+  while true {
+    let actual = match move covers.next() {
+      Option<Rect>.Some { value } => value
+      Option<Rect>.None => {
+        break
+      }
+    }
+    run Testing.expect(count < pages.length, "one auto-area cover per page")
+    let wanted = pages[count]
+    run Testing.expect(
+      actual.x == wanted.x && actual.y == wanted.y && actual.width == wanted.width
+        && actual.height == wanted.height,
+      "unreachable flow overflow cannot enlarge a fragmented grid's auto area",
+    )
+    count = count + 1
+  }
+  run Testing.expect(count == 2, "both auto-area covers use their own page bounds")
 }
 
 test effect fn absoluteChildOfFixedGridUsesEachPagesGeometry()

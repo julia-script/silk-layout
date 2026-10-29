@@ -483,38 +483,22 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
   alignTracks(own.tracks.asMutSlice(), natural, sizing.size, parent, sizing.columns)
 }
 
-effect fn applyMinimum<'pass, 'source, M: Measure + TextMeasure>(
-  nodes: &BoxTree<'source>,
-  output: &mut LayoutPass<'pass, 'source>,
-  measurer: &mut M,
-  id: usize,
-  request: &mut Input,
-  horizontal: bool,
-  minimum: f32,
-)
-  ! OutOfMemoryError | TextError | FragmentationError
-  ? &mut Allocator {
+fn applyMinimum(request: &mut Input, horizontal: bool, minimum: f32) with Intrinsic.inlineAlways() {
   if minimum <= 0.0 {
     return
   }
-  if horizontal && request.known.widthDefinite {
-    request.known.width = max(request.known.width, minimum)
-    return
-  }
-  if !horizontal && request.known.heightDefinite {
-    request.known.height = max(request.known.height, minimum)
-    return
-  }
-  run probeNode(nodes, &mut output, &mut measurer, id, &request)
-  if horizontal && output.boxes[id].size.width < minimum {
-    request.known.width = minimum
-    request.known.widthDefinite = true
-    request.indefiniteWidth = !output.boxes[id].widthDefinite
-  }
-  if !horizontal && output.boxes[id].size.height < minimum {
-    request.known.height = minimum
-    request.known.heightDefinite = true
-    request.indefiniteHeight = !output.boxes[id].heightDefinite
+  if horizontal {
+    if request.known.widthDefinite {
+      request.known.width = max(request.known.width, minimum)
+    } else {
+      request.minimum.width = minimum
+    }
+  } else {
+    if request.known.heightDefinite {
+      request.known.height = max(request.known.height, minimum)
+    } else {
+      request.minimum.height = minimum
+    }
   }
 }
 
@@ -869,15 +853,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
             false,
             false,
           )
-          run applyMinimum(
-            nodes,
-            &mut output,
-            &mut measurer,
-            item.id,
-            &mut request,
-            !axis.vertical,
-            measured.usedMinimum,
-          )
+          applyMinimum(&mut request, !axis.vertical, measured.usedMinimum)
         }
         if rowPolicy.automatic && blockMinimum.kind == DimensionKind.Auto {
           let measured = run measureContribution(
@@ -893,15 +869,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
             false,
             false,
           )
-          run applyMinimum(
-            nodes,
-            &mut output,
-            &mut measurer,
-            item.id,
-            &mut request,
-            axis.vertical,
-            measured.usedMinimum,
-          )
+          applyMinimum(&mut request, axis.vertical, measured.usedMinimum)
         }
         request.performLayout = input.performLayout
         request.baselines = input.baselines || Baselines.active(&baselines, index, true)

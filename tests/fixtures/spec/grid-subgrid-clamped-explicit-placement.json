@@ -1,0 +1,24 @@
+{
+  "name": "grid-subgrid-clamped-explicit-placement",
+  "kind": "spec",
+  "features": ["grid", "subgrid", "placement"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#subgrid-implicit", "https://drafts.csswg.org/css-grid-2/#clamp-a-grid-area"],
+  "derivation": "The inherited grid is exactly two columns (23,37) and one 17px row. The first item's -7/-5 columns lie wholly before the three explicit lines, so its area becomes the first column. The second starts at line2 and extends past line3, so its span is truncated to the second column. The third lies wholly after the explicit grid in both axes and is moved into the last track of each axis. No 99px column or 101px row is generated; the last two items overlap at (23,0).",
+  "input": {
+    "viewport": {"width": 200, "height": 100},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "width": 60, "gridTemplateColumns": [23,37], "gridTemplateRows": [17]}},
+      {"parent": 0, "style": {"display": "grid", "gridTemplateColumns": "subgrid", "gridTemplateRows": "subgrid", "gridColumnStart": 1, "gridColumnEnd": 3, "gridRowStart": 1, "gridRowEnd": 2, "gridAutoColumns": [99], "gridAutoRows": [101]}},
+      {"parent": 1, "style": {"gridColumnStart": -7, "gridColumnEnd": -5, "gridRowStart": 1}},
+      {"parent": 1, "style": {"gridColumnStart": 2, "gridColumnEnd": 8, "gridRowStart": 1}},
+      {"parent": 1, "style": {"gridColumnStart": 8, "gridColumnEnd": 10, "gridRowStart": 4, "gridRowEnd": 6}}
+    ]
+  },
+  "expected": {"sources": [
+    {"x": 0, "y": 0, "width": 60, "height": 17},
+    {"x": 0, "y": 0, "width": 60, "height": 17},
+    {"x": 0, "y": 0, "width": 23, "height": 17},
+    {"x": 23, "y": 0, "width": 37, "height": 17},
+    {"x": 23, "y": 0, "width": 37, "height": 17}
+  ]}
+}

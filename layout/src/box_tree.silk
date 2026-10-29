@@ -12,6 +12,9 @@ import grid_style { GridTemplate }
 pub enum BoxKind { Block, Flex, Grid, Inline, InlineFormatting, Text }
 pub struct BoxNode {
   pub source: usize, pub styleOwner: usize, pub anonymousStyle: usize,
+  // styleOwner's index in styles, so style() needs no source lookup;
+  // NO_NODE with anonymousStyle.
+  pub styleIndex: usize,
   pub kind: BoxKind,
   pub parent: usize, pub firstChild: usize, pub lastChild: usize, pub nextSibling: usize,
   pub previousContinuation: usize, pub nextContinuation: usize,
@@ -83,7 +86,7 @@ impl BoxTree {
   pub fn style(self: &Self, id: usize) -> &Style with Intrinsic.inlineAlways() {
     let node = self.node(id)
     if node.anonymousStyle != NO_NODE { return &self.anonymousStyles.asSlice()[node.anonymousStyle] }
-    return &self.styles[self.sources[node.styleOwner].styleIndex]
+    return &self.styles[node.styleIndex]
   }
 
   // Generated parents precede their children. Resolve continuation ancestry
@@ -339,7 +342,7 @@ impl BoxTree {
     // contents and generated wrappers do not substitute a source parent here.
     let independent = kind != BoxKind.Inline && (replaced || flexChild || positioned || floating || differentWritingMode || display.insideIs(DisplayInside.FlowRoot) || kind == BoxKind.Flex || kind == BoxKind.Grid || style.alignContent != Align.Normal || scrollable(style.overflowX) || scrollable(style.overflowY) || source == 0)
     let node = BoxNode {
-      source: source, styleOwner: source, anonymousStyle: NO_NODE, kind: kind,
+      source: source, styleOwner: source, anonymousStyle: NO_NODE, styleIndex: self.sources[source].styleIndex, kind: kind,
       parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE,
       previousContinuation: NO_NODE, nextContinuation: NO_NODE,
       firstForSource: true, lastForSource: true,
@@ -463,7 +466,7 @@ fn documentWhitespace(value: string) -> bool {
 
 fn anonymous(kind: BoxKind, owner: usize, slot: usize) -> BoxNode {
   return BoxNode {
-    source: NO_NODE, styleOwner: owner, anonymousStyle: slot, kind: kind,
+    source: NO_NODE, styleOwner: owner, anonymousStyle: slot, styleIndex: NO_NODE, kind: kind,
     parent: NO_NODE, firstChild: NO_NODE, lastChild: NO_NODE, nextSibling: NO_NODE,
     previousContinuation: NO_NODE, nextContinuation: NO_NODE,
     firstForSource: false, lastForSource: false,

@@ -358,12 +358,16 @@ fn usedBox(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSi
 }
 fn usedChildrenInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize, parent: OptionalSize) -> Input {
   let input = usedInput(nodes, output, id, viewport)
-  let mut box = withGutter(&resolveBox(nodes.style(id), &input), output.boxes[id].scrollbarGutter)
+  return usedChildrenInputOf(nodes, output, id, &input, &withGutter(&resolveBox(nodes.style(id), &input), output.boxes[id].scrollbarGutter), parent)
+}
+// usedChildrenInput from the box's usedInput and usedBox.
+fn usedChildrenInputOf(nodes: &BoxTree, output: &LayoutPass, id: usize, input: &Input, used: &ResolvedBox, parent: OptionalSize) -> Input {
+  let mut box = used.*
   box.size = OptionalSize {
     width: output.boxes[id].size.width, height: output.boxes[id].size.height,
     widthDefinite: output.boxes[id].widthDefinite, heightDefinite: output.boxes[id].heightDefinite,
   }
-  return childrenInput(&input, nodes.style(id), &box, parent)
+  return childrenInput(input, nodes.style(id), &box, parent)
 }
 fn nextPositionSource(nodes: &BoxTree, id: usize) -> usize {
   if !nodes.styles[nodes.sources[id].styleIndex].display.isNone() && nodes.sources[id].firstChild != NO_NODE { return nodes.sources[id].firstChild }
@@ -629,10 +633,13 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
     if !fragmented && output.absoluteInputOwner == cb { input = output.absoluteInput }
     else {
-      input = usedChildrenInput(nodes, &output, cb, viewport, containing)
+      let cbInput = usedInput(nodes, &output, cb, viewport)
+      let cbBox = withGutter(&resolveBox(cbStyle, &cbInput), output.boxes[cb].scrollbarGutter)
+      input = usedChildrenInputOf(nodes, &output, cb, &cbInput, &cbBox, containing)
       if !fragmented {
         output.absoluteInputOwner = cb
         output.absoluteInput = input
+        output.absoluteBox = cbBox
       }
     }
   }
@@ -730,7 +737,8 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
     let mut innerWidth = viewport.width
     let mut innerHeight = viewport.height
     if parent != NO_NODE {
-      parentBox = usedBox(nodes, &output, parent, viewport)
+      if !fragmented && parent == output.absoluteInputOwner { parentBox = output.absoluteBox }
+      else { parentBox = usedBox(nodes, &output, parent, viewport) }
       ps = nodes.style(parent)
       innerWidth = max(0.0, output.boxes[parent].size.width - parentBox.inset.horizontal())
       innerHeight = max(0.0, output.boxes[parent].size.height - parentBox.inset.vertical())

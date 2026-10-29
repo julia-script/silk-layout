@@ -247,10 +247,23 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   return result.size.height
 }
 
+// Whether a box has no in-flow children: absolutely positioned children take
+// no part in its sizing (CSS2 §10.6.7, Flexbox §4.1), so its probes size it
+// as if childless. Its final layout still places them.
+fn noInFlowChildren(nodes: &BoxTree, id: usize) -> bool {
+  let mut child = nodes.node(id).firstChild
+  while child != NO_NODE {
+    let node = nodes.node(child)
+    if node.kind == BoxKind.Text || node.kind == BoxKind.Inline || node.kind == BoxKind.InlineFormatting || !outOfFlow(nodes.style(child)) { return false }
+    child = node.nextSibling
+  }
+  return true
+}
+
 fn emptyContentWidth(nodes: &BoxTree, id: usize) -> bool with Intrinsic.inlineAlways() {
   let node = nodes.node(id)
   let style = nodes.style(id)
-  return node.firstChild == NO_NODE && node.measurement == Measurement.None && (node.kind == BoxKind.Block || node.kind == BoxKind.Flex)
+  return noInFlowChildren(nodes, id) && node.measurement == Measurement.None && (node.kind == BoxKind.Block || node.kind == BoxKind.Flex)
     && !isGrid(style) && !style.replaced && style.aspectRatio <= 0.0 && style.writingMode == WritingMode.HorizontalTb
     && style.overflowX == Overflow.Visible && style.overflowY == Overflow.Visible
 }
@@ -405,7 +418,7 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   if node.kind == BoxKind.InlineFormatting || style.replaced { return KEY_FIXED }
   let mut shape: u16 = 0
   // Empty grids can still have different min/max-content track sizes (§5.2).
-  if node.firstChild == NO_NODE && node.measurement == Measurement.None && node.kind != BoxKind.Text && node.kind != BoxKind.Grid { shape = shape | KEY_EMPTY }
+  if node.measurement == Measurement.None && node.kind != BoxKind.Text && node.kind != BoxKind.Grid && noInFlowChildren(nodes, id) { shape = shape | KEY_EMPTY }
   if style.width.kind == DimensionKind.Length { shape = shape | KEY_WIDTH_LENGTH }
   if style.height.kind == DimensionKind.Length { shape = shape | KEY_HEIGHT_LENGTH }
   if node.kind == BoxKind.Block && node.measurement == Measurement.None && !isFlex(style) && style.writingMode == WritingMode.HorizontalTb && style.height.kind != DimensionKind.MinContent && style.height.kind != DimensionKind.MaxContent && style.height.kind != DimensionKind.FitContent { shape = shape | KEY_BLOCK }
@@ -571,7 +584,7 @@ pub effect fn probeNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
 
 // probeNode after a cache miss for `key`.
 pub effect fn probeFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, key: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  if nodes.node(id).firstChild == NO_NODE && emptyBoxApplies(nodes, id, &input) {
+  if noInFlowChildren(nodes, id) && emptyBoxApplies(nodes, id, &input) {
     run probeEmptyBox(nodes, &mut output, id, &input, &key)
     return
   }
@@ -604,7 +617,7 @@ fn emptyBoxPlain(nodes: &BoxTree, id: usize, input: &Input) -> bool with Intrins
 // Whether an intrinsic width probe of a childless box, made from `input`,
 // takes emptyBoxApplies' path; its width is then the box's inset.
 pub fn emptyIntrinsicWidth(nodes: &BoxTree, id: usize, input: &Input) -> bool {
-  return nodes.node(id).firstChild == NO_NODE && emptyBoxPlain(nodes, id, &input)
+  return noInFlowChildren(nodes, id) && emptyBoxPlain(nodes, id, &input)
 }
 
 fn emptyBoxApplies(nodes: &BoxTree, id: usize, input: &Input) -> bool {
@@ -665,7 +678,7 @@ fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut Resolv
 // costs less than storing and finding its result. False when
 // emptyBoxApplies does not hold, leaving result untouched.
 pub fn sizeEmptyBox(nodes: &BoxTree, id: usize, input: &Input, result: &mut Layout) -> bool {
-  if nodes.node(id).firstChild != NO_NODE || !emptyBoxApplies(nodes, id, &input) { return false }
+  if !noInFlowChildren(nodes, id) || !emptyBoxApplies(nodes, id, &input) { return false }
   let style = nodes.style(id)
   let mut box = resolveBox(style, &input)
   emptyBoxLayout(style, &input, &BfcState.make(), &mut box, &mut result)

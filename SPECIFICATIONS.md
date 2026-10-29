@@ -32,7 +32,7 @@ The integrated regression gates pass the following focused corpus. These counts 
 
 | Coverage | Passing cases |
 |---|---:|
-| Native layout tests | 270 |
+| Native layout tests | 271 |
 | Malformed adapter requests | 241 |
 | Adapter bidi cases | 9 |
 | Normative specification fixtures | 646 |
@@ -91,6 +91,8 @@ Cross-axis change checks defer otherwise-unused maximum contributions until a ch
 Fixed-minimum tracks with fixed maxima, or flexible maxima under definite used space, omit unused item contributions ([§12.5](https://drafts.csswg.org/css-grid-2/#algo-content), [§12.7](https://drafts.csswg.org/css-grid-2/#algo-flex-tracks)). Indefinite flexible tracks and intrinsic minima retain collection; item minimum overflow and final baseline alignment remain independent.
 
 Internal sizing requests carry border-box minimum bounds separately from known sizes. A bound preserves larger natural sizes, wins over a smaller maximum, does not inherit to children, and does not establish percentage definiteness. Intrinsic queries ignore the bound in their queried axis; cross-axis bounds remain live, including for opaque measurement and shrink-to-fit queries. Cache keys distinguish effective bounds, and fragmented containing-block reconstruction retains them without adding fields to `Layout`. Authored intrinsic minimum keywords cannot overwrite a stronger request bound.
+
+Size-cache matching rejects different available constraints and known sizes before checking shared context. It still distinguishes effective minimum bounds and every existing context field; baseline and full-size capabilities remain directional. Fresh plain measured-leaf probes use the existing complete leaf-layout path directly, retaining baselines, overflow, opaque cross-axis dependencies and min/max remeasurement. Fragmented or otherwise ineligible probes retain the general dispatch.
 
 Grid supplies automatic item minimums through those bounds when an axis has no known size, instead of running a separate preliminary layout to discover whether the minimum binds. Known axes retain their direct lower-bound clamp. Track-sizing contribution probes are retained; the normal sizing loop enforces a binding floor while preserving larger natural sizes and definite preferred cross sizes.
 

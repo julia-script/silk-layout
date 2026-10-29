@@ -1170,7 +1170,7 @@ effect fn emitLine<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       }
       let emitted = run output.fragments.append(value)
       if output.frame != NO_NODE && nodes.style(scope.id).position != Position.Static {
-        run output.rememberFragmentBox(scope.id, emitted.index, FullBoxGeometry { parent: input.parent, known: OptionalSize.none(), content: OptionalSize.none() })
+        run output.rememberFragmentBox(scope.id, emitted.index, FullBoxGeometry { parent: input.parent, known: OptionalSize.none(), minimum: Size { width: 0.0, height: 0.0 }, content: OptionalSize.none() })
       }
       let values = spans.values.asMutSlice()
       values[index].fragment = emitted.index

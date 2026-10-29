@@ -10,6 +10,9 @@ pub struct Input {
   // Available-space constraints, never percentage-resolution bases.
   pub parentMaxSize: Size, pub scrollportSize: Size,
   pub known: OptionalSize,
+  // Border-box lower bounds, not preferred sizes or percentage bases.
+  // Intrinsic queries ignore the bound in their queried axis.
+  pub minimum: Size,
   pub availableWidth: AvailableSpace, pub availableHeight: AvailableSpace,
   pub blockRoot: bool, pub blockify: bool, pub atomicInline: bool,
   pub intrinsicWidth: bool, pub intrinsicHeight: bool, pub shrinkToFit: bool,
@@ -35,7 +38,13 @@ impl Input {
     let mut height = AvailableSpace.maxContent()
     if parent.widthDefinite { width = AvailableSpace.definite(parent.width) }
     if parent.heightDefinite { height = AvailableSpace.definite(parent.height) }
-    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, baselines: true, fullSize: true, fragmentation: FragmentInput.continuous() }
+    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), minimum: Size { width: 0.0, height: 0.0 }, availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, baselines: true, fullSize: true, fragmentation: FragmentInput.continuous() }
+  }
+  pub fn effectiveMinimum(self: &Self) -> Size with Intrinsic.inlineAlways() {
+    let mut result = self.minimum
+    if self.intrinsicWidth { result.width = 0.0 }
+    if self.intrinsicHeight { result.height = 0.0 }
+    return result
   }
 }
 pub struct ResolvedBox {
@@ -142,7 +151,7 @@ pub fn resolveBoxEdges(style: &Style, input: &Input, zeroEdges: bool) -> Resolve
   let mut result = ResolvedBox {
     padding: padding, border: border, margin: margin, inset: inset, size: size,
     gutter: ResolvedEdges.zero(), scrollbarMetrics: ScrollbarMetrics.zero(),
-    min: Size { width: max(inset.horizontal(), minimumLength(style.minWidth, input.parent.width, input.parent.widthDefinite) + addWidth), height: max(inset.vertical(), minimumLength(style.minHeight, input.parent.height, input.parent.heightDefinite) + addHeight) },
+    min: Size { width: max(input.minimum.width, max(inset.horizontal(), minimumLength(style.minWidth, input.parent.width, input.parent.widthDefinite) + addWidth)), height: max(input.minimum.height, max(inset.vertical(), minimumLength(style.minHeight, input.parent.height, input.parent.heightDefinite) + addHeight)) },
     max: Size { width: max(inset.horizontal(), resolve(style.maxWidth, input.parent.width, input.parent.widthDefinite, UNBOUNDED) + addWidth), height: max(inset.vertical(), resolve(style.maxHeight, input.parent.height, input.parent.heightDefinite, UNBOUNDED) + addHeight) },
   }
   if input.intrinsicWidth {
@@ -177,9 +186,10 @@ pub fn childrenInput(input: &Input, style: &Style, box: &ResolvedBox, parent: Op
     subtractWidth = box.inset.horizontal()
     subtractHeight = box.inset.vertical()
   }
+  let requestMinimum = input.effectiveMinimum()
   let minimum = Size {
-    width: max(0.0, resolve(style.minWidth, input.parent.width, input.parent.widthDefinite, 0.0) - subtractWidth),
-    height: max(0.0, resolve(style.minHeight, input.parent.height, input.parent.heightDefinite, 0.0) - subtractHeight),
+    width: max(requestMinimum.width - box.inset.horizontal(), max(0.0, resolve(style.minWidth, input.parent.width, input.parent.widthDefinite, 0.0) - subtractWidth)),
+    height: max(requestMinimum.height - box.inset.vertical(), max(0.0, resolve(style.minHeight, input.parent.height, input.parent.heightDefinite, 0.0) - subtractHeight)),
   }
   result.parentMaxSize = Size {
     width: max(minimum.width, resolve(style.maxWidth, input.parent.width, input.parent.widthDefinite, UNBOUNDED) - subtractWidth),

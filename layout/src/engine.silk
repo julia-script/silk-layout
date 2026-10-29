@@ -233,6 +233,13 @@ effect fn intrinsic<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   // A childless box without content measurement has no content to size: its
   // intrinsic width is its padding and border, with no cache entry needed.
   if horizontal && emptyContentWidth(nodes, id) { return resolveBox(nodes.style(id), &request).inset.horizontal() }
+  // Cross-axis request bounds can change an opaque measurer's intrinsic
+  // answer. Use the normal min/max sizing loop rather than raw contents.
+  if (horizontal && !request.intrinsicHeight && request.minimum.height > 0.0) || (!horizontal && !request.intrinsicWidth && request.minimum.width > 0.0) {
+    run probeNode(nodes, &mut output, &mut measurer, id, &request)
+    if horizontal { return output.boxes[id].size.width }
+    return output.boxes[id].size.height
+  }
   let key = cacheKey(output.keyShape(id), &request, output.viewportFree(id))
   match output.lookupSize(id, &key, CacheKind.IntrinsicContents) {
     Option<Size>.Some { value: cached } => {
@@ -594,6 +601,7 @@ fn cacheKey(shape: u16, input: &Input, viewportFree: bool) -> Input {
 // intrinsic axis the same key, so one result serves both.
 pub fn constraintFreeProbe(shape: u16) -> bool { return shape & KEY_FIXED == 0 && shape & KEY_EMPTY != 0 }
 pub fn normalizeKey(shape: u16, key: &mut Input, viewportFree: bool) {
+  key.minimum = key.effectiveMinimum()
   // Only replaced boxes and orthogonal flows read the initial containing
   // block and the scrollport limits; see Incremental.markSubtrees.
   if viewportFree {
@@ -616,6 +624,7 @@ pub fn normalizeKey(shape: u16, key: &mut Input, viewportFree: bool) {
     key.availableHeight = AvailableSpace.maxContent()
     key.parent.height = 0.0
     key.parent.heightDefinite = false
+    key.minimum.height = 0.0
   }
   // Inline formatting boxes and replaced boxes keep the rest of the request.
   if shape & KEY_FIXED != 0 { return }
@@ -1093,7 +1102,8 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   }
   if !input.intrinsicWidth {
     if style.minWidth.kind == DimensionKind.MinContent || style.minWidth.kind == DimensionKind.MaxContent {
-      sizing.box.min.width = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, style.minWidth.kind == DimensionKind.MinContent)
+      let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, style.minWidth.kind == DimensionKind.MinContent)
+      sizing.box.min.width = max(sizing.box.min.width, minimum)
     }
     if style.maxWidth.kind == DimensionKind.MinContent || style.maxWidth.kind == DimensionKind.MaxContent {
       sizing.box.max.width = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, style.maxWidth.kind == DimensionKind.MinContent)
@@ -1101,7 +1111,8 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   }
   if !input.intrinsicHeight {
     if style.minHeight.kind == DimensionKind.MinContent || style.minHeight.kind == DimensionKind.MaxContent {
-      sizing.box.min.height = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, style.minHeight.kind == DimensionKind.MinContent)
+      let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, style.minHeight.kind == DimensionKind.MinContent)
+      sizing.box.min.height = max(sizing.box.min.height, minimum)
     }
     if style.maxHeight.kind == DimensionKind.MinContent || style.maxHeight.kind == DimensionKind.MaxContent {
       sizing.box.max.height = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, style.maxHeight.kind == DimensionKind.MinContent)
@@ -1454,7 +1465,7 @@ effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
       if fullContent.heightDefinite { fullContent.height = max(0.0, fullContent.height - sizing.box.inset.vertical()) }
       fullContent.widthDefinite = fullContent.widthDefinite && !sizing.request.indefiniteWidth
       fullContent.heightDefinite = fullContent.heightDefinite && !sizing.request.indefiniteHeight
-      run output.rememberFullBox(id, FullBoxGeometry { parent: incoming.parent, known: incoming.known, content: fullContent })
+      run output.rememberFullBox(id, FullBoxGeometry { parent: incoming.parent, known: incoming.known, minimum: incoming.effectiveMinimum(), content: fullContent })
     }
   }
   if fragmented {

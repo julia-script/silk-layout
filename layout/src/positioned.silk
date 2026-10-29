@@ -179,7 +179,7 @@ effect fn fragmentedInterruption(nodes: &BoxTree, output: &mut LayoutPass, id: u
         let emitted = run output.fragments.append(fragment)
         match output.fragmentFullBox(parent) {
           Option<FullBoxGeometry>.Some { value } => {
-            run output.rememberFragmentBox(id, emitted.index, FullBoxGeometry { parent: value.content, known: OptionalSize.none(), content: OptionalSize.none() })
+            run output.rememberFragmentBox(id, emitted.index, FullBoxGeometry { parent: value.content, known: OptionalSize.none(), minimum: Size { width: 0.0, height: 0.0 }, content: OptionalSize.none() })
           }
           Option<FullBoxGeometry>.None => {}
         }
@@ -348,6 +348,7 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
       Option<FullBoxGeometry>.Some { value } => {
         input.parent = value.parent
         input.known = value.known
+        input.minimum = value.minimum
       }
       Option<FullBoxGeometry>.None => {}
     }
@@ -1002,6 +1003,7 @@ effect fn flexShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &
   let mut input = usedInput(nodes, &output, parentBox, initial)
   input.parent = metadata.parent
   input.known = metadata.known
+  input.minimum = metadata.minimum
   let box = resolveBox(nodes.style(parentBox), &input)
   input.known = OptionalSize.definite(metadata.content.width + box.inset.horizontal(), metadata.content.height + box.inset.vertical())
   input.indefiniteWidth = !metadata.content.widthDefinite
@@ -1060,6 +1062,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
       Option<FullBoxGeometry>.Some { value } => {
         input.parent = value.parent
         input.known = value.known
+        input.minimum = value.minimum
       }
       Option<FullBoxGeometry>.None => {}
     }
@@ -1135,6 +1138,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
         let mut updated = value
         updated.parent = input.parent
         updated.known = input.known
+        updated.minimum = input.effectiveMinimum()
         if full.size.widthDefinite { updated.content.width = max(0.0, full.size.width - full.inset.horizontal()) }
         if full.size.heightDefinite { updated.content.height = max(0.0, full.size.height - full.inset.vertical()) }
         metadata = Option<FullBoxGeometry>.Some { value: updated }

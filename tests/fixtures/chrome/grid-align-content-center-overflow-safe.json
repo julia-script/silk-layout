@@ -1,0 +1,59 @@
+{
+  "name": "grid-align-content-center-overflow-safe",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#overflow-values",
+    "https://drafts.csswg.org/css-align-3/#auto-safety-default"
+  ],
+  "derivation": "A single 80px track in a 50px content box overflows by 30px. Center shifts -15px unless explicit safe falls back to start. The default unsafe policy is expressly permitted by Align 3 auto-safety-default.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 50,
+          "height": 50,
+          "gridTemplateColumns": [
+            80
+          ],
+          "gridTemplateRows": [
+            80
+          ],
+          "justifyContent": "center",
+          "alignContent": "center",
+          "justifyContentSafety": "safe",
+          "alignContentSafety": "safe"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 50
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 80
+      }
+    ]
+  }
+}

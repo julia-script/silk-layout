@@ -1,0 +1,74 @@
+{
+  "name": "grid-baseline-definite-fr-sharing",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "baseline",
+    "fractional-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#row-align",
+    "https://drafts.csswg.org/css-align-3/#baseline-align-self",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline"
+  ],
+  "derivation": "A definite 80px container makes the minmax(0, 1fr) maximum non-intrinsic. The horizontal grid selects alphabetic baselines. Its 0px auto-width item shares the sideways-lr peer's right-edge alphabetic baseline at 40px, moving to x=40.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            {
+              "minmax": [
+                0,
+                {
+                  "fr": 1
+                }
+              ]
+            }
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ],
+          "justifyItems": "baseline",
+          "width": 80
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "sideways-lr",
+          "width": 40,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 80
+      },
+      {
+        "x": 40,
+        "width": 0
+      },
+      {
+        "x": 0,
+        "width": 40
+      }
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "name": "grid-align-self-start-orthogonal",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#positional-values"
+  ],
+  "derivation": "In a horizontal LTR grid, a vertical-rl item has right block-start in the horizontal alignment axis, so justify-self:self-start aligns its 20px width at x=80. RTL makes its vertical inline-start bottom, so align-self:self-start aligns its 30px height at y=60.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "height": 90,
+          "gridTemplateColumns": [
+            100
+          ],
+          "gridTemplateRows": [
+            90
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 30,
+          "writingMode": "vertical-rl",
+          "direction": "rtl",
+          "justifySelf": "self-start",
+          "alignSelf": "self-start"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 90
+      },
+      {
+        "x": 80,
+        "y": 60,
+        "width": 20,
+        "height": 30
+      }
+    ]
+  }
+}

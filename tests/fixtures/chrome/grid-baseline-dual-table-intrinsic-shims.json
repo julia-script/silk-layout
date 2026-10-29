@@ -1,0 +1,151 @@
+{
+  "name": "grid-baseline-dual-table-intrinsic-shims",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "baseline",
+    "intrinsic-measure"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims",
+    "https://drafts.csswg.org/css-grid-2/#grid-baselines",
+    "https://drafts.csswg.org/css-align-3/#baseline-align-self"
+  ],
+  "derivation": "Both providers are 20px tall, with first/last baselines 8/15 and 4/12. First-baseline alignment needs a 4px start shim on the second item, making the first auto row 24px. Last-baseline alignment needs a 3px end shim on the first item, making the second auto row 23px and placing its second item 3px lower. Each grid exports its sharing group baseline in both directions: 8 and 15 respectively. The outer block is 47px high and exports 8/39.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 40
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "width": 40,
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ],
+          "alignItems": "baseline"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 20
+        },
+        "measure": {
+          "minWidth": 20,
+          "maxWidth": 20,
+          "height": 20,
+          "firstBaseline": 8,
+          "lastBaseline": 15
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 20
+        },
+        "measure": {
+          "minWidth": 20,
+          "maxWidth": 20,
+          "height": 20,
+          "firstBaseline": 4,
+          "lastBaseline": 12
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "width": 40,
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ],
+          "alignItems": "last baseline"
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "width": 20
+        },
+        "measure": {
+          "minWidth": 20,
+          "maxWidth": 20,
+          "height": 20,
+          "firstBaseline": 8,
+          "lastBaseline": 15
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "width": 20
+        },
+        "measure": {
+          "minWidth": 20,
+          "maxWidth": 20,
+          "height": 20,
+          "firstBaseline": 4,
+          "lastBaseline": 12
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "height": 47,
+        "firstBaseline": 8,
+        "lastBaseline": 39
+      },
+      {
+        "height": 24,
+        "firstBaseline": 8,
+        "lastBaseline": 8
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "height": 20
+      },
+      {
+        "x": 20,
+        "y": 4,
+        "height": 20
+      },
+      {
+        "y": 24,
+        "height": 23,
+        "firstBaseline": 15,
+        "lastBaseline": 15
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "height": 20
+      },
+      {
+        "x": 20,
+        "y": 3,
+        "height": 20
+      }
+    ]
+  }
+}

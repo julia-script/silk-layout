@@ -718,6 +718,22 @@ effect fn subgridFutureShells(nested: bool)
   childStyle.height = Dimension.px(150.0)
   let absolute = run tree.append(subgrid, move childStyle)
   run place(&mut tree, absolute, 2, 1)
+  // The next absolute sibling revisits earlier accepted fragments after the
+  // first has reached page3. A second relative subgrid then needs new shells
+  // under the already-existing (and, when nested, inherited) parent shells.
+  let mut siblingStyle = absoluteStyle()
+  siblingStyle.inset.bottom = Dimension.auto()
+  siblingStyle.inset.left = Dimension.px(5.0)
+  siblingStyle.height = Dimension.px(150.0)
+  let sibling = run tree.append(subgrid, move siblingStyle)
+  run place(&mut tree, sibling, 2, 1)
+  let laterSubgrid = run positionedSubgrid(&mut tree, parent)
+  let mut laterStyle = absoluteStyle()
+  laterStyle.inset.bottom = Dimension.auto()
+  laterStyle.inset.left = Dimension.px(10.0)
+  laterStyle.height = Dimension.px(150.0)
+  let later = run tree.append(laterSubgrid, move laterStyle)
+  run place(&mut tree, later, 2, 1)
   let pages = [
     Rect { x: 7.0, y: 5.0, width: 200.0, height: 60.0 },
     Rect { x: 13.0, y: 91.0, width: 240.0, height: 60.0 },
@@ -738,9 +754,13 @@ effect fn subgridFutureShells(nested: bool)
     }
     run computeFragmented(&tree, &mut output, &mut measure, OptionalSize.none(), pageFrames(&pages))
     run expectSubgridShellRects(&mut output, absolute, inset)
+    run expectSubgridShellRects(&mut output, sibling, 5.0)
+    run expectSubgridShellRects(&mut output, later, 10.0)
     let mut fresh = LayoutTree.make()
     run computeFragmented(&tree, &mut fresh, &mut measure, OptionalSize.none(), pageFrames(&pages))
     run expectSubgridShellRects(&mut fresh, absolute, inset)
+    run expectSubgridShellRects(&mut fresh, sibling, 5.0)
+    run expectSubgridShellRects(&mut fresh, later, 10.0)
     stage = stage + 1
   }
 }

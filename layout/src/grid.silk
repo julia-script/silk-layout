@@ -1301,6 +1301,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     }
     run output.cache.gridGeometry.capture(
       id,
+      input.gridContext,
       columns,
       bounds.columnOrigin,
       columnExplicit,
@@ -1323,6 +1324,14 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       let scratch = &output.cache.gridMemos.fragmentScratch.asSlice()[output.cache.gridMemos.fragmentScratch.length()
         - 1]
       output.cache.gridGeometry.captureRows(id, scratch)
+    }
+  } else if input.performLayout
+    && (input.gridContext != 0 || output.cache.gridGeometry.find(id) != NO_NODE) {
+    run output.cache.gridGeometry.captureContext(id, input.gridContext)
+    if output.frame != NO_NODE {
+      let fragment = output.publication(id)
+      run output.cache.gridGeometry.setFragment(
+        id, fragment, result.contentRect(), result.paddingRect())
     }
   }
   if subgridSharing { run output.cache.gridMemos.baselineOffsets.append(move baselineOffsets) }

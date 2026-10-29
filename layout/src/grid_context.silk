@@ -221,7 +221,8 @@ impl GridContextStore {
       if self.journal.get(at) == index {
         self.journal.set(at, NO_NODE)
         self.heads.set(id, self.slots.asSlice()[index].previous)
-        self.slots.asMutSlice()[index].previous = NO_NODE
+        let slots = self.slots.asMutSlice()
+        slots[index].previous = NO_NODE
         return index
       }
     }

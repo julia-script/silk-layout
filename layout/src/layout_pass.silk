@@ -419,7 +419,9 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
         let kind = self.fragments.values.asSlice()[first].kind
         if kind == FragmentKind.Box {
           let overflow = value.scrollableOverflow
-          if overflow.x < 0.0 || overflow.y < 0.0 || overflow.x + overflow.width > value.size.width || overflow.y + overflow.height > value.size.height { run self.overflowEscapes.append(first) }
+          // Other parents already hold their children's overflow (see
+          // overflowGeometry); the root's children's still has to reach it.
+          if self.fragments.values.asSlice()[first].parent == 0 && (overflow.x < 0.0 || overflow.y < 0.0 || overflow.x + overflow.width > value.size.width || overflow.y + overflow.height > value.size.height) { run self.overflowEscapes.append(first) }
           run self.fragments.edit(first)
           let fragments = self.fragments.values.asMutSlice()
           fragments[first].location = value.location

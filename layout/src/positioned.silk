@@ -1668,7 +1668,7 @@ pub fn addOverflow(base: Rect, rect: Rect, limits: ResolvedEdges) -> Rect {
   if right - left < EMPTY_EXTENT || bottom - top < EMPTY_EXTENT { return base }
   return base.unionWith(Rect { x: left, y: top, width: right - left, height: bottom - top })
 }
-fn propagatedOverflow(style: &Style, rect: Rect, padding: Rect) -> Rect {
+pub fn propagatedOverflow(style: &Style, rect: Rect, padding: Rect) -> Rect {
   let mut left = rect.x
   let mut right = rect.x + rect.width
   let mut top = rect.y

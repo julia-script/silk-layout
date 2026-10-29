@@ -2,7 +2,7 @@
 // Independent Chromium observations are regression evidence, not the specification.
 // Usage: node scripts/chrome-diff.mjs --cli PATH [fixture.json | fixture-directory]
 //        --mode all|spec|chrome --chrome PATH --chrome-version Chrome/VERSION
-//        --tolerance 0.05 --fuzz 100 --grid-fuzz 100 --seed 1
+//        --tolerance 0.05 --fuzz 100 --grid-fuzz 100 --subgrid-fuzz 100 --seed 1
 import { spawn, spawnSync } from 'node:child_process';
 import { access, mkdtemp, readdir, readFile, rm, mkdir, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -22,7 +22,7 @@ const fontBaselineFields = ['alphabetic', 'ideographic', 'central', 'mathematica
 const baselineFields = [...fontBaselineFields, 'xMiddle', 'textOver', 'textUnder'];
 const options = { cli: process.env.SILK_LAYOUT_CLI, chrome: process.env.CHROME_PATH,
   chromeVersion: process.env.CHROME_VERSION, mode: 'all', tolerance: 0.05,
-  fuzz: 0, gridFuzz: 0, seed: 1, path: join(root, 'tests/fixtures') };
+  fuzz: 0, gridFuzz: 0, subgridFuzz: 0, seed: 1, path: join(root, 'tests/fixtures') };
 const summary = { schemaVersion: 3, tolerance: options.tolerance, seed: 1, browser: null,
   totals: { discovered: 0, passed: 0, failed: 0, excludedUnsupported: 0,
     spec: 0, chrome: 0, fuzz: 0, mismatches: 0 },
@@ -66,11 +66,12 @@ async function fixtureFonts(input) {
 function parseArgs() {
   let positional = false;
   const values = { '--cli': 'cli', '--chrome': 'chrome', '--chrome-version': 'chromeVersion',
-    '--mode': 'mode', '--tolerance': 'tolerance', '--fuzz': 'fuzz', '--grid-fuzz': 'gridFuzz', '--seed': 'seed' };
+    '--mode': 'mode', '--tolerance': 'tolerance', '--fuzz': 'fuzz', '--grid-fuzz': 'gridFuzz',
+    '--subgrid-fuzz': 'subgridFuzz', '--seed': 'seed' };
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
     if (arg === '--help' || arg === '-h') {
-      process.stdout.write('Usage: node scripts/chrome-diff.mjs --cli PATH [fixture.json|directory]\n  --mode all|spec|chrome --chrome PATH --chrome-version Chrome/VERSION\n  --tolerance 0.05 --fuzz N --grid-fuzz N --seed INTEGER\nSpec fixtures assert hand-derived expectations without Chrome. Differential failures\nare never excluded. Unsupported browser adapters are reported and exit nonzero.\nGrid fuzz uses an independent seeded stream; --fuzz inputs are unchanged.\nBoth fuzz modes retain failures and leaf-reduced reproductions in .cache/chrome-diff.\n');
+      process.stdout.write('Usage: node scripts/chrome-diff.mjs --cli PATH [fixture.json|directory]\n  --mode all|spec|chrome --chrome PATH --chrome-version Chrome/VERSION\n  --tolerance 0.05 --fuzz N --grid-fuzz N --subgrid-fuzz N --seed INTEGER\nSpec fixtures assert hand-derived expectations without Chrome. Differential failures\nare never excluded. Unsupported browser adapters are reported and exit nonzero.\nGrid and subgrid fuzz use independent seeded streams; existing --fuzz and\n--grid-fuzz inputs are unchanged. --subgrid-fuzz N emits indices 0..N-1 from\nseed XOR 0x73756267; increasing N preserves the earlier input prefix.\nAll fuzz modes retain failures and leaf-reduced reproductions in .cache/chrome-diff.\n');
       return false;
     }
     if (values[arg]) {
@@ -82,18 +83,22 @@ function parseArgs() {
   options.tolerance = Number(options.tolerance);
   options.fuzz = Number(options.fuzz);
   options.gridFuzz = Number(options.gridFuzz);
+  options.subgridFuzz = Number(options.subgridFuzz);
   options.seed = Number(options.seed);
   if (!Number.isFinite(options.tolerance) || options.tolerance < 0) throw new Error('Tolerance must be finite and nonnegative');
   if (!Number.isSafeInteger(options.fuzz) || options.fuzz < 0) throw new Error('--fuzz must be a nonnegative safe integer');
   if (!Number.isSafeInteger(options.gridFuzz) || options.gridFuzz < 0) throw new Error('--grid-fuzz must be a nonnegative safe integer');
+  if (!Number.isSafeInteger(options.subgridFuzz) || options.subgridFuzz < 0) throw new Error('--subgrid-fuzz must be a nonnegative safe integer');
   if (!Number.isInteger(options.seed) || options.seed < 0 || options.seed > 0xffffffff) throw new Error('--seed must be an unsigned 32-bit integer');
   if (!['all', 'spec', 'chrome'].includes(options.mode)) throw new Error('Invalid --mode');
   if (options.mode === 'spec' && options.fuzz) throw new Error('--fuzz requires Chrome mode');
   if (options.mode === 'spec' && options.gridFuzz) throw new Error('--grid-fuzz requires Chrome mode');
+  if (options.mode === 'spec' && options.subgridFuzz) throw new Error('--subgrid-fuzz requires Chrome mode');
   if (!options.cli) throw new Error('Supply the prebuilt native CLI using --cli PATH or SILK_LAYOUT_CLI; this harness never builds it');
   options.cli = resolve(options.cli);
   summary.tolerance = options.tolerance;
   summary.seed = options.seed;
+  if (options.subgridFuzz) summary.totals.subgridFuzz = 0;
   return true;
 }
 
@@ -1418,6 +1423,93 @@ function gridFuzzInput(random, index) {
   return input;
 }
 
+function subgridFuzzInput(random, index) {
+  const integer = (low, high) => low + Math.floor(random() * (high - low + 1));
+  const pick = values => values[integer(0, values.length - 1)];
+  const tracks = count => Array.from({ length: count }, () =>
+    pick([integer(28, 64), 'auto', { minmax: [0, { fr: integer(1, 2) }] }]));
+  const gap = () => pick(['normal', 0, integer(4, 20)]);
+  const vertical = mode => mode !== 'horizontal-tb';
+  const columns = integer(2, 3), rows = integer(2, 3);
+  const writingMode = index % 7 === 0 ? 'vertical-lr' : 'horizontal-tb';
+  const input = { viewport: { width: 800, height: 600 }, nodes: [{
+    parent: null, style: {
+      display: 'grid', width: 320, height: 240, writingMode,
+      gridTemplateColumns: tracks(columns), gridTemplateRows: tracks(rows),
+      columnGap: integer(0, 12), rowGap: integer(0, 12),
+      justifyContent: 'start', alignContent: 'start'
+    }
+  }] };
+  const placement = count => {
+    const start = integer(1, count), span = integer(1, count - start + 1);
+    return pick([[start, { span }], [start - count - 2, start + span - count - 2]]);
+  };
+  const addLeaves = (parent, columnCount, rowCount, mode) => {
+    const count = integer(2, 4);
+    for (let i = 0; i < count; i++) {
+      const style = {
+        display: 'block', writingMode: mode,
+        justifySelf: pick(['stretch', 'start', 'center', 'end']),
+        alignSelf: pick(['stretch', 'start', 'center', 'end'])
+      };
+      // Leave one item automatic; all explicit placements stay inside the
+      // local grid, including when either axis has no implicit tracks.
+      if (i !== 0) {
+        [style.gridColumnStart, style.gridColumnEnd] = placement(columnCount);
+        [style.gridRowStart, style.gridRowEnd] = placement(rowCount);
+      }
+      const width = integer(8, 36), height = integer(6, 28);
+      const node = { parent, style };
+      if (i % 2 === 0) {
+        // The browser adapter supports fixed atomic measurements, not an
+        // opaque wrapping provider. Keep these leaves horizontal and avoid
+        // synthetic vertical-baseline policy differences.
+        style.writingMode = 'horizontal-tb';
+        node.measure = { minWidth: width, maxWidth: width, height };
+      } else if (index % 4 === 0) {
+        style.height = height;
+        style.aspectRatio = pick([1, 2]);
+      } else {
+        style.width = width;
+        style.height = height;
+      }
+      input.nodes.push(node);
+    }
+  };
+  const addSubgrid = (parent, parentColumns, parentRows, parentMode, axes, depth) => {
+    const columnSpan = integer(1, parentColumns), rowSpan = integer(1, parentRows);
+    const columnStart = integer(1, parentColumns - columnSpan + 1);
+    const rowStart = integer(1, parentRows - rowSpan + 1);
+    const mode = index % 11 === 0 && depth === 0
+      ? (vertical(parentMode) ? 'horizontal-tb' : 'vertical-lr') : parentMode;
+    const orthogonal = vertical(mode) !== vertical(parentMode);
+    const inheritColumns = axes !== 1, inheritRows = axes !== 0;
+    const localColumns = inheritColumns ? (orthogonal ? rowSpan : columnSpan) : integer(2, 3);
+    const localRows = inheritRows ? (orthogonal ? columnSpan : rowSpan) : integer(2, 3);
+    const id = input.nodes.length;
+    input.nodes.push({ parent, style: {
+      display: 'grid', writingMode: mode, direction: pick(['ltr', 'ltr', 'rtl']),
+      gridColumnStart: columnStart, gridColumnEnd: { span: columnSpan },
+      gridRowStart: rowStart, gridRowEnd: { span: rowSpan },
+      gridTemplateColumns: inheritColumns ? 'subgrid' : tracks(localColumns),
+      gridTemplateRows: inheritRows ? 'subgrid' : tracks(localRows),
+      gridAutoFlow: pick(['row', 'column', 'row dense', 'column dense']),
+      columnGap: gap(), rowGap: gap(),
+      padding: integer(0, 3), border: integer(0, 2),
+      margin: { left: integer(-2, 3), right: integer(-2, 3), top: 0, bottom: 0 },
+      justifyContent: 'start', alignContent: 'start'
+    } });
+    if (depth === 0) {
+      // Alternate which local axis is inherited at the next level, exercising
+      // per-axis recursion as well as two-axis inheritance in small trees.
+      addSubgrid(id, localColumns, localRows, mode, (axes + 1) % 3, 1);
+    }
+    addLeaves(id, localColumns, localRows, mode);
+  };
+  addSubgrid(0, columns, rows, writingMode, index % 3, 0);
+  return input;
+}
+
 // Bounded structural reduction preserves the discrepancy field and delta sign.
 // Original input is always retained; reduction stops after a bounded leaf sweep,
 // without claiming globally minimal CSS or a normative correctness oracle.
@@ -1448,7 +1540,7 @@ async function main() {
   if (!parseArgs()) return;
   await access(options.cli, constants.X_OK);
   const files = await fixtureFiles(options.path);
-  if (!files.length && !options.fuzz && !options.gridFuzz) throw new Error('No fixture files found');
+  if (!files.length && !options.fuzz && !options.gridFuzz && !options.subgridFuzz) throw new Error('No fixture files found');
   for (const source of files) {
     let fixture;
     try {
@@ -1477,6 +1569,23 @@ async function main() {
   for (let index = 0; index < options.gridFuzz; index++) {
     const input = gridFuzzInput(gridRandom, index), name = `grid-fuzz-${options.seed}-${index}`;
     const result = await runFixture({ name, kind: 'chrome', input, features: ['seeded-grid-auto-placement', 'seeded-grid-names-areas-repeat', 'seeded-grid-alignment-baselines-scroll'] }, name, true);
+    if (result.mismatches?.length) {
+      const reduced = await reduceFailure(input, result.mismatches[0]);
+      result.reducedReproduction = await saveFailure(name, reduced.input, {
+        seed: options.seed, index, attempts: reduced.attempts, reduction: reduced.reduction
+      }, '.reduced');
+    }
+  }
+  // A third domain leaves both existing generators and their random draws
+  // untouched. Counts in any stream cannot perturb another stream's inputs.
+  const subgridRandom = randomSource((options.seed ^ 0x73756267) >>> 0);
+  for (let index = 0; index < options.subgridFuzz; index++) {
+    const input = subgridFuzzInput(subgridRandom, index), name = `subgrid-fuzz-${options.seed}-${index}`;
+    summary.totals.subgridFuzz++;
+    const result = await runFixture({ name, kind: 'chrome', input,
+      features: ['seeded-subgrid-nested-axes', 'seeded-subgrid-local-tracks-placement',
+        'seeded-subgrid-gutters-mbp', 'seeded-subgrid-fixed-measured-sizes', 'seeded-subgrid-writing-modes']
+    }, name, true);
     if (result.mismatches?.length) {
       const reduced = await reduceFailure(input, result.mismatches[0]);
       result.reducedReproduction = await saveFailure(name, reduced.input, {

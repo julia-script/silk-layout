@@ -43,7 +43,7 @@ pub effect fn captureShell<'pass, 'source, M: Measure + TextMeasure>(
   output.cache.gridGeometry.inheritRows(id)
   let content = output.cache.gridGeometry.get(retained).content
   let padding = output.cache.gridGeometry.get(retained).padding
-  output.cache.gridGeometry.setFragment(id, fragment, content, padding)
+  run output.cache.gridGeometry.setFragment(id, fragment, content, padding)
 }
 
 // The supplied padding rectangle selects the physical containing-block instance.

@@ -87,11 +87,11 @@ test effect fn gridGeometryAcceptedFragmentsRemainImmutableAcrossRollback()
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut store = GridGeometryStore.make()
   run captureBox(&mut store, 4, 43.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 7, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   let first = store.findFragment(4, 7)
   let checkpoint = store.checkpoint()
   run captureBox(&mut store, 4, 33.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(4, 19, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 19, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     store.get(first).columns.tracks.get(0).start == 43.0
       && store.get(store.findFragment(4, 19)).columns.tracks.get(0).start == 33.0,
@@ -113,11 +113,11 @@ test effect fn gridGeometryShellRetentionDoesNotPublishProbeRows()
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut store = GridGeometryStore.make()
   run captureBox(&mut store, 4, 43.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 7, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   let accepted = store.findFragment(4, 7)
   let checkpoint = store.checkpoint()
   run captureBox(&mut store, 4, 53.0, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 7, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   let retained = store.retain(4)
   run Testing.expect(
     store.findFragment(4, 7) == accepted,
@@ -129,7 +129,7 @@ test effect fn gridGeometryShellRetentionDoesNotPublishProbeRows()
     store.findFragment(4, 7) == accepted,
     "publishing a retained shell cannot re-publish its discarded probe fragment identity",
   )
-  store.setFragment(4, 31, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 31, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     store.get(store.findFragment(4, 7)).columns.tracks.get(0).start == 43.0
       && store.get(store.findFragment(4, 31)).columns.tracks.get(0).start == 53.0,
@@ -147,15 +147,15 @@ test effect fn gridGeometrySameFragmentReplacementRestoresBothIndices()
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut store = GridGeometryStore.make()
   run captureBox(&mut store, 4, 43.0, 80.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 7, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   let accepted = store.findFragment(4, 7)
   let outer = store.checkpoint()
   run captureBox(&mut store, 4, 33.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 7, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   let replacement = store.findFragment(4, 7)
   let inner = store.checkpoint()
   run captureBox(&mut store, 4, 53.0, 100.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(4, 7, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 7, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     store.get(store.findFragment(4, 7)).columns.tracks.get(0).start == 53.0,
     "Grid 10.1 consumers see the newest accepted candidate for a reused fragment index",
@@ -166,7 +166,7 @@ test effect fn gridGeometrySameFragmentReplacementRestoresBothIndices()
     "inner rollback restores both the fragment and box heads",
   )
   run captureBox(&mut store, 4, 63.0, 120.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(4, 19, Rect.zero(), Rect.zero())
+  run store.setFragment(4, 19, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   store.restore(outer)
   run Testing.expect(
     store.findFragment(4, 7) == accepted && store.findFragment(4, 19) == NO_NODE,
@@ -179,11 +179,11 @@ test effect fn gridGeometryFragmentIndexSurvivesCommitRemapAndSlotReuse()
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut store = GridGeometryStore.make()
   run captureBox(&mut store, 0, 13.0, 20.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(0, 3, Rect.zero(), Rect.zero())
+  run store.setFragment(0, 3, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   run captureBox(&mut store, 2, 23.0, 30.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(2, 7, Rect.zero(), Rect.zero())
+  run store.setFragment(2, 7, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   run captureBox(&mut store, 2, 33.0, 40.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(2, 11, Rect.zero(), Rect.zero())
+  run store.setFragment(2, 11, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   store.commit()
   run Testing.expect(
     store.findFragment(2, 7) == NO_NODE && store.findFragment(2, 11) == store.find(2),
@@ -191,7 +191,7 @@ test effect fn gridGeometryFragmentIndexSurvivesCommitRemapAndSlotReuse()
   )
   let marker = store.checkpoint()
   run captureBox(&mut store, 2, 43.0, 50.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(2, 11, Rect.zero(), Rect.zero())
+  run store.setFragment(2, 11, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   store.restore(marker)
   run Testing.expect(
     store.get(store.findFragment(2, 11)).columns.tracks.get(0).start == 33.0,
@@ -207,14 +207,14 @@ test effect fn gridGeometryFragmentIndexSurvivesCommitRemapAndSlotReuse()
   )
   store.dropBox(0)
   run captureBox(&mut store, 1, 53.0, 60.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(1, 19, Rect.zero(), Rect.zero())
+  run store.setFragment(1, 19, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     store.findFragment(0, 11) == NO_NODE && store.findFragment(1, 11) == NO_NODE,
     "reusing a released slot does not resurrect the old fragment identity",
   )
   store.clear()
   run captureBox(&mut store, 1, 63.0, 70.0) |> Effect.provideMut<Allocator>(&mut allocator)
-  store.setFragment(1, 19, Rect.zero(), Rect.zero())
+  run store.setFragment(1, 19, Rect.zero(), Rect.zero()) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     store.findFragment(2, 3) == NO_NODE
       && store.get(store.findFragment(1, 19)).columns.tracks.get(0).start == 63.0,

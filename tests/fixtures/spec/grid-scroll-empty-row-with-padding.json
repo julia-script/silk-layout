@@ -1,0 +1,75 @@
+{
+  "name": "grid-scroll-empty-row-with-padding",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment",
+    "scroll-state"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#overflow",
+    "https://drafts.csswg.org/css-grid-2/#grid-align",
+    "https://drafts.csswg.org/css-align-3/#overflow-scroll-position"
+  ],
+  "derivation": "An empty 120px grid row is included despite zero column extent; 10px padding on both block edges makes its scrollable height 140px. The 1px absolute probe creates no tracks and moves to y=-70 when the 100px request clamps to the 70px scroll range.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 20,
+          "height": 70,
+          "paddingTop": 10,
+          "paddingBottom": 10,
+          "gridTemplateColumns": "none",
+          "gridTemplateRows": [
+            120
+          ],
+          "overflowX": "auto",
+          "overflowY": "auto"
+        },
+        "scrollOffset": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "width": 1,
+          "height": 1,
+          "inset": {
+            "left": 0,
+            "top": 0
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 70,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowHeight": 140
+      },
+      {
+        "x": 0,
+        "y": -70,
+        "width": 1,
+        "height": 1
+      }
+    ]
+  }
+}

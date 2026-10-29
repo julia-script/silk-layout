@@ -32,7 +32,7 @@ The integrated regression gates pass the following focused corpus. These counts 
 
 | Coverage | Passing cases |
 |---|---:|
-| Native layout tests | 277 |
+| Native layout tests | 286 |
 | Malformed adapter requests | 241 |
 | Adapter bidi cases | 9 |
 | Normative specification fixtures | 664 |

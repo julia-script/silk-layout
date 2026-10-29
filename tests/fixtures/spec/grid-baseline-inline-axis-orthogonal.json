@@ -1,0 +1,72 @@
+{
+  "name": "grid-baseline-inline-axis-orthogonal",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "baseline",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#row-align",
+    "https://drafts.csswg.org/css-align-3/#baseline-terms",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline"
+  ],
+  "derivation": "The horizontal grid establishes the alignment context, so its dominant baseline remains alphabetic even for column sharing. Axis-compatible vertical-lr synthesis puts both items' alphabetic baselines at their left border edges. Both therefore stay at x=0; the synthesized central midpoints are not the alignment baseline.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "gridTemplateColumns": [
+            60
+          ],
+          "gridTemplateRows": [
+            20,
+            20
+          ],
+          "justifyItems": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "width": 10,
+          "height": 10,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "width": 30,
+          "height": 10,
+          "gridRowStart": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 60,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 0,
+        "y": 20
+      }
+    ]
+  }
+}

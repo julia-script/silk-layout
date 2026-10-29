@@ -1,0 +1,43 @@
+{
+  "name": "grid-baseline-export-empty",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "baseline",
+    "intrinsic-measure"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-baselines"
+  ],
+  "derivation": "Grid 2 §11.6 step five: a grid with no items has neither baseline set even when explicit tracks exist.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 80,
+          "gridTemplateColumns": [
+            40,
+            40
+          ],
+          "gridTemplateRows": [
+            30
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "hasFirstBaseline": false,
+        "hasLastBaseline": false
+      }
+    ]
+  }
+}

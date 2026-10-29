@@ -1,0 +1,164 @@
+import silk.testing { Testing, AssertionError }
+import geometry { Layout, Size, BaselineSet, OptionalSize, AvailableKind }
+import style { Style, WritingMode, Direction, Dimension }
+import grid_tracks { TrackState }
+import grid_baselines {
+  BaselineGroup,
+  physicalBaselines,
+  baselineMode,
+  cyclicSize,
+  groupEnd,
+  exportRank,
+  gridBefore
+}
+import context { Input }
+import grid_contributions { contributionBaselineInput }
+
+// Grid 2 §12.5: minimum, min-content and max-content shims are independent.
+test effect fn gridBaselineContributionShimsAreIndependent()
+  ! AssertionError<'static> {
+  let mut group = BaselineGroup.make(false)
+  group.include(0, 8.0, 2.0, 0.0, 10.0)
+  group.include(0, 4.0, 6.0, 0.0, 10.0)
+  group.include(1, 6.0, 4.0, 0.0, 10.0)
+  group.include(1, 9.0, 1.0, 0.0, 10.0)
+  group.include(2, 12.0, 8.0, 0.0, 20.0)
+  group.include(2, 7.0, 13.0, 0.0, 20.0)
+  run Testing.expect(group.shim(0, 4.0, 6.0) == 4.0, "minimum shim uses minimum baselines")
+  run Testing.expect(group.shim(1, 6.0, 4.0) == 3.0, "min-content shim has its own group")
+  run Testing.expect(group.shim(2, 7.0, 13.0) == 5.0, "max-content shim has its own group")
+}
+
+// Align §9.3: safe fallback positions the group, not its members independently.
+test effect fn gridLastBaselineSafeOverflowPreservesSharing()
+  ! AssertionError<'static> {
+  let mut group = BaselineGroup.make(true)
+  group.include(3, 25.0, 5.0, 0.0, 20.0)
+  group.include(3, 10.0, 10.0, 0.0, 20.0)
+  run Testing.expect(
+    group.target() == 25.0,
+    "overflowing last group falls back to start without separating baselines",
+  )
+  run Testing.expect(group.shim(3, 25.0, 5.0) == 5.0, "last shim adds distance after baseline")
+}
+
+// Align §§9.1–9.2: opposite flows share only with opposite preferences.
+test effect fn gridBaselineOrientationAndOrthogonalSynthesis()
+  ! AssertionError<'static> {
+  let mut style = Style.make()
+  style.writingMode = WritingMode.VerticalRl
+  let mut parent = Style.make()
+  parent.writingMode = WritingMode.VerticalLr
+  run Testing.expect(
+    groupEnd(&style, &parent, false, false),
+    "first in opposite block flow shares the end group",
+  )
+  run Testing.expect(
+    !groupEnd(&style, &parent, false, true),
+    "last in opposite flow shares the first group",
+  )
+  style.writingMode = WritingMode.HorizontalTb
+  style.direction = Direction.Rtl
+  run Testing.expect(
+    baselineMode(&style, WritingMode.HorizontalTb, true) == WritingMode.VerticalRl,
+    "orthogonal inline-axis synthesis uses rtl vertical-rl",
+  )
+  let mut layout = Layout.zero()
+  layout.size = Size { width: 20.0, height: 30.0 }
+  let table = physicalBaselines(&layout, &style, WritingMode.HorizontalTb, true, false)
+  run Testing.expect(
+    table.alphabetic == 0.0 && table.central == 10.0,
+    "synthesis uses border under edge and midpoint",
+  )
+  style.writingMode = WritingMode.VerticalRl
+  layout.hasFirstBaseline = true
+  layout.firstBaselines = BaselineSet.uniform(7.0)
+  let own = physicalBaselines(&layout, &style, WritingMode.VerticalLr, true, false)
+  run Testing.expect(
+    own.alphabetic == 13.0,
+    "opposite block-start tables convert to physical coordinates",
+  )
+}
+
+// Grid §§11.3–11.4: cyclic exclusion survives later definite track resolution.
+test effect fn gridBaselineCycleRecognizesIndefiniteFlex()
+  ! AssertionError<'static> {
+  let mut style = Style.make()
+  style.height = Dimension.pct(0.5)
+  let tracks: [TrackState; 1] = [TrackState.flexible(0.0, 1.0)]
+  run Testing.expect(
+    cyclicSize(&style, false, &tracks, 0, 1, false),
+    "percentage in indefinite flex is cyclic",
+  )
+  style.height = Dimension.px(12.0)
+  run Testing.expect(
+    !cyclicSize(&style, false, &tracks, 0, 1, false),
+    "fixed size has no baseline sizing cycle",
+  )
+}
+
+// Grid §11.6: spanning endpoint exclusions apply before priority selection.
+test effect fn gridBaselineExportEndpointsAndGridOrder()
+  ! AssertionError<'static> {
+  run Testing.expect(
+    exportRank(false, false, true, false, true, false) == 0,
+    "first group starting in first occupied track wins",
+  )
+  run Testing.expect(
+    exportRank(false, true, true, false, true, false) == 4,
+    "last group spanning past first track is excluded",
+  )
+  run Testing.expect(
+    exportRank(true, false, false, true, true, false) == 4,
+    "first group beginning before last track is excluded",
+  )
+  run Testing.expect(
+    exportRank(true, true, false, true, true, false) == 0,
+    "last group ending in last occupied track wins",
+  )
+  run Testing.expect(gridBefore(0, 2, 9, 1, 0, 0), "row precedes document order")
+  run Testing.expect(gridBefore(0, 0, 9, 0, 2, 0), "column precedes document order")
+  run Testing.expect(gridBefore(0, 0, 1, 0, 0, 2), "coincident items use order-modified order")
+}
+
+// Grid §12.5 shims precede scalar contribution caps: a capped intrinsic
+// contribution is not an instruction to lay out a second, differently sized box.
+test effect fn gridBaselineCapturePreservesIntrinsicContexts()
+  ! AssertionError<'static> {
+  let mut style = Style.make()
+  style.minWidth = Dimension.px(90.0)
+  style.maxWidth = Dimension.px(100.0)
+  let mut request = Input.make(OptionalSize.none())
+  request.known.height = 40.0
+  request.known.heightDefinite = true
+  request.indefiniteHeight = true
+  request.known.width = 12.0
+  request.known.widthDefinite = true
+  let minimum = contributionBaselineInput(&request, &style, true, 0)
+  let smallest = contributionBaselineInput(&request, &style, true, 1)
+  let largest = contributionBaselineInput(&request, &style, true, 2)
+  run Testing.expect(
+    !minimum.known.widthDefinite && !smallest.known.widthDefinite && !largest.known.widthDefinite,
+    "neither scalar caps nor incoming area widths force the intrinsic probe",
+  )
+  run Testing.expect(
+    minimum.availableWidth.kind == AvailableKind.MinContent
+      && smallest.availableWidth.kind == AvailableKind.MinContent
+      && largest.availableWidth.kind == AvailableKind.MaxContent,
+    "each channel keeps its sizing constraint",
+  )
+  run Testing.expect(
+    smallest.known.height == 40.0 && smallest.known.heightDefinite && smallest.indefiniteHeight,
+    "cross knowledge and CSS indefiniteness survive independently",
+  )
+  run Testing.expect(
+    smallest.baselines && smallest.intrinsicWidth && !smallest.performLayout,
+    "intrinsic capture requests baseline-producing probes only",
+  )
+  style.width = Dimension.px(80.0)
+  let fixed = contributionBaselineInput(&request, &style, true, 1)
+  run Testing.expect(
+    !fixed.intrinsicWidth && !fixed.known.widthDefinite,
+    "definite authored size remains active without forcing a capped size",
+  )
+}

@@ -1,0 +1,80 @@
+{
+  "name": "grid-align-left-right-sideways-lr",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#positional-values"
+  ],
+  "derivation": "Sideways-lr line-left is physical bottom regardless of RTL. In a 100px inline track, left places a 20px-high item at y=80 and right at y=0. Both items share the same explicit area.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 90,
+          "height": 100,
+          "writingMode": "sideways-lr",
+          "direction": "rtl",
+          "gridTemplateColumns": [
+            100
+          ],
+          "gridTemplateRows": [
+            90
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "height": 20,
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "justifySelf": "left",
+          "alignSelf": "start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "height": 20,
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "justifySelf": "right",
+          "alignSelf": "start"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 90,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": 80,
+        "width": 30,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 20
+      }
+    ]
+  }
+}

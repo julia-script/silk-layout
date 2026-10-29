@@ -1,0 +1,79 @@
+{
+  "name": "grid-baseline-last-spanning-endpoint",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "baseline"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#grid-baselines",
+    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline"
+  ],
+  "derivation": "The spanning item joins the last row group, not its starting row. Both last baselines align at row-two end 50.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 80,
+          "gridTemplateColumns": [
+            40,
+            40
+          ],
+          "gridTemplateRows": [
+            20,
+            30
+          ],
+          "alignItems": "last baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 10,
+          "gridRowStart": 1,
+          "gridRowEnd": 3,
+          "gridColumnStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 20,
+          "gridRowStart": 2,
+          "gridColumnStart": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 50
+      },
+      {
+        "x": 0,
+        "y": 40,
+        "width": 20,
+        "height": 10
+      },
+      {
+        "x": 40,
+        "y": 30,
+        "width": 20,
+        "height": 20
+      }
+    ]
+  }
+}

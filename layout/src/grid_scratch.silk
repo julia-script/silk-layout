@@ -5,6 +5,7 @@ import grid_placement { GridItem, GridBounds, PlacementScratch }
 import grid_tracks { TrackState, TrackContribution }
 import grid_lines { LineNames }
 import grid_template { ExpandedAxis }
+import grid_baselines { GridBaselines }
 
 pub struct GridAxisScratch {
   pub tracks: List<TrackState>,
@@ -63,6 +64,7 @@ pub struct GridScratch {
   // Lazy zero-or-one payload: ordinary numeric grids need no expanded-template
   // vectors, and leases do not move all those empty vectors on every probe.
   pub template: List<GridTemplateScratch>,
+  pub baselines: List<GridBaselines>,
 }
 
 impl GridScratch {
@@ -75,6 +77,7 @@ impl GridScratch {
       rows: GridAxisScratch.make(),
       trackWork: List<usize>.make(),
       template: List<GridTemplateScratch>.make(),
+      baselines: List<GridBaselines>.make(),
     }
   }
 }

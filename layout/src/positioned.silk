@@ -5,7 +5,7 @@ import style { Style, Position, DimensionKind, Direction, WritingMode, Align, Fl
 import tree { NO_NODE }
 import box_tree { BoxTree, BoxKind }
 import fragments { FragmentKind }
-import context { Input, ResolvedBox, resolveBox, childrenInput, withGutter, resolve, resolves, outOfFlow, isFlex, scrollable, usedOverflowForAxis, UNBOUNDED }
+import context { Input, ResolvedBox, resolveBox, childrenInput, withGutter, resolve, resolves, outOfFlow, isFlex, isGrid, scrollable, usedOverflowForAxis, UNBOUNDED }
 import engine { layoutNode, layoutNodeInPlace, layoutInBfc, flowMarginRect, resolveFragmentBox, shapedBox }
 import layout_pass { LayoutPass, FullBoxGeometry, CacheKind }
 import text { TextMeasure, TextError }
@@ -1603,6 +1603,11 @@ fn alignmentOpensOrigin(style: &Style, horizontal: bool) -> bool {
     if horizontal == mainHorizontal { align = style.justifyContent
       safety = style.justifyContentSafety }
     else if style.flexWrap == FlexWrap.NoWrap { return false }
+  } else if isGrid(style) {
+    if horizontal == (style.writingMode == WritingMode.HorizontalTb) {
+      align = style.justifyContent
+      safety = style.justifyContentSafety
+    }
   } else if horizontal == (style.writingMode == WritingMode.HorizontalTb) { return false }
   let offset = alignmentOffset(align, -1.0, reverse, logicalReverse, logicalReverse, horizontal, safety == OverflowAlignment.Safe)
   if reverse { return offset > -1.0 }

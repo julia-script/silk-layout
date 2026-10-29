@@ -1,0 +1,73 @@
+{
+  "name": "grid-baseline-indefinite-fr-fallback",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "baseline",
+    "fractional-tracks"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#row-align",
+    "https://drafts.csswg.org/css-align-3/#baseline-align-self",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline"
+  ],
+  "derivation": "The shrink-to-fit container has an indefinite preferred width. Its minmax(0, 1fr) track is intrinsic for baseline-cycle detection even after the used width becomes 40px. The auto-width item must keep safe self-start fallback at x=0; the explicit 40px peer establishes the track width.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "inline-grid",
+          "gridTemplateColumns": [
+            {
+              "minmax": [
+                0,
+                {
+                  "fr": 1
+                }
+              ]
+            }
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ],
+          "justifyItems": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "sideways-lr",
+          "width": 40,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 40
+      },
+      {
+        "x": 0,
+        "width": 0
+      },
+      {
+        "x": 0,
+        "width": 40
+      }
+    ]
+  }
+}

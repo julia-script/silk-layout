@@ -1,0 +1,79 @@
+{
+  "name": "grid-baseline-fixed-track-group-member",
+  "kind": "chrome",
+  "features": [
+    "grid",
+    "baseline",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims",
+    "https://drafts.csswg.org/css-align-3/#baseline-align-self"
+  ],
+  "derivation": "A 30px item confined to the fixed first 10px row establishes the shared bottom baseline at 30. The 10px item spanning that row and an auto row needs a 20px shim, contributing 30px across the span. The auto row therefore grows to 20px; a fixed-track group member must participate even though it has no intrinsic track contribution of its own.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 40,
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            10,
+            "auto"
+          ],
+          "alignItems": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10,
+          "height": 10,
+          "gridRowStart": 1,
+          "gridRowEnd": {
+            "span": 2
+          },
+          "gridColumnStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10,
+          "height": 30,
+          "gridRowStart": 1,
+          "gridColumnStart": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 40,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 20,
+        "y": 0,
+        "width": 10,
+        "height": 30
+      }
+    ]
+  }
+}

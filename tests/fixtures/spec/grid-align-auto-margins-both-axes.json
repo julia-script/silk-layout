@@ -1,0 +1,63 @@
+{
+  "name": "grid-align-auto-margins-both-axes",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-margins"
+  ],
+  "derivation": "The 20x30 border box leaves 80px inline space, shared 40/40 by auto margins, and 50px block space after a fixed 10px bottom margin, absorbed by the top auto margin. End self-alignment is disabled.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "height": 90,
+          "gridTemplateColumns": [
+            100
+          ],
+          "gridTemplateRows": [
+            90
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 20,
+          "height": 30,
+          "marginLeft": "auto",
+          "marginRight": "auto",
+          "marginTop": "auto",
+          "marginBottom": 10,
+          "justifySelf": "end",
+          "alignSelf": "end"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 90
+      },
+      {
+        "x": 40,
+        "y": 50,
+        "width": 20,
+        "height": 30
+      }
+    ]
+  }
+}

@@ -443,7 +443,8 @@ function unsupportedAdapter(input, output, fontEvidence = []) {
     if (node.measure) {
       const m = node.measure;
       if (m.minWidth !== m.maxWidth || m.wrap) reasons.push({ node: index, feature: 'variable-intrinsic-measure', reason: 'The DOM adapter is an atomic fixed intrinsic box, not a text shaping or wrapping provider.' });
-      if ((m.firstBaseline ?? m.lastBaseline ?? m.height) !== (m.lastBaseline ?? m.firstBaseline ?? m.height)) reasons.push({ node: index, feature: 'multiple-measure-baselines', reason: 'The atomic measurement adapter has one line.' });
+      const first = m.firstBaseline ?? m.lastBaseline ?? m.height, last = m.lastBaseline ?? first;
+      if (first !== last && (first < 0 || last < 0 || first > m.height || last > m.height)) reasons.push({ node: index, feature: 'out-of-box-measure-baselines', reason: 'Distinct fixed-box metric lines require both baselines within the supplied height.' });
       if ((node.style.writingMode ?? 'horizontal-tb') !== 'horizontal-tb' && (m.firstBaseline !== undefined || m.lastBaseline !== undefined)) reasons.push({ node: index, feature: 'nonhorizontal-measure-baseline', reason: 'The synthetic baseline marker represents horizontal-tb only; vertical and sideways baseline measurements require a matching provider.' });
       if (node.style.display && !['block', 'inline-block'].includes(node.style.display)) reasons.push({ node: index, feature: 'measured-formatting-context', reason: 'Measured DOM leaves use a block or inline-block inline formatting context.' });
     }
@@ -716,7 +717,7 @@ async function observeDOM(input, fontAssets, columns) {
     flow.style.cssText = `position:relative;left:${columns.x}px;top:${columns.y}px;box-sizing:content-box;margin:0;padding:0;border:0;width:${columns.width}px;height:${columns.height}px;writing-mode:${columns.mode};direction:${columns.direction};column-count:1;column-width:auto;column-gap:${columns.gap}px;column-fill:auto;overflow:visible;`;
     viewport.append(flow);
   }
-  const elements = [], markers = [], loads = [], resources = [];
+  const elements = [], markers = [], lastMarkers = [], loads = [], resources = [];
   for (let i = 0; i < input.nodes.length; i++) {
     const node = input.nodes[i];
     if (Object.hasOwn(node, 'text')) {
@@ -841,7 +842,23 @@ async function observeDOM(input, fontAssets, columns) {
       atomic.style.cssText = `display:inline-block;vertical-align:baseline;width:${m.maxWidth}px;height:${m.height}px;line-height:0;font-size:0;padding:0;border:0;margin:0;`;
       // A zero-width inline box sets the line baseline without platform fonts.
       marker.style.cssText = `display:inline-block;vertical-align:baseline;width:0;height:${baseline}px;padding:0;border:0;margin:0;`;
-      atomic.append(marker); element.append(atomic); markers[i] = marker;
+      atomic.append(marker); markers[i] = marker;
+      const last = m.lastBaseline ?? baseline;
+      if (last === baseline) element.append(atomic);
+      else {
+        // Two overlapping metric lines preserve the declared fixed intrinsic
+        // box while exposing distinct first/last in-flow baselines to CSS.
+        // Keep them as direct block children: wrapping both in one atomic
+        // inline would export only that inline's last baseline.
+        const firstLine = document.createElement('div'), lastLine = document.createElement('div');
+        firstLine.style.cssText = `height:${m.height}px;line-height:0;font-size:0;padding:0;border:0;margin:0;`;
+        lastLine.style.cssText = firstLine.style.cssText;
+        lastLine.style.marginTop = `${-m.height}px`;
+        const lastAtomic = atomic.cloneNode(true), lastMarker = lastAtomic.firstElementChild;
+        lastMarker.style.height = `${last}px`;
+        firstLine.append(atomic); lastLine.append(lastAtomic);
+        element.append(firstLine, lastLine); lastMarkers[i] = lastMarker;
+      }
     }
     (node.parent === null ? flow : elements[node.parent]).append(element);
     elements.push(element);
@@ -1001,7 +1018,8 @@ async function observeDOM(input, fontAssets, columns) {
     }
     if (markers[i] && (node.measure.firstBaseline !== undefined || node.measure.lastBaseline !== undefined)) {
       box.firstBaseline = markers[i].getBoundingClientRect().bottom - rect.top;
-      box.lastBaseline = box.firstBaseline; box.hasFirstBaseline = true; box.hasLastBaseline = true;
+      box.lastBaseline = (lastMarkers[i] ?? markers[i]).getBoundingClientRect().bottom - rect.top;
+      box.hasFirstBaseline = true; box.hasLastBaseline = true;
     }
     return box;
   }) };
@@ -1340,6 +1358,54 @@ function gridFuzzInput(random, index) {
       gridRowStart, gridRowEnd, gridColumnStart, gridColumnEnd
     } });
   }
+  // Alignment has its own stream, preserving every earlier placement/template
+  // draw and the legacy block/flex stream. Keep one fifth as unchanged controls.
+  if (index % 5 !== 0) {
+    const alignmentRandom = randomSource((options.seed ^ 0x616c6967 ^ index) >>> 0);
+    const alignmentPick = values => values[Math.floor(alignmentRandom() * values.length)];
+    const modes = ['horizontal-tb', 'vertical-rl', 'vertical-lr', 'sideways-rl', 'sideways-lr'];
+    const positions = ['start', 'end', 'center', 'self-start', 'self-end'];
+    const self = [...positions, 'stretch', 'baseline', 'last baseline'];
+    const distribution = ['start', 'end', 'center', 'stretch', 'space-between', 'space-around', 'space-evenly'];
+    const safety = (style, property) => {
+      if (positions.includes(style[property]) || ['left', 'right'].includes(style[property])) {
+        style[`${property}Safety`] = alignmentPick(['default', 'safe', 'unsafe']);
+      }
+    };
+    rootStyle.writingMode = modes[Math.floor(index / 4) % modes.length];
+    rootStyle.direction = alignmentPick(['ltr', 'rtl']);
+    rootStyle.justifyContent = alignmentPick(distribution);
+    rootStyle.alignContent = alignmentPick(distribution);
+    rootStyle.justifyItems = alignmentPick([...self, 'left', 'right']);
+    rootStyle.alignItems = alignmentPick(self);
+    for (const property of ['justifyContent', 'alignContent', 'justifyItems', 'alignItems']) safety(rootStyle, property);
+    if (index % 4 === 0) rootStyle.height = 80;
+    if (index % 4 === 1) rootStyle.width = 80;
+    if (index % 7 === 1) { rootStyle.display = 'inline-grid'; delete rootStyle.width; }
+    if (index % 7 === 2) delete rootStyle.height;
+    if (index % 8 === 1) {
+      rootStyle.overflowX = rootStyle.overflowY = 'auto';
+      input.nodes[0].scrollOffset = {
+        x: alignmentPick([-80, 0, 80]), y: alignmentPick([-80, 0, 80])
+      };
+    }
+    for (const node of input.nodes.slice(1)) {
+      const style = node.style;
+      style.writingMode = alignmentPick([rootStyle.writingMode, rootStyle.writingMode, ...modes]);
+      style.direction = alignmentPick([rootStyle.direction, 'ltr', 'rtl']);
+      if (alignmentRandom() < 0.5) style.justifySelf = alignmentPick(['auto', ...self, 'left', 'right']);
+      if (alignmentRandom() < 0.5) style.alignSelf = alignmentPick(['auto', ...self]);
+      safety(style, 'justifySelf'); safety(style, 'alignSelf');
+      if (alignmentRandom() < 0.3) {
+        style[alignmentPick(['marginLeft', 'marginRight', 'marginTop', 'marginBottom'])] = 'auto';
+      }
+      if (alignmentRandom() < 0.2) {
+        const dimension = alignmentPick(['width', 'height']);
+        if (alignmentRandom() < 0.5) delete style[dimension];
+        else style[dimension] = { percent: 0.5 };
+      }
+    }
+  }
   return input;
 }
 
@@ -1401,7 +1467,7 @@ async function main() {
   const gridRandom = randomSource((options.seed ^ 0x67726964) >>> 0);
   for (let index = 0; index < options.gridFuzz; index++) {
     const input = gridFuzzInput(gridRandom, index), name = `grid-fuzz-${options.seed}-${index}`;
-    const result = await runFixture({ name, kind: 'chrome', input, features: ['seeded-grid-auto-placement', 'seeded-grid-names-areas-repeat'] }, name, true);
+    const result = await runFixture({ name, kind: 'chrome', input, features: ['seeded-grid-auto-placement', 'seeded-grid-names-areas-repeat', 'seeded-grid-alignment-baselines-scroll'] }, name, true);
     if (result.mismatches?.length) {
       const reduced = await reduceFailure(input, result.mismatches[0]);
       result.reducedReproduction = await saveFailure(name, reduced.input, {

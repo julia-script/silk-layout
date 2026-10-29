@@ -1,0 +1,845 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import silk.ownership { Copy }
+import silk.i32
+import silk.usize
+import geometry { Layout, BaselineSet, FontRequest, Measure, Size, Point, max, min }
+import style { Style, WritingMode, Direction, Align, Dimension, DimensionKind }
+import axes { Axes }
+import context { Input, UNBOUNDED }
+import box_tree { BoxTree }
+import tree { NO_NODE }
+import grid_placement { GridItem }
+import grid_tracks { TrackState, TrackContribution }
+import grid_style { GridBreadthKind }
+import grid_contributions { ItemContribution, contributionBaselineInput }
+import grid_alignment { selfAlignment, oppositeSelfStart }
+import layout_pass { LayoutPass, CacheKind }
+import engine { normalizeKey, probeFresh }
+import text { TextMeasure, TextError }
+import fragmentation { FragmentationError }
+
+struct Metrics {
+  before: f64,
+  after: f64,
+  lower: f64,
+  upper: f64,
+  present: bool
+}
+
+impl Copy for Metrics {}
+
+impl Metrics {
+  fn empty() -> Metrics {
+    return Metrics {
+      before: -UNBOUNDED,
+      after: -UNBOUNDED,
+      lower: -UNBOUNDED,
+      upper: UNBOUNDED,
+      present: false,
+    }
+  }
+}
+
+// Four independent channels: minimum, min-content, max-content and final layout.
+// CSS Grid 2 §12.5 forbids reusing a final-position shim for intrinsic sizing.
+pub struct BaselineGroup {
+  end: bool,
+  metrics: [Metrics; 4]
+}
+
+impl Copy for BaselineGroup {}
+
+impl BaselineGroup {
+  pub fn make(end: bool) -> BaselineGroup {
+    return BaselineGroup {
+      end: end,
+      metrics: [Metrics.empty(), Metrics.empty(), Metrics.empty(), Metrics.empty()],
+    }
+  }
+
+  pub fn include(self: &mut Self, kind: usize, before: f64, after: f64, start: f64, extent: f64) {
+    let metric = &mut self.metrics[kind]
+    metric.before = max(metric.before, before)
+    metric.after = max(metric.after, after)
+    metric.lower = max(metric.lower, start + before)
+    metric.upper = min(metric.upper, start + extent - after)
+    metric.present = true
+  }
+
+  pub fn shim(self: &Self, kind: usize, before: f64, after: f64) -> f64 {
+    if !self.metrics[kind].present {
+      return 0.0
+    }
+    if self.end {
+      return max(0.0, self.metrics[kind].after - after)
+    }
+    return max(0.0, self.metrics[kind].before - before)
+  }
+
+  pub fn target(self: &Self) -> f64 {
+    let metric = &self.metrics[3]
+    if self.end {
+      return max(metric.lower, metric.upper)
+    }
+    return metric.lower
+  }
+}
+
+struct Sample {
+  before: f64,
+  after: f64,
+  start: f64,
+  present: bool
+}
+
+impl Copy for Sample {}
+
+impl Sample {
+  fn empty() -> Sample {
+    return Sample { before: 0.0, after: 0.0, start: 0.0, present: false }
+  }
+}
+
+struct Entry {
+  group: usize,
+  last: bool,
+  mirror: bool,
+  previousMinimum: f64,
+  previousMinContent: f64,
+  comparePrevious: bool,
+  samples: [Sample; 4]
+}
+
+impl Copy for Entry {}
+
+impl Entry {
+  fn empty() -> Entry {
+    return Entry {
+      group: NO_NODE,
+      last: false,
+      mirror: false,
+      previousMinimum: 0.0,
+      previousMinContent: 0.0,
+      comparePrevious: false,
+      samples: [Sample.empty(), Sample.empty(), Sample.empty(), Sample.empty()],
+    }
+  }
+}
+
+pub struct BaselineAxis {
+  entries: List<Entry>,
+  groups: List<BaselineGroup>,
+  index: List<usize>,
+  mirrorOffset: f64
+}
+
+pub struct GridBaselines {
+  columns: BaselineAxis,
+  rows: BaselineAxis
+}
+
+impl BaselineAxis {
+  fn make() -> BaselineAxis {
+    return BaselineAxis {
+      entries: List<Entry>.make(),
+      groups: List<BaselineGroup>.make(),
+      index: List<usize>.make(),
+      mirrorOffset: 0.0,
+    }
+  }
+}
+
+impl GridBaselines {
+  pub fn make() -> GridBaselines {
+    return GridBaselines { columns: BaselineAxis.make(), rows: BaselineAxis.make() }
+  }
+
+  pub fn any(self: &Self) -> bool {
+    return self.columns.entries.length() != 0 || self.rows.entries.length() != 0
+  }
+}
+
+fn axisState(scratch: &GridBaselines, columns: bool) -> &BaselineAxis {
+  if columns {
+    return &scratch.columns
+  }
+  return &scratch.rows
+}
+
+fn axisStateMut(scratch: &mut GridBaselines, columns: bool) -> &mut BaselineAxis {
+  if columns {
+    return &mut scratch.columns
+  }
+  return &mut scratch.rows
+}
+
+fn axisSize(size: Size, horizontal: bool) -> f64 {
+  if horizontal {
+    return size.width
+  }
+  return size.height
+}
+
+fn reverseBlock(mode: WritingMode) -> bool {
+  return mode == WritingMode.VerticalRl || mode == WritingMode.SidewaysRl
+}
+
+fn lineOverReverse(mode: WritingMode) -> bool {
+  return mode == WritingMode.VerticalRl || mode == WritingMode.VerticalLr
+    || mode == WritingMode.SidewaysRl
+}
+
+fn reverseAxis(parent: &Style, columns: bool) -> bool {
+  if columns {
+    return (parent.writingMode == WritingMode.SidewaysLr)
+      != (parent.usedDirection() == Direction.Rtl)
+  }
+  return reverseBlock(parent.writingMode)
+}
+
+pub fn baselineMode(style: &Style, containerMode: WritingMode, horizontal: bool) -> WritingMode {
+  let mut mode = style.writingMode
+  if (mode != WritingMode.HorizontalTb) != horizontal {
+    mode = containerMode
+    if (mode != WritingMode.HorizontalTb) != horizontal {
+      mode = WritingMode.HorizontalTb
+      if horizontal {
+        mode = WritingMode.VerticalLr
+        if style.usedDirection() == Direction.Rtl {
+          mode = WritingMode.VerticalRl
+        }
+      }
+    }
+  }
+  return mode
+}
+
+pub fn physicalBaselines(
+  layout: &Layout,
+  style: &Style,
+  containerMode: WritingMode,
+  horizontal: bool,
+  last: bool,
+) -> BaselineSet {
+  let extent = axisSize(layout.size, horizontal)
+  if (style.writingMode != WritingMode.HorizontalTb) == horizontal
+    && ((!last && layout.hasFirstBaseline) || (last && layout.hasLastBaseline)) {
+    let mut baselines = layout.firstBaselines
+    if last {
+      baselines = layout.lastBaselines
+    }
+    if reverseBlock(style.writingMode) {
+      baselines = baselines.reversed(extent)
+    }
+    return baselines
+  }
+  let mode = baselineMode(style, containerMode, horizontal)
+  if lineOverReverse(mode) {
+    return BaselineSet.synthesized(extent, 0.0)
+  }
+  return BaselineSet.synthesized(0.0, extent)
+}
+
+pub fn groupEnd(style: &Style, parent: &Style, columns: bool, last: bool) -> bool {
+  // Align §9.3 / CSSWG #3454: compatible group fallbacks resolve to the
+  // same physical side. The mode assumed only for baseline synthesis cannot
+  // represent a bottom-to-top inline direction as a horizontal block flow.
+  let axis = Axes.make(parent.writingMode)
+  return last != oppositeSelfStart(style, parent, &axis, columns)
+}
+
+fn percentage(value: Dimension) -> bool {
+  return value.kind == DimensionKind.Percent || value.kind == DimensionKind.Calc
+}
+
+pub fn cyclicSize(
+  style: &Style,
+  horizontal: bool,
+  tracks: &[TrackState],
+  start: usize,
+  end: usize,
+  definite: bool,
+) -> bool {
+  let mut preferred = style.height
+  let mut minimum = style.minHeight
+  let mut maximum = style.maxHeight
+  if horizontal {
+    preferred = style.width
+    minimum = style.minWidth
+    maximum = style.maxWidth
+  }
+  let ownInline = horizontal == (style.writingMode == WritingMode.HorizontalTb)
+  let depends = percentage(preferred) || percentage(minimum) || percentage(maximum)
+    || ownInline
+      && (preferred.kind == DimensionKind.Auto || preferred.kind == DimensionKind.FitContent)
+  if !depends {
+    return false
+  }
+  let mut index = start
+  while index < end {
+    let track = &tracks[index]
+    if !track.collapsed
+      && (track.minimum != GridBreadthKind.Length
+        || (track.maximum != GridBreadthKind.Length
+          && (track.maximum != GridBreadthKind.Flex || !definite))) {
+      return true
+    }
+    index = index + 1
+  }
+  return false
+}
+
+fn autoMargins(style: &Style, horizontal: bool) -> bool {
+  if horizontal {
+    return style.margin.left.kind == DimensionKind.Auto
+      || style.margin.right.kind == DimensionKind.Auto
+  }
+  return style.margin.top.kind == DimensionKind.Auto
+    || style.margin.bottom.kind == DimensionKind.Auto
+}
+
+// Call exactly once with the initially initialized tracks. Eligibility is retained
+// across cyclic-percentage reruns, even when their used track sizes become definite.
+effect fn prepareAxis<M: Measure>(
+  nodes: &BoxTree,
+  measurer: &mut M,
+  items: &[GridItem],
+  parent: &Style,
+  tracks: &[TrackState],
+  definite: bool,
+  columns: bool,
+  state: &mut BaselineAxis,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  state.entries.clear()
+  state.groups.clear()
+  state.index.clear()
+  state.mirrorOffset = 0.0
+  let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
+  let contextMode = baselineMode(parent, parent.writingMode, horizontal)
+  let mut hasMirror = false
+  let mut index: usize = 0
+  while index < items.length {
+    let item = &items[index]
+    let style = nodes.style(item.id)
+    let align = selfAlignment(style, parent, columns)
+    let mut span = item.row
+    if columns {
+      span = item.column
+    }
+    if (align == Align.Baseline || align == Align.LastBaseline) && !autoMargins(style, horizontal)
+      && !cyclicSize(
+        style,
+        horizontal,
+        tracks,
+        i32.toUsize(span.start),
+        i32.toUsize(span.end),
+        definite,
+      ) {
+      if state.entries.length() == 0 {
+        let mut fill: usize = 0
+        while fill < items.length {
+          run state.entries.append(Entry.empty())
+          fill = fill + 1
+        }
+        run state.index.appendRepeated(NO_NODE, tracks.length * 2)
+      }
+      let last = align == Align.LastBaseline
+      let end = groupEnd(style, parent, columns, last)
+      let mut track = i32.toUsize(span.start)
+
+      // Align §9.2: computed preference selects the spanning context;
+      // physical fallback direction selects the compatible group within it.
+      if last {
+        track = i32.toUsize(span.end) - 1
+      }
+      let mut group = track * 2
+      if end {
+        group = group + 1
+      }
+      let mut mapped = state.index.get(group)
+      if mapped == NO_NODE {
+        mapped = state.groups.length()
+        state.index.set(group, mapped)
+        run state.groups.append(BaselineGroup.make(end))
+      }
+      group = mapped
+      let mirror = lineOverReverse(baselineMode(style, parent.writingMode, horizontal))
+        != lineOverReverse(contextMode)
+      hasMirror = hasMirror || mirror
+      let entry = &mut state.entries.asMutSlice()[index]
+      entry.group = group
+      entry.last = last
+      entry.mirror = mirror
+    }
+    index = index + 1
+  }
+  if hasMirror {
+    let font = Measure.font(
+      &mut measurer,
+      FontRequest {
+        key: parent.fontKey,
+        writingMode: parent.writingMode,
+        textOrientation: parent.textOrientation,
+        direction: parent.usedDirection(),
+      },
+    )
+    state.mirrorOffset = 2.0
+      * (font.baselines.central
+        - font.baselines.forContext(parent.writingMode, parent.textOrientation))
+    if reverseAxis(parent, columns) != lineOverReverse(contextMode) {
+      state.mirrorOffset = -state.mirrorOffset
+    }
+  }
+}
+
+pub effect fn prepare<M: Measure>(
+  nodes: &BoxTree,
+  measurer: &mut M,
+  items: &[GridItem],
+  parent: &Style,
+  columns: &[TrackState],
+  rows: &[TrackState],
+  columnDefinite: bool,
+  rowDefinite: bool,
+  scratch: &mut GridBaselines,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  run prepareAxis(
+    nodes,
+    &mut measurer,
+    items,
+    parent,
+    columns,
+    columnDefinite,
+    true,
+    &mut scratch.columns,
+  )
+  run prepareAxis(nodes, &mut measurer, items, parent, rows, rowDefinite, false, &mut scratch.rows)
+}
+
+pub fn active(scratch: &GridBaselines, index: usize, columns: bool) -> bool {
+  let state = axisState(scratch, columns)
+  return index < state.entries.length() && state.entries.asSlice()[index].group != NO_NODE
+}
+
+pub fn reset(scratch: &mut GridBaselines, columns: bool, previous: &[TrackContribution]) {
+  let state = axisStateMut(&mut scratch, columns)
+  let groups = state.groups.asMutSlice()
+  let mut index: usize = 0
+  while index < groups.length {
+    let mut kind: usize = 0
+    while kind < 3 {
+      groups[index].metrics[kind] = Metrics.empty()
+      kind = kind + 1
+    }
+    index = index + 1
+  }
+  let entries = state.entries.asMutSlice()
+  index = 0
+  while index < entries.length {
+    entries[index].comparePrevious = index < previous.length
+    if index < previous.length {
+      entries[index].previousMinimum = previous[index].minimum
+      entries[index].previousMinContent = previous[index].minContent
+    }
+    let mut kind: usize = 0
+    while kind < 3 {
+      entries[index].samples[kind] = Sample.empty()
+      kind = kind + 1
+    }
+    index = index + 1
+  }
+}
+
+pub fn resetFinal(scratch: &mut GridBaselines) {
+  let mut pass: usize = 0
+  while pass < 2 {
+    let state = axisStateMut(&mut scratch, pass == 0)
+    let groups = state.groups.asMutSlice()
+    let mut index: usize = 0
+    while index < groups.length {
+      groups[index].metrics[3] = Metrics.empty()
+      index = index + 1
+    }
+    let entries = state.entries.asMutSlice()
+    index = 0
+    while index < entries.length {
+      entries[index].samples[3] = Sample.empty()
+      index = index + 1
+    }
+    pass = pass + 1
+  }
+}
+
+fn capture(
+  state: &mut BaselineAxis,
+  index: usize,
+  columns: bool,
+  kind: usize,
+  style: &Style,
+  parent: &Style,
+  layout: &Layout,
+  start: f64,
+  area: f64,
+) {
+  let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
+  let entry = &mut state.entries.asMutSlice()[index]
+  let baselines = physicalBaselines(layout, style, parent.writingMode, horizontal, entry.last)
+  let extent = axisSize(layout.size, horizontal)
+
+  // Axis-compatible synthesis changes border edges, not the context's
+  // dominant baseline type (Align 3 §9.3).
+  let mut distance = baselines.forContext(parent.writingMode, parent.textOrientation)
+  if reverseAxis(parent, columns) {
+    distance = extent - distance
+  }
+  if entry.mirror {
+    distance = distance - state.mirrorOffset
+  }
+  let axes = Axes.make(parent.writingMode)
+  let margin = axes.edges(layout.usedMargin)
+  let mut before = margin.top + distance
+  let mut after = margin.bottom + extent - distance
+  if columns {
+    before = margin.left + distance
+    after = margin.right + extent - distance
+    if parent.usedDirection() == Direction.Rtl {
+      before = margin.right + distance
+      after = margin.left + extent - distance
+    }
+  }
+  entry.samples[kind] = Sample { before: before, after: after, start: start, present: true }
+  state.groups.asMutSlice()[entry.group].include(kind, before, after, start, area)
+}
+
+// Reuses each contribution's original request and the normal independent-box
+// cache without copying Layout. Scalar caps never become known layout sizes.
+pub effect fn captureContribution<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  scratch: &mut GridBaselines,
+  index: usize,
+  columns: bool,
+  id: usize,
+  request: &Input,
+  measured: &ItemContribution,
+  parent: &Style,
+)
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
+  if !active(&scratch, index, columns) {
+    return
+  }
+  let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
+  let mut kind: usize = 0
+  while kind < 3 {
+    let mut contribution = measured.minimum
+    if kind == 1 {
+      contribution = measured.minContent
+    }
+    if kind == 2 {
+      contribution = measured.maxContent
+    }
+    let probe = contributionBaselineInput(request, nodes.style(id), horizontal, kind)
+    let mut key = probe
+    normalizeKey(output.keyShape(id), &mut key, output.viewportFree(id))
+    let cached = output.findProbe(id, &key, CacheKind.IndependentBox)
+    if cached == usize.MAX {
+      run probeFresh(nodes, &mut output, &mut measurer, id, &probe, &key)
+    }
+    let layout = output.probed(id, cached)
+    capture(
+      axisStateMut(&mut scratch, columns),
+      index,
+      columns,
+      kind,
+      nodes.style(id),
+      parent,
+      layout,
+      0.0,
+      contribution,
+    )
+    kind = kind + 1
+  }
+}
+
+pub fn applyShims(
+  scratch: &GridBaselines,
+  columns: bool,
+  contributions: &mut [TrackContribution],
+) -> bool {
+  let state = axisState(scratch, columns)
+  let entries = state.entries.asSlice()
+  let groups = state.groups.asSlice()
+  let mut index: usize = 0
+  let mut changed = false
+  while index < entries.length {
+    let entry = &entries[index]
+    if entry.group != NO_NODE && index < contributions.length {
+      let mut kind: usize = 0
+      while kind < 3 {
+        let sample = &entry.samples[kind]
+        if sample.present {
+          let shim = groups[entry.group].shim(kind, sample.before, sample.after)
+          if kind == 0 {
+            contributions[index].minimum = contributions[index].minimum + shim
+          }
+          if kind == 1 {
+            contributions[index].minContent = contributions[index].minContent + shim
+          }
+          if kind == 2 {
+            contributions[index].maxContent = contributions[index].maxContent + shim
+          }
+        }
+        kind = kind + 1
+      }
+      if entry.comparePrevious {
+        changed = changed || contributions[index].minimum != entry.previousMinimum
+          || contributions[index].minContent != entry.previousMinContent
+      }
+    }
+    index = index + 1
+  }
+  return changed
+}
+
+pub fn captureFinal(
+  scratch: &mut GridBaselines,
+  index: usize,
+  style: &Style,
+  parent: &Style,
+  layout: &Layout,
+  start: Point,
+  area: Size,
+) {
+  if active(&scratch, index, true) {
+    capture(&mut scratch.columns, index, true, 3, style, parent, layout, start.x, area.width)
+  }
+  if active(&scratch, index, false) {
+    capture(&mut scratch.rows, index, false, 3, style, parent, layout, start.y, area.height)
+  }
+}
+
+pub fn shift(scratch: &GridBaselines, index: usize, columns: bool, fallback: f64) -> f64 {
+  if !active(scratch, index, columns) {
+    return fallback
+  }
+  let state = axisState(scratch, columns)
+  let entry = &state.entries.asSlice()[index]
+  let sample = &entry.samples[3]
+  if !sample.present {
+    return fallback
+  }
+  return state.groups.asSlice()[entry.group].target() - sample.start - sample.before
+}
+
+// Rank zero/one are the preferred/opposite sharing groups; two is an existing
+// baseline table; three is synthesized from the first/last item in grid order.
+// Four means this item's spanning endpoints exclude it from the current track.
+pub fn exportRank(
+  last: bool,
+  itemLast: bool,
+  starts: bool,
+  ends: bool,
+  sharing: bool,
+  hasBaseline: bool,
+) -> usize {
+  let mut endpoint = starts
+  if last {
+    endpoint = ends
+  }
+  if sharing {
+    let mut groupEndpoint = starts
+    if itemLast {
+      groupEndpoint = ends
+    }
+    if groupEndpoint {
+      if last == itemLast {
+        return 0
+      }
+      return 1
+    }
+  }
+  if endpoint && hasBaseline {
+    return 2
+  }
+  return 4
+}
+
+pub fn gridBefore(
+  row: i32,
+  column: i32,
+  order: usize,
+  otherRow: i32,
+  otherColumn: i32,
+  otherOrder: usize,
+) -> bool {
+  return row < otherRow
+    || row == otherRow && (column < otherColumn || column == otherColumn && order < otherOrder)
+}
+
+// Grid 2 §11.6. Stored item tables are already initial-scroll-position tables
+// (engine's baseline normalization); location is unscrolled border-box position.
+// Only sharing-group exports generate a new table from the container's font.
+pub fn containerBaselines<M: Measure>(
+  nodes: &BoxTree,
+  output: &LayoutPass,
+  measurer: &mut M,
+  items: &[GridItem],
+  parent: &Style,
+  scratch: &GridBaselines,
+  result: &mut Layout,
+) {
+  if items.length == 0 {
+    return
+  }
+  let horizontal = parent.writingMode != WritingMode.HorizontalTb
+  let mut firstTrack = items[0].row.start
+  let mut lastTrack = items[0].row.end - 1
+  let mut index: usize = 1
+  while index < items.length {
+    if items[index].row.start < firstTrack {
+      firstTrack = items[index].row.start
+    }
+    if items[index].row.end - 1 > lastTrack {
+      lastTrack = items[index].row.end - 1
+    }
+    index = index + 1
+  }
+  let mut fontBaselines = BaselineSet.zero()
+  let mut hasFont = false
+  let mut pass: usize = 0
+  while pass < 2 {
+    let last = pass == 1
+    let mut track = firstTrack
+    if last {
+      track = lastTrack
+    }
+    let mut chosen = NO_NODE
+    let mut chosenRank: usize = 4
+    let mut chosenLast = last
+    index = 0
+    while index < items.length {
+      let item = &items[index]
+      let layout = &output.boxes[item.id]
+      let compatible = (nodes.style(item.id).writingMode != WritingMode.HorizontalTb) == horizontal
+      let hasBaseline = layout.hasFirstBaseline || layout.hasLastBaseline
+      let sharing = active(scratch, index, false)
+      let mut itemLast = false
+      if sharing {
+        itemLast = scratch.rows.entries.asSlice()[index].last
+      }
+      let mut rank = exportRank(
+        last,
+        itemLast,
+        item.row.start == track,
+        item.row.end - 1 == track,
+        sharing,
+        compatible && hasBaseline,
+      )
+
+      // Synthesis considers all grid items, not only the occupied edge track.
+      if rank == 4 {
+        rank = 3
+      }
+      let mut earlier = true
+      if chosen != NO_NODE {
+        let previous = &items[chosen]
+        earlier = gridBefore(
+          item.row.start,
+          item.column.start,
+          index,
+          previous.row.start,
+          previous.column.start,
+          chosen,
+        )
+        if last {
+          earlier = !earlier
+        }
+      }
+      if rank < chosenRank || rank == chosenRank && earlier {
+        chosen = index
+        chosenRank = rank
+        chosenLast = last
+        if rank < 2 {
+          chosenLast = itemLast
+        }
+        if rank == 2 {
+          if !last && !layout.hasFirstBaseline {
+            chosenLast = true
+          }
+          if last && !layout.hasLastBaseline {
+            chosenLast = false
+          }
+        }
+      }
+      index = index + 1
+    }
+    let item = &items[chosen]
+    let child = &output.boxes[item.id]
+    let childStyle = nodes.style(item.id)
+    let mut baselines = physicalBaselines(
+      child,
+      childStyle,
+      parent.writingMode,
+      horizontal,
+      chosenLast,
+    )
+
+    // Step four explicitly synthesizes even if this item owns another table.
+    if chosenRank == 3 {
+      let extent = axisSize(child.size, horizontal)
+      if lineOverReverse(baselineMode(childStyle, parent.writingMode, horizontal)) {
+        baselines = BaselineSet.synthesized(extent, 0.0)
+      } else {
+        baselines = BaselineSet.synthesized(0.0, extent)
+      }
+    }
+    let mut location = child.location.y
+    if horizontal {
+      location = child.location.x
+    }
+    baselines = baselines.translated(location)
+    if reverseBlock(parent.writingMode) {
+      baselines = baselines.reversed(axisSize(result.size, horizontal))
+    }
+    if chosenRank < 2 {
+      if !hasFont {
+        let font = Measure.font(
+          &mut measurer,
+          FontRequest {
+            key: parent.fontKey,
+            writingMode: parent.writingMode,
+            textOrientation: parent.textOrientation,
+            direction: parent.usedDirection(),
+          },
+        )
+        fontBaselines = font.baselines
+        if parent.writingMode == WritingMode.VerticalLr {
+          fontBaselines = fontBaselines.reversed(font.ascent + font.descent)
+        }
+        hasFont = true
+      }
+      let mut baseline = baselines.forContext(parent.writingMode, parent.textOrientation)
+      let fontBaseline = fontBaselines.forContext(parent.writingMode, parent.textOrientation)
+      if lineOverReverse(baselineMode(childStyle, parent.writingMode, horizontal))
+        != lineOverReverse(parent.writingMode) {
+        baseline = baseline - 2.0 * (fontBaselines.central - fontBaseline)
+      }
+      baselines = fontBaselines.translated(baseline - fontBaseline)
+    }
+    if last {
+      result.lastBaselines = baselines
+      result.hasLastBaseline = true
+    } else {
+      result.firstBaselines = baselines
+      result.hasFirstBaseline = true
+    }
+    pass = pass + 1
+  }
+}

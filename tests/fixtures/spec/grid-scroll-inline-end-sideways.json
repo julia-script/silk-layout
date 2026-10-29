@@ -1,0 +1,90 @@
+{
+  "name": "grid-scroll-inline-end-sideways",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment",
+    "scroll-state"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#overflow",
+    "https://drafts.csswg.org/css-grid-2/#grid-align",
+    "https://drafts.csswg.org/css-align-3/#overflow-scroll-position"
+  ],
+  "derivation": "End distribution shifts a 120px track by -70px in the logical inline axis of a 50px scrollport. Align \u00a75.3 opens the normally unreachable origin only to the grid subject, not the farther absolute box. Physical-axis conversion and clamped scroll yield the authored visual positions.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "width": 20,
+          "height": 50,
+          "writingMode": "sideways-lr",
+          "direction": "ltr",
+          "gridTemplateColumns": [
+            120
+          ],
+          "gridTemplateRows": [
+            20
+          ],
+          "justifyContent": "end",
+          "overflowX": "auto",
+          "overflowY": "auto"
+        },
+        "scrollOffset": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "width": 10,
+          "height": 10,
+          "inset": {
+            "left": 0,
+            "top": 140
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 50,
+        "scrollableOverflowY": 0,
+        "scrollableOverflowHeight": 120
+      },
+      {
+        "x": 0,
+        "y": 40,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 0,
+        "y": 70,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "name": "grid-baseline-inline-opposite-preferences",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "baseline",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#row-align",
+    "https://drafts.csswg.org/css-align-3/#baseline-terms",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline"
+  ],
+  "derivation": "Opposite vertical block flows with opposite first/last preferences share the inline end group. The horizontal grid selects alphabetic baselines, synthesized at the left border edge in both vertical modes. The 20px-wide group is end-aligned in the 60px column, putting both items at x=40.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "gridTemplateColumns": [
+            60
+          ],
+          "gridTemplateRows": [
+            20,
+            20
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "width": 20,
+          "height": 10,
+          "gridRowStart": 1,
+          "justifySelf": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-lr",
+          "width": 10,
+          "height": 10,
+          "gridRowStart": 2,
+          "justifySelf": "last baseline"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 60,
+        "height": 40
+      },
+      {
+        "x": 40,
+        "y": 0
+      },
+      {
+        "x": 40,
+        "y": 20
+      }
+    ]
+  }
+}

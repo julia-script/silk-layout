@@ -1,0 +1,76 @@
+{
+  "name": "grid-align-space-evenly-overflow",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#distribution-values"
+  ],
+  "derivation": "Two 40px tracks plus a 10px gutter exceed 60px by 30px. Distributed alignment uses safe fallback: neither negative spacing nor a negative initial offset.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 60,
+          "height": 60,
+          "gridTemplateColumns": [
+            40,
+            40
+          ],
+          "gridTemplateRows": [
+            40,
+            40
+          ],
+          "columnGap": 10,
+          "rowGap": 10,
+          "justifyContent": "space-evenly",
+          "alignContent": "space-evenly"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "gridColumnStart": 2,
+          "gridRowStart": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 60
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 40,
+        "height": 40
+      },
+      {
+        "x": 50,
+        "y": 50,
+        "width": 40,
+        "height": 40
+      }
+    ]
+  }
+}

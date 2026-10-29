@@ -1,0 +1,414 @@
+import silk.testing { Testing, AssertionError }
+import silk.usize
+import axes { Axes }
+import geometry { Size, ResolvedEdges }
+import style { Style, Align, OverflowAlignment, Dimension, Direction, WritingMode }
+import grid_tracks { TrackState, positionTracks, spanSize }
+import grid_alignment { selfAlignment, alignTracks, alignItem }
+
+// CSS Align 3 #distribution-values; Grid 2 §11.5. Bases total 60,
+// gutters total 20, so 120 free units expand the two spanning gutters.
+test effect fn gridContentDistributionExpandsSpans()
+  ! AssertionError<'static> {
+  let values: [Align; 3] = [Align.SpaceBetween, Align.SpaceAround, Align.SpaceEvenly]
+  let offsets: [f64; 3] = [0.0, 20.0, 30.0]
+  let steps: [f64; 3] = [90.0, 70.0, 60.0]
+  let mut index: usize = 0
+  while index < values.length {
+    let mut parent = Style.make()
+    parent.justifyContent = values[index]
+    parent.alignContent = values[index]
+    let mut columns: [TrackState; 3] = [
+      TrackState.fixed(20.0),
+      TrackState.fixed(20.0),
+      TrackState.fixed(20.0),
+    ]
+    let mut rows: [TrackState; 3] = [
+      TrackState.fixed(20.0),
+      TrackState.fixed(20.0),
+      TrackState.fixed(20.0),
+    ]
+    let used = positionTracks(&mut columns, 10.0)
+    let rowUsed = positionTracks(&mut rows, 10.0)
+    alignTracks(&mut columns, used, 200.0, &parent, true)
+    alignTracks(&mut rows, rowUsed, 200.0, &parent, false)
+    run Testing.expect(
+      columns[0].position == offsets[index] && columns[1].position == offsets[index] + steps[index]
+        && columns[2].position == offsets[index] + 2.0 * steps[index],
+      "distribution allocates only free space, retaining original gutters",
+    )
+    run Testing.expect(
+      rows[2].position == columns[2].position
+        && spanSize(&columns, 0, 3) == 20.0 + 2.0 * steps[index],
+      "row distribution and spanning areas use aligned track endpoints",
+    )
+    index = index + 1
+  }
+}
+
+// Grid 2 §§11.1, 11.5: empty auto-fit tracks neither count as subjects nor
+// introduce an extra distribution gutter. Collapsed positions stay at the
+// preceding live track end; leading/trailing collapsed gutters disappear.
+test effect fn gridContentCollapsedTracksCoincide()
+  ! AssertionError<'static> {
+  let mut collapsed = TrackState.fixed(0.0)
+  collapsed.collapsed = true
+  let mut tracks: [TrackState; 5] = [
+    collapsed,
+    TrackState.fixed(20.0),
+    collapsed,
+    TrackState.fixed(20.0),
+    collapsed,
+  ]
+  let mut parent = Style.make()
+  parent.justifyContent = Align.SpaceAround
+  let used = positionTracks(&mut tracks, 10.0)
+  alignTracks(&mut tracks, used, 110.0, &parent, true)
+  run Testing.expect(
+    tracks[0].position == 15.0 && tracks[1].position == 15.0 && tracks[2].position == 35.0
+      && tracks[3].position == 75.0
+      && tracks[4].position == 95.0,
+    "only two live tracks split sixty free units into 15/30/15",
+  )
+  run Testing.expect(
+    spanSize(&tracks, 1, 4) == 80.0,
+    "spanning area includes the enlarged coincident gutter once",
+  )
+  let mut empty: [TrackState; 2] = [collapsed, collapsed]
+  alignTracks(&mut empty, 0.0, 100.0, &parent, true)
+  run Testing.expect(
+    empty[0].position == 0.0 && empty[1].position == 0.0,
+    "no live subjects leaves the empty grid at start",
+  )
+}
+
+// CSS Align 3 #distribution-values: between falls back to safe start;
+// around/evenly fall back to safe center, regardless of unsafe flags.
+test effect fn gridContentDistributionFallbacks()
+  ! AssertionError<'static> {
+  let values: [Align; 3] = [Align.SpaceBetween, Align.SpaceAround, Align.SpaceEvenly]
+  let expected: [f64; 3] = [0.0, 30.0, 30.0]
+  let mut index: usize = 0
+  while index < values.length {
+    let mut parent = Style.make()
+    parent.justifyContent = values[index]
+    parent.justifyContentSafety = OverflowAlignment.Unsafe
+    let mut one: [TrackState; 1] = [TrackState.fixed(40.0)]
+    alignTracks(&mut one, 40.0, 100.0, &parent, true)
+    run Testing.expect(
+      one[0].position == expected[index],
+      "one subject uses start or center fallback",
+    )
+    let mut overflow: [TrackState; 2] = [TrackState.fixed(40.0), TrackState.fixed(40.0)]
+    let used = positionTracks(&mut overflow, 10.0)
+    alignTracks(&mut overflow, used, 60.0, &parent, true)
+    run Testing.expect(
+      overflow[0].position == 0.0 && overflow[1].position == 50.0,
+      "negative free space uses the safe distribution fallback",
+    )
+    index = index + 1
+  }
+}
+
+// CSS Align 3 #overflow-values and #auto-safety-default explicitly permit
+// unsafe as the default policy for grids without optional smart safety.
+test effect fn gridContentSafetyAndDirectionalEdges()
+  ! AssertionError<'static> {
+  let modes: [OverflowAlignment; 3] = [
+    OverflowAlignment.Default,
+    OverflowAlignment.Safe,
+    OverflowAlignment.Unsafe,
+  ]
+  let centers: [f64; 3] = [-10.0, 0.0, -10.0]
+  let mut index: usize = 0
+  while index < modes.length {
+    let mut parent = Style.make()
+    parent.justifyContent = Align.Center
+    parent.justifyContentSafety = modes[index]
+    let mut tracks: [TrackState; 1] = [TrackState.fixed(80.0)]
+    alignTracks(&mut tracks, 80.0, 60.0, &parent, true)
+    run Testing.expect(
+      tracks[0].position == centers[index],
+      "only explicit safe changes overflowing positional alignment",
+    )
+    index = index + 1
+  }
+  let mut parent = Style.make()
+  parent.direction = Direction.Rtl
+  parent.justifyContent = Align.Left
+  parent.alignContent = Align.End
+  let mut columns: [TrackState; 1] = [TrackState.fixed(20.0)]
+  let mut rows: [TrackState; 1] = [TrackState.fixed(20.0)]
+  alignTracks(&mut columns, 20.0, 100.0, &parent, true)
+  alignTracks(&mut rows, 20.0, 70.0, &parent, false)
+  run Testing.expect(
+    columns[0].position == 80.0 && rows[0].position == 50.0,
+    "RTL line-left is logical end while block end is direction-independent",
+  )
+}
+
+// Grid 2 §11.2: auto margins take positive free space before self alignment.
+// Input may carry block-layout auto-margin results; recompute from zero.
+test effect fn gridItemAutoMarginsBothAxes()
+  ! AssertionError<'static> {
+  let parent = Style.make()
+  let axis = Axes.make(parent.writingMode)
+  let mut item = Style.make()
+  item.justifySelf = Align.End
+  item.alignSelf = Align.End
+  item.margin.left = Dimension.auto()
+  item.margin.right = Dimension.auto()
+  item.margin.top = Dimension.auto()
+  let result = alignItem(
+    &item,
+    &parent,
+    &axis,
+    Size { width: 100.0, height: 90.0 },
+    Size { width: 20.0, height: 30.0 },
+    ResolvedEdges { top: 77.0, right: 88.0, bottom: 10.0, left: 99.0 },
+  )
+  run Testing.expect(
+    result.margin.left == 40.0 && result.margin.right == 40.0 && result.margin.top == 50.0
+      && result.margin.bottom == 10.0,
+    "auto margins split eighty inline units and absorb fifty block units",
+  )
+  run Testing.expect(
+    result.inlineShift == 0.0 && result.blockShift == 0.0,
+    "positive auto margins disable both self-alignment axes",
+  )
+  item.margin.right = Dimension.px(10.0)
+  let single = alignItem(
+    &item,
+    &parent,
+    &axis,
+    Size { width: 100.0, height: 90.0 },
+    Size { width: 20.0, height: 30.0 },
+    ResolvedEdges { top: 0.0, right: 10.0, bottom: 10.0, left: 0.0 },
+  )
+  run Testing.expect(
+    single.margin.left == 70.0 && single.margin.right == 10.0,
+    "a single auto margin absorbs all remaining space",
+  )
+}
+
+// Grid 2 §11.2: overflowing auto margins are zero, not a start fallback.
+// CSS Align 3 #overflow-values: fixed margins participate in the margin box.
+test effect fn gridItemOverflowMarginsRetainAlignment()
+  ! AssertionError<'static> {
+  let parent = Style.make()
+  let axis = Axes.make(parent.writingMode)
+  let mut item = Style.make()
+  item.justifySelf = Align.Center
+  item.alignSelf = Align.End
+  item.margin.left = Dimension.auto()
+  item.margin.top = Dimension.auto()
+  let area = Size { width: 50.0, height: 50.0 }
+  let size = Size { width: 70.0, height: 70.0 }
+  let margins = ResolvedEdges { left: 90.0, right: 10.0, top: 90.0, bottom: 10.0 }
+  let overflowing = alignItem(&item, &parent, &axis, area, size, margins)
+  run Testing.expect(
+    overflowing.margin.left == 0.0 && overflowing.margin.top == 0.0
+      && overflowing.inlineShift == -15.0
+      && overflowing.blockShift == -30.0,
+    "overflow auto margins become zero and fixed margins remain in free space",
+  )
+  item.justifySelfSafety = OverflowAlignment.Safe
+  item.alignSelfSafety = OverflowAlignment.Safe
+  let safe = alignItem(&item, &parent, &axis, area, size, margins)
+  run Testing.expect(
+    safe.inlineShift == 0.0 && safe.blockShift == 0.0,
+    "safe uses container start in both overflowing axes",
+  )
+}
+
+// CSS Align 3 #positional-values: self-start follows the subject's start in
+// the relevant physical axis, even for orthogonal subject/container pairs.
+// Tables below independently enumerate physical starts: horizontal inline
+// left, vertical-rl/lr inline top, sideways-rl inline top, sideways-lr bottom;
+// block starts top, right, left, right, left. RTL reverses inline only.
+test effect fn gridItemSelfAlignmentAllWritingModes()
+  ! AssertionError<'static> {
+  let modes: [WritingMode; 5] = [
+    WritingMode.HorizontalTb,
+    WritingMode.VerticalRl,
+    WritingMode.VerticalLr,
+    WritingMode.SidewaysRl,
+    WritingMode.SidewaysLr,
+  ]
+  let inlineHigh: [bool; 5] = [false, false, false, false, true]
+  let blockHigh: [bool; 5] = [false, true, false, true, false]
+  let mut p: usize = 0
+  while p < modes.length {
+    let mut c: usize = 0
+    while c < modes.length {
+      let mut d: usize = 0
+      while d < 4 {
+        let parentRtl = d >= 2
+        let childRtl = d == 1 || d == 3
+        let mut parent = Style.make()
+        parent.writingMode = modes[p]
+        if parentRtl {
+          parent.direction = Direction.Rtl
+        }
+        let mut item = Style.make()
+        item.writingMode = modes[c]
+        if childRtl {
+          item.direction = Direction.Rtl
+        }
+        item.justifySelf = Align.SelfStart
+        item.alignSelf = Align.SelfEnd
+        let axis = Axes.make(parent.writingMode)
+        let mut subjectInlineHigh = inlineHigh[c] != childRtl
+        let mut subjectBlockHigh = blockHigh[c]
+        if (p == 0) != (c == 0) {
+          subjectInlineHigh = blockHigh[c]
+          subjectBlockHigh = inlineHigh[c] != childRtl
+        }
+        let mut inlineExpected = 0.0
+        if subjectInlineHigh != (inlineHigh[p] != parentRtl) {
+          inlineExpected = 80.0
+        }
+        let mut blockExpected = 0.0
+        if subjectBlockHigh == blockHigh[p] {
+          blockExpected = 60.0
+        }
+        let result = alignItem(
+          &item,
+          &parent,
+          &axis,
+          Size { width: 100.0, height: 90.0 },
+          Size { width: 20.0, height: 30.0 },
+          ResolvedEdges.zero(),
+        )
+        run Testing.expect(
+          result.inlineShift == inlineExpected && result.blockShift == blockExpected,
+          "self-start/end compare physical starts across modes and directions",
+        )
+        item.justifySelf = Align.Left
+        let left = alignItem(
+          &item,
+          &parent,
+          &axis,
+          Size { width: 100.0, height: 90.0 },
+          Size { width: 20.0, height: 30.0 },
+          ResolvedEdges.zero(),
+        )
+        let mut leftExpected = 0.0
+        if parentRtl {
+          leftExpected = 80.0
+        }
+        run Testing.expect(
+          left.inlineShift == leftExpected,
+          "left is parent line-left in all writing modes",
+        )
+        item.justifySelf = Align.Right
+        let right = alignItem(
+          &item,
+          &parent,
+          &axis,
+          Size { width: 100.0, height: 90.0 },
+          Size { width: 20.0, height: 30.0 },
+          ResolvedEdges.zero(),
+        )
+        run Testing.expect(
+          right.inlineShift == 80.0 - leftExpected,
+          "right is parent line-right in all writing modes",
+        )
+        d = d + 1
+      }
+      c = c + 1
+    }
+    p = p + 1
+  }
+}
+
+// Grid 2 §11.2 and Writing Modes 4 §7: return physical margins unchanged
+// in representation, while shifts stay logical and exclude those margins.
+test effect fn gridItemVerticalPhysicalAutoMargins()
+  ! AssertionError<'static> {
+  let mut parent = Style.make()
+  parent.writingMode = WritingMode.SidewaysLr
+  parent.direction = Direction.Rtl
+  let axis = Axes.make(parent.writingMode)
+  let mut item = Style.make()
+  item.margin.bottom = Dimension.auto()
+  item.margin.right = Dimension.auto()
+  item.justifySelf = Align.End
+  item.alignSelf = Align.End
+  let result = alignItem(
+    &item,
+    &parent,
+    &axis,
+    Size { width: 100.0, height: 90.0 },
+    Size { width: 20.0, height: 30.0 },
+    ResolvedEdges { top: 10.0, right: 0.0, bottom: 0.0, left: 5.0 },
+  )
+  run Testing.expect(
+    result.margin.top == 10.0 && result.margin.bottom == 70.0 && result.margin.left == 5.0
+      && result.margin.right == 55.0,
+    "sideways margins resolve on physical sides without RTL swapping the returned edges",
+  )
+  run Testing.expect(
+    result.inlineShift == 0.0 && result.blockShift == 0.0,
+    "margins are excluded from both logical shifts",
+  )
+}
+
+// CSS Align 3 #justify-grid, #align-grid, #baseline-values: normal sizing
+// differs for replaced/ratio boxes; baseline values survive until grouping.
+test effect fn gridItemNormalInheritanceAndBaselineFallback()
+  ! AssertionError<'static> {
+  let mut parent = Style.make()
+  let mut item = Style.make()
+  run Testing.expect(
+    selfAlignment(&item, &parent, true) == Align.Stretch
+      && selfAlignment(&item, &parent, false) == Align.Stretch,
+    "ordinary normal items stretch",
+  )
+  item.replaced = true
+  run Testing.expect(
+    selfAlignment(&item, &parent, true) == Align.Start,
+    "replaced normal items retain natural size",
+  )
+  item.replaced = false
+  item.aspectRatio = 2.0
+  run Testing.expect(
+    selfAlignment(&item, &parent, false) == Align.Start,
+    "ratio normal items retain their preferred ratio",
+  )
+  parent.justifyItems = Align.End
+  parent.justifyItemsSafety = OverflowAlignment.Safe
+  let axis = Axes.make(parent.writingMode)
+  let area = Size { width: 30.0, height: 30.0 }
+  let size = Size { width: 50.0, height: 50.0 }
+  let inherited = alignItem(&item, &parent, &axis, area, size, ResolvedEdges.zero())
+  run Testing.expect(
+    inherited.inlineShift == 0.0,
+    "auto inherits the items overflow safety as well as its keyword",
+  )
+  item.direction = Direction.Rtl
+  item.justifySelf = Align.Baseline
+  item.alignSelf = Align.LastBaseline
+  run Testing.expect(
+    selfAlignment(&item, &parent, true) == Align.Baseline
+      && selfAlignment(&item, &parent, false) == Align.LastBaseline,
+    "baseline preferences reach the sharing module intact",
+  )
+  let fallback = alignItem(
+    &item,
+    &parent,
+    &axis,
+    Size { width: 100.0, height: 100.0 },
+    size,
+    ResolvedEdges.zero(),
+  )
+  run Testing.expect(
+    fallback.inlineShift == 50.0 && fallback.blockShift == 50.0,
+    "baseline fallback uses subject start/end rather than container start/end",
+  )
+  let overflow = alignItem(&item, &parent, &axis, area, size, ResolvedEdges.zero())
+  run Testing.expect(
+    overflow.inlineShift == 0.0 && overflow.blockShift == 0.0,
+    "both baseline fallbacks are safe",
+  )
+}

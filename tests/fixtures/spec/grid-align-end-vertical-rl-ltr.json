@@ -1,0 +1,63 @@
+{
+  "name": "grid-align-end-vertical-rl-ltr",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#row-align",
+    "https://drafts.csswg.org/css-grid-2/#column-align",
+    "https://drafts.csswg.org/css-align-3/#positional-values"
+  ],
+  "derivation": "Logical area 100x90 minus item 20x30 gives end shifts 80 and 60. Inline RTL reverses placement; writing-mode maps logical coordinates to physical axes, including sideways-lr bottom-to-top line progression.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 90,
+          "height": 100,
+          "writingMode": "vertical-rl",
+          "direction": "ltr",
+          "gridTemplateColumns": [
+            100
+          ],
+          "gridTemplateRows": [
+            90
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 30,
+          "height": 20,
+          "justifySelf": "end",
+          "alignSelf": "end"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 90,
+        "height": 100
+      },
+      {
+        "x": 0,
+        "y": 80,
+        "width": 30,
+        "height": 20
+      }
+    ]
+  }
+}

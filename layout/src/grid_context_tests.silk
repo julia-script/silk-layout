@@ -228,3 +228,29 @@ test effect fn inheritedContextPooledDescriptorsResetWithoutRecyclingIdentity()
   run Testing.expect(!recycled.vertical && recycled.phase == 0 && recycled.columns.tracks.length() == 0 && recycled.columns.lines.length() == 0 && recycled.areas.length() == 0, "committed predecessor buffers reset before reuse")
   run Testing.expect(changed != accepted && store.valid(2, changed) && !store.valid(2, accepted), "taking released buffers cannot alias a live context")
 }
+
+test effect fn inheritedShellSnapshotRetainsOnlySelectedAllocation()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridContextStore.make()
+  let accepted = run bind(&mut store, 1, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.commit()
+  let outer = store.checkpoint()
+  let marker = store.checkpoint()
+  let ignored = run bind(&mut store, 2, 3) |> Effect.provideMut<Allocator>(&mut allocator)
+  let selected = run bind(&mut store, 1, 4) |> Effect.provideMut<Allocator>(&mut allocator)
+  let retained = store.retainSince(1, marker)
+  run Testing.expect(retained != NO_NODE, "a newly bound shell allocation can be detached")
+  store.restore(marker)
+  run Testing.expect(store.valid(1, accepted) && !store.valid(2, ignored),
+    "restoring the allocation probe discards every unselected binding")
+  run store.publish(1, retained) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(store.currentKey(1) == selected && store.valid(1, selected),
+    "the selected immutable descriptor keeps its exact identity")
+  let nested = store.checkpoint()
+  run Testing.expect(store.retainSince(1, nested) == NO_NODE,
+    "an unchanged pre-checkpoint binding is never detached")
+  store.restore(outer)
+  run Testing.expect(store.valid(1, accepted) && !store.valid(1, selected),
+    "enclosing rollback also owns the retained shell allocation")
+}

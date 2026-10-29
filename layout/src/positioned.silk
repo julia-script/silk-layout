@@ -356,6 +356,14 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
 fn usedBox(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize) -> ResolvedBox {
   return withGutter(&resolveBox(nodes.style(id), &usedInput(nodes, output, id, viewport)), output.boxes[id].scrollbarGutter)
 }
+// The used box of an absolutely positioned box's generated parent, or of the
+// initial containing block without one; positionTree keeps the containing
+// block's in output.absoluteBox.
+fn staticParentBox(nodes: &BoxTree, output: &LayoutPass, parent: usize, viewport: OptionalSize, fragmented: bool, viewportStyle: &Style) -> ResolvedBox {
+  if parent == NO_NODE { return resolveBox(viewportStyle, &Input.make(viewport)) }
+  if !fragmented && parent == output.absoluteInputOwner { return output.absoluteBox }
+  return usedBox(nodes, output, parent, viewport)
+}
 fn usedChildrenInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize, parent: OptionalSize) -> Input {
   let input = usedInput(nodes, output, id, viewport)
   return usedChildrenInputOf(nodes, output, id, &input, &withGutter(&resolveBox(nodes.style(id), &input), output.boxes[id].scrollbarGutter), parent)
@@ -614,8 +622,29 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   let mut containing = viewport
   if cb != NO_NODE || fragmented { containing = OptionalSize.definite(cbRect.width, cbRect.height) }
   let origin = Point { x: cbRect.x, y: cbRect.y }
+  let mut input = Input.make(containing)
+  if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
+    if !fragmented && output.absoluteInputOwner == cb { input = output.absoluteInput }
+    else {
+      let cbInput = usedInput(nodes, &output, cb, viewport)
+      let cbBox = withGutter(&resolveBox(cbStyle, &cbInput), output.boxes[cb].scrollbarGutter)
+      input = usedChildrenInputOf(nodes, &output, cb, &cbInput, &cbBox, containing)
+      if !fragmented {
+        output.absoluteInputOwner = cb
+        output.absoluteInput = input
+        output.absoluteBox = cbBox
+        output.absoluteLimitsSet = false
+        output.absoluteScrollParent = NO_NODE
+      }
+    }
+  }
+  // Unfragmented siblings with this containing block share its limits and
+  // their parent's scroll ancestor (positionTree keeps them with absoluteInput).
+  let shared = !fragmented && cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline
   let mut limits = ResolvedEdges { left: cbRect.x, right: cbRect.x + cbRect.width, top: cbRect.y, bottom: cbRect.y + cbRect.height }
-  if style.position != Position.Fixed {
+  if style.position != Position.Fixed && shared && output.absoluteLimitsSet {
+    limits = output.absoluteLimits
+  } else if style.position != Position.Fixed {
     // A scrollable original CB can expose abspos overflow in each reachable
     // direction. Fixed boxes without anchor positioning retain finite limits.
     let viewportContaining = cb == NO_NODE || cb == 0
@@ -628,31 +657,33 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
       if reachable.top == -UNBOUNDED { limits.top = -UNBOUNDED }
       if reachable.bottom == UNBOUNDED { limits.bottom = UNBOUNDED }
     }
+    if shared {
+      output.absoluteLimits = limits
+      output.absoluteLimitsSet = true
+    }
   }
-  let mut input = Input.make(containing)
-  if cb != NO_NODE && nodes.node(cb).kind != BoxKind.Inline {
-    if !fragmented && output.absoluteInputOwner == cb { input = output.absoluteInput }
-    else {
-      let cbInput = usedInput(nodes, &output, cb, viewport)
-      let cbBox = withGutter(&resolveBox(cbStyle, &cbInput), output.boxes[cb].scrollbarGutter)
-      input = usedChildrenInputOf(nodes, &output, cb, &cbInput, &cbBox, containing)
-      if !fragmented {
-        output.absoluteInputOwner = cb
-        output.absoluteInput = input
-        output.absoluteBox = cbBox
+  let scrollParent = nodes.node(id).parent
+  if shared && output.absoluteScrollParent == scrollParent {
+    if output.absoluteScrolled { input.scrollportSize = output.absoluteScrollport }
+  } else {
+    let mut scrolled = false
+    let mut scrollAncestor = scrollParent
+    while scrollAncestor != NO_NODE {
+      let ancestor = nodes.node(scrollAncestor)
+      let ancestorStyle = nodes.style(scrollAncestor)
+      if ancestor.kind != BoxKind.Inline && ancestor.kind != BoxKind.InlineFormatting && (scrollable(usedOverflowForAxis(ancestorStyle, true)) || scrollable(usedOverflowForAxis(ancestorStyle, false))) {
+        let constraints = usedChildrenInput(nodes, &output, scrollAncestor, viewport, containing)
+        input.scrollportSize = constraints.scrollportSize
+        scrolled = true
+        break
       }
+      scrollAncestor = ancestor.parent
     }
-  }
-  let mut scrollAncestor = nodes.node(id).parent
-  while scrollAncestor != NO_NODE {
-    let ancestor = nodes.node(scrollAncestor)
-    let ancestorStyle = nodes.style(scrollAncestor)
-    if ancestor.kind != BoxKind.Inline && ancestor.kind != BoxKind.InlineFormatting && (scrollable(usedOverflowForAxis(ancestorStyle, true)) || scrollable(usedOverflowForAxis(ancestorStyle, false))) {
-      let constraints = usedChildrenInput(nodes, &output, scrollAncestor, viewport, containing)
-      input.scrollportSize = constraints.scrollportSize
-      break
+    if shared {
+      output.absoluteScrollParent = scrollParent
+      output.absoluteScrolled = scrolled
+      output.absoluteScrollport = input.scrollportSize
     }
-    scrollAncestor = ancestor.parent
   }
   input.initialContainingBlock = viewport
   if fragmented && !attached && output.frames.depth() > 0 {
@@ -732,13 +763,11 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
   if !anchor.valid {
     let mut staticRoot = parent
     if staticRoot == NO_NODE { staticRoot = 0 }
-    let mut parentBox = resolveBox(viewportStyle, &Input.make(viewport))
+    let parentBox = staticParentBox(nodes, &output, parent, viewport, fragmented, viewportStyle)
     let mut ps = viewportStyle
     let mut innerWidth = viewport.width
     let mut innerHeight = viewport.height
     if parent != NO_NODE {
-      if !fragmented && parent == output.absoluteInputOwner { parentBox = output.absoluteBox }
-      else { parentBox = usedBox(nodes, &output, parent, viewport) }
       ps = nodes.style(parent)
       innerWidth = max(0.0, output.boxes[parent].size.width - parentBox.inset.horizontal())
       innerHeight = max(0.0, output.boxes[parent].size.height - parentBox.inset.vertical())

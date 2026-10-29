@@ -6,6 +6,8 @@ MIT-licensed block, flexbox and grid layout in safe Silk, with specification-der
 
 The workspace pins published Silk `0.1.0-dev.29+94cf9559bf47`. Use an LLVM 22 clang; set `SILK_CLANG` to its absolute path if it is not automatically discovered. On Linux x86_64, `export SILK_CLANG=$(scripts/install-llvm)` downloads the official LLVM 22.1.8 release and keeps only clang under `.cache/`.
 
+When upgrading Silk, update every manifest and the workflow's `SILK_VERSION`, archive SHA-256 and compiler SHA-256 together. Check both digests against the published release assets, including the compiler extracted from the archive. CI derives its toolchain cache key from `SILK_VERSION`.
+
 ```sh
 silk use
 scripts/check

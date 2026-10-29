@@ -4,14 +4,7 @@ import silk.num.i32
 import silk.num.usize
 import axes { Axes }
 import box_tree { BoxTree }
-import context {
-  Input,
-  ResolvedBox,
-  resolves,
-  effectiveDisplay,
-  blockJustification,
-  outOfFlow
-}
+import context { Input, ResolvedBox, resolves, effectiveDisplay, blockJustification, outOfFlow }
 import geometry { OptionalSize, AvailableKind, max, clamp }
 import style { Style, DimensionKind, DisplayOutside, Float, Align, WritingMode }
 import grid_style { GridTemplate }
@@ -165,6 +158,8 @@ pub effect fn prepareTemplate<'source>(
   logical: &ResolvedBox,
   limits: &ResolvedBox,
   axis: &Axes,
+  columnOverride: usize,
+  rowOverride: usize,
   scratch: &mut GridScratch,
 )
   ! OutOfMemoryError
@@ -173,7 +168,8 @@ pub effect fn prepareTemplate<'source>(
   let template = &nodes.grids[style.grid]
   let mut columnRepeat: usize = 0
   let mut rowRepeat: usize = 0
-  if template.columns.repeats.length() != 0 || template.rows.repeats.length() != 0 {
+  if columnOverride == usize.MAX
+    && (template.columns.repeats.length() != 0 || template.rows.repeats.length() != 0) {
     let preferred = preferredSizes(style, input, logical, limits, axis)
     let mut columns = RepeatSizing {
       size: max(0.0, preferred.width - logical.inset.horizontal()),
@@ -193,6 +189,10 @@ pub effect fn prepareTemplate<'source>(
     rows.maximum = max(rows.minimum, rows.maximum)
     columnRepeat = repeatCount(&template.columns, &columns)
     rowRepeat = repeatCount(&template.rows, &rows)
+  }
+  if columnOverride != usize.MAX {
+    columnRepeat = columnOverride
+    rowRepeat = rowOverride
   }
   if scratch.template.length() == 0 {
     run scratch.template.append(GridTemplateScratch.make())

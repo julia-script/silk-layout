@@ -6,6 +6,7 @@ import grid_tracks { TrackState, TrackContribution }
 import grid_lines { LineNames }
 import grid_template { ExpandedAxis }
 import grid_baselines { GridBaselines }
+import grid_fragment_scratch { GridFragmentScratch }
 
 pub struct GridAxisScratch {
   pub tracks: List<TrackState>,
@@ -101,11 +102,19 @@ pub struct GridMemos {
   index: List<usize>,
   slots: List<GridMemoSlot>,
   used: usize,
+  // A recursion-depth pool, separate from ordinary per-box sizing leases.
+  // Continuous layout neither allocates nor moves fragment-item vectors.
+  pub fragmentScratch: List<GridFragmentScratch>,
 }
 
 impl GridMemos {
   pub fn make() -> GridMemos {
-    return GridMemos { index: List<usize>.make(), slots: List<GridMemoSlot>.make(), used: 0 }
+    return GridMemos {
+      index: List<usize>.make(),
+      slots: List<GridMemoSlot>.make(),
+      used: 0,
+      fragmentScratch: List<GridFragmentScratch>.make(),
+    }
   }
 
   // A fresh cache or remapped box identity invalidates placement, not capacity.

@@ -1,0 +1,79 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.num.i32
+import geometry { Size, Point, OptionalSize, ResolvedEdges }
+import grid_placement { GridItem }
+import tree { NO_NODE }
+
+// Full item allocations are temporary sizing results, not continuation state.
+// Only the existing ResumeStore journal owns consumed content and size progress.
+pub struct FragmentItem {
+  pub size: Size,
+  pub offset: Point,
+  pub margin: ResolvedEdges,
+  pub known: OptionalSize,
+  pub minimum: Size,
+  pub nextStart: usize,
+  pub nextEnd: usize,
+}
+
+impl FragmentItem {
+  pub fn make() -> FragmentItem {
+    return FragmentItem {
+      size: Size { width: 0.0, height: 0.0 },
+      offset: Point { x: 0.0, y: 0.0 },
+      margin: ResolvedEdges.zero(),
+      known: OptionalSize.none(),
+      minimum: Size { width: 0.0, height: 0.0 },
+      nextStart: NO_NODE,
+      nextEnd: NO_NODE,
+    }
+  }
+}
+
+pub struct FragmentRow {
+  pub firstStart: usize,
+  pub firstEnd: usize,
+}
+
+impl Copy for FragmentRow {}
+
+pub struct GridFragmentScratch {
+  pub items: List<FragmentItem>,
+  pub rows: List<FragmentRow>,
+}
+
+impl GridFragmentScratch {
+  pub fn make() -> GridFragmentScratch {
+    return GridFragmentScratch { items: List<FragmentItem>.make(), rows: List<FragmentRow>.make() }
+  }
+
+  pub effect fn prepare(self: &mut Self, items: &[GridItem], rowCount: usize)
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    self.items.clear()
+    self.rows.clear()
+    run self.items.reserve(items.length)
+    let mut index: usize = 0
+    while index < items.length {
+      run self.items.append(FragmentItem.make())
+      index = index + 1
+    }
+    run self.rows.appendRepeated(FragmentRow { firstStart: NO_NODE, firstEnd: NO_NODE }, rowCount)
+
+    // Prepending in reverse preserves order-modified document order at each
+    // boundary, including the precedence of competing page-side requirements.
+    while index > 0 {
+      index = index - 1
+      let start = i32.toUsize(items[index].row.start)
+      let end = i32.toUsize(items[index].row.end) - 1
+      let entry = &mut self.items.asMutSlice()[index]
+      let rows = self.rows.asMutSlice()
+      entry.nextStart = rows[start].firstStart
+      rows[start].firstStart = index
+      entry.nextEnd = rows[end].firstEnd
+      rows[end].firstEnd = index
+    }
+  }
+}

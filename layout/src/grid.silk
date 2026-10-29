@@ -2,6 +2,7 @@ import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.num.i32
 import silk.num.usize
 import silk.collections.list { List }
+import silk.core.option { Option }
 import geometry {
   Layout,
   Size,
@@ -20,7 +21,10 @@ import box_tree { BoxTree }
 import layout_pass { LayoutPass }
 import engine { layoutNode, layoutNodeInPlace, probeNode, shapedBox }
 import text { TextMeasure, TextError }
-import fragmentation { FragmentationError }
+import fragmentation { FragmentationError, FlowCursor, BoundaryProbe, ResumeCheckpoint }
+import fragment_box as FragmentBox
+import grid_fragment as Fragments
+import grid_fragment { FragmentGrid }
 import axes { Axes }
 import grid_placement { GridItem, collectItems }
 import grid_style { GridTrack, GridBreadthKind }
@@ -511,6 +515,81 @@ fn applyMinimum(request: &mut Input, horizontal: bool, minimum: f32) with Intrin
   }
 }
 
+// Continuous and fragmented placement use the same area and automatic-minimum
+// constraints. A fragment changes the fitting budget, never the percentage basis.
+pub effect fn requestItem<'pass, 'source, M: Measure + TextMeasure>(
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  item: &GridItem,
+  base: &Input,
+  parent: &Style,
+  axis: &Axes,
+  columns: &[TrackState],
+  rows: &[TrackState],
+  columnGap: f32,
+  rowGap: f32,
+  area: OptionalSize,
+) -> Input
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator with Intrinsic.inlineAlways() {
+  let style = nodes.style(item.id)
+  let mut request = itemInput(&output, item.id, base, style, parent, axis, area)
+  let columnPolicy = trackPolicy(
+    columns,
+    i32.toUsize(item.column.start),
+    i32.toUsize(item.column.end),
+    columnGap,
+    AvailableKind.Definite,
+  )
+  let rowPolicy = trackPolicy(
+    rows,
+    i32.toUsize(item.row.start),
+    i32.toUsize(item.row.end),
+    rowGap,
+    AvailableKind.Definite,
+  )
+  let mut inlineMinimum = style.minWidth
+  let mut blockMinimum = style.minHeight
+  if axis.vertical {
+    inlineMinimum = style.minHeight
+    blockMinimum = style.minWidth
+  }
+  if columnPolicy.automatic && inlineMinimum.kind == DimensionKind.Auto {
+    let measured = run measureContribution(
+      nodes,
+      &mut output,
+      &mut measurer,
+      item.id,
+      &request,
+      !axis.vertical,
+      true,
+      columnPolicy.cap,
+      rowPolicy.cap,
+      false,
+      false,
+    )
+    applyMinimum(&mut request, !axis.vertical, measured.usedMinimum)
+  }
+  if rowPolicy.automatic && blockMinimum.kind == DimensionKind.Auto {
+    let measured = run measureContribution(
+      nodes,
+      &mut output,
+      &mut measurer,
+      item.id,
+      &request,
+      axis.vertical,
+      true,
+      rowPolicy.cap,
+      columnPolicy.cap,
+      false,
+      false,
+    )
+    applyMinimum(&mut request, axis.vertical, measured.usedMinimum)
+  }
+  return request
+}
+
 pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   nodes: &BoxTree<'source>,
   output: &mut LayoutPass<'pass, 'source>,
@@ -521,6 +600,11 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
 ) -> Layout
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
+  let fragmented = input.performLayout && input.fragmentation.active
+  let mut allocationCheckpoint = Option<ResumeCheckpoint>.None
+  if fragmented {
+    allocationCheckpoint = Option<ResumeCheckpoint>.Some { value: output.resumes.checkpoint() }
+  }
   let style = nodes.style(id)
   let template = &nodes.grids[style.grid]
   let axis = Axes.make(style.writingMode)
@@ -542,7 +626,45 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   let mut lease = run output.cache.gridMemos.take(id, nodes.boxes.length())
   let prepared = needsPreparation(template)
   if prepared {
-    run prepareTemplate(nodes, id, lease.fresh, input, &logical, &limits, &axis, &mut lease.value)
+    let mut columnOverride = usize.MAX
+    let mut rowOverride = usize.MAX
+    if fragmented {
+      let state = output.resumes.get(id)
+      if state.started {
+        match &state.cursor {
+          FlowCursor.Grid {
+            row,
+            progress,
+            gap,
+            columnRepeat,
+            rowRepeat,
+            consumed,
+            boundaryHandled
+          } => {
+            drop row
+            drop progress
+            drop gap
+            drop consumed
+            drop boundaryHandled
+            columnOverride = columnRepeat
+            rowOverride = rowRepeat
+          }
+          _ => {}
+        }
+      }
+    }
+    run prepareTemplate(
+      nodes,
+      id,
+      lease.fresh,
+      input,
+      &logical,
+      &limits,
+      &axis,
+      columnOverride,
+      rowOverride,
+      &mut lease.value,
+    )
   } else if lease.fresh {
     let emptyNames = LineNames.make()
     lease.value.bounds = run collectItems(
@@ -808,9 +930,48 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   }
   let sharing = baselines.any()
   let mut passes: usize = 1
-  if sharing {
-    Baselines.resetFinal(&mut baselines)
-    passes = 2
+  match move allocationCheckpoint {
+    Option<ResumeCheckpoint>.Some { value } => {
+      let mut columnRepeat: usize = 0
+      let mut rowRepeat: usize = 0
+      if prepared {
+        columnRepeat = lease.value.template.asSlice()[0].columnRepeat
+        rowRepeat = lease.value.template.asSlice()[0].rowRepeat
+      }
+      let grid = FragmentGrid {
+        items: items,
+        columns: columns,
+        rows: rows,
+        axis: axis,
+        inlineSize: columnSizing.size,
+        inlineExtent: axis.size(result.size).width,
+        columnGap: columnSizing.usedGap,
+        rowGap: rowSizing.usedGap,
+        blockDefinite: rowSizing.definite,
+        columnRepeat: columnRepeat,
+        rowRepeat: rowRepeat,
+      }
+      run Fragments.layoutGridFragment(
+        nodes,
+        &mut output,
+        &mut measurer,
+        id,
+        input,
+        box,
+        &base,
+        &grid,
+        &mut baselines,
+        &mut result,
+        value,
+      )
+      passes = 0
+    }
+    Option<ResumeCheckpoint>.None => {
+      if sharing {
+        Baselines.resetFinal(&mut baselines)
+        passes = 2
+      }
+    }
   }
   let mut pass: usize = 0
   while pass < passes {
@@ -825,61 +986,20 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       let areaHeight = spanSize(rows, row, rowEnd)
       let itemStyle = nodes.style(item.id)
       if pass == 0 {
-        let mut request = itemInput(
-          &output,
-          item.id,
+        let mut request = run requestItem(
+          nodes,
+          &mut output,
+          &mut measurer,
+          item,
           &base,
-          itemStyle,
           style,
           &axis,
+          columns,
+          rows,
+          columnSizing.usedGap,
+          rowSizing.usedGap,
           OptionalSize.definite(areaWidth, areaHeight),
         )
-        let columnPolicy = trackPolicy(
-          columns,
-          column,
-          columnEnd,
-          columnSizing.usedGap,
-          AvailableKind.Definite,
-        )
-        let rowPolicy = trackPolicy(rows, row, rowEnd, rowSizing.usedGap, AvailableKind.Definite)
-        let mut inlineMinimum = itemStyle.minWidth
-        let mut blockMinimum = itemStyle.minHeight
-        if axis.vertical {
-          inlineMinimum = itemStyle.minHeight
-          blockMinimum = itemStyle.minWidth
-        }
-        if columnPolicy.automatic && inlineMinimum.kind == DimensionKind.Auto {
-          let measured = run measureContribution(
-            nodes,
-            &mut output,
-            &mut measurer,
-            item.id,
-            &request,
-            !axis.vertical,
-            true,
-            columnPolicy.cap,
-            rowPolicy.cap,
-            false,
-            false,
-          )
-          applyMinimum(&mut request, !axis.vertical, measured.usedMinimum)
-        }
-        if rowPolicy.automatic && blockMinimum.kind == DimensionKind.Auto {
-          let measured = run measureContribution(
-            nodes,
-            &mut output,
-            &mut measurer,
-            item.id,
-            &request,
-            axis.vertical,
-            true,
-            rowPolicy.cap,
-            columnPolicy.cap,
-            false,
-            false,
-          )
-          applyMinimum(&mut request, axis.vertical, measured.usedMinimum)
-        }
         request.performLayout = input.performLayout
         request.baselines = input.baselines || Baselines.active(&baselines, index, true)
           || Baselines.active(&baselines, index, false)
@@ -946,7 +1066,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     }
     pass = pass + 1
   }
-  if input.baselines {
+  if input.baselines && !fragmented {
     Baselines.containerBaselines(
       nodes,
       &output,
@@ -955,7 +1075,30 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       style,
       &baselines,
       &mut result,
+      false,
     )
+  }
+  if input.performLayout && input.fragmentation.boundaryProbe == BoundaryProbe.After
+    && nodes.node(id).dynamicAfter {
+    let mut state = output.resumes.get(id)
+    state.after = FragmentBox.boundary(
+      nodes,
+      id,
+      false,
+      input.fragmentation.kind,
+      input.fragmentation.rectoOnRight,
+    )
+    state.after.merge(
+      Fragments.outerBoundary(
+        nodes,
+        &output,
+        items,
+        rows.length,
+        false,
+        input.fragmentation.rectoOnRight,
+      ),
+    )
+    run output.resumes.set(id, state)
   }
   if input.performLayout && style.position != Position.Static {
     let emptyNames = LineNames.make()

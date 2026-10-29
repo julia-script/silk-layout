@@ -1,0 +1,23 @@
+{
+  "name": "grid-fragment-absolute-area-shells",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "absolute-positioning", "percentages"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#abspos-items", "https://drafts.csswg.org/css-grid-2/#pagination"],
+  "derivation": "Pinned css-grid-2 section 10.1 makes the selected area the absolute containing block, including percentage sizing. Columns37/53 with gutter11 put column2 at x48 with width53. An absolute height137 consumes 61+61+15 on pages at y0/83/166, including two positioning-only shells after normal Grid ends at23. Section13 permits fragmentation and prescribes consumed space; its exact layout is not defined, and section13.1 is nonnormative. These are original hand-derived coordinates for this engine's continuation policy.",
+  "input": {
+    "viewport": {"width": 101, "height": 200},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 101, "height": 61}], "repeatStep": {"x": 0, "y": 83}},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "position": "relative", "gridTemplateColumns": [37, 53], "gridTemplateRows": [23], "columnGap": 11}},
+      {"parent": 0, "style": {"height": 23}},
+      {"parent": 0, "style": {"position": "relative", "height": 23}},
+      {"parent": 0, "style": {"position": "absolute", "inset": {"left": 0, "top": 0}, "width": {"percent": 1}, "height": 137, "gridColumnStart": 2, "gridColumnEnd": 3}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 101, "height": 23}]},
+    {"rects": [{"x": 0, "y": 0, "width": 37, "height": 23}]},
+    {"rects": [{"x": 48, "y": 0, "width": 53, "height": 23}]},
+    {"rects": [{"x": 48, "y": 0, "width": 53, "height": 61}, {"x": 48, "y": 83, "width": 53, "height": 61}, {"x": 48, "y": 166, "width": 53, "height": 15}]}
+  ]}
+}

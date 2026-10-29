@@ -1,5 +1,5 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
 import grid_absolute { GridGeometry }
 import grid_lines { LineNames }
 import grid_tracks { TrackState }

@@ -13,6 +13,8 @@ silk build --package silk_layout_cli
 python3 scripts/fetch-specs.py
 ```
 
+For native tests alone, run `silk test --root src/tests.silk` from `layout/`. The explicit test root is required: package-only testing can succeed with zero discovered tests, and workspace checking does not load modules imported only by the test root.
+
 Chrome source-text comparisons additionally need the MIT-licensed FontTools build tool:
 
 ```sh

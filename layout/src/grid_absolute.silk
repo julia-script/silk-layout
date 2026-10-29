@@ -1,7 +1,7 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.ownership { Copy }
-import silk.i32
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.num.i32
 import axes { Axes }
 import geometry { Rect }
 import grid_lines { LineNames, resolveAbsoluteSpan }

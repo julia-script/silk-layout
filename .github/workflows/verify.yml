@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      SILK_VERSION: 0.1.0-dev.26+430d979004dc
+      SILK_VERSION: 0.1.0-dev.27+323ceb59e7ee
       SILK_HOME: ${{ github.workspace }}/.cache/silk
     steps:
       - uses: actions/checkout@v4

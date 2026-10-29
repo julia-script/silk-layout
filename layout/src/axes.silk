@@ -1,4 +1,4 @@
-import silk.ownership { Copy }
+import silk.core.ownership { Copy }
 import geometry { Size, OptionalSize, ResolvedEdges, Point }
 import style { Style, DimensionKind, WritingMode }
 import context { ResolvedBox }

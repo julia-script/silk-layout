@@ -1,6 +1,6 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.usize
-import silk.effect { Effect }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.num.usize
+import silk.core.effect { Effect }
 import geometry { Layout, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, Measure, MeasureRequest, NaturalDimensions, ScrollbarRequest, BaselineSet, MarginStrut, max, min, clamp }
 import style { Style, Display, Dimension, Edges, DimensionKind, DisplayOutside, DisplayInside, Float, Position, WritingMode, Direction, FlexDirection, FlexWrap, Align, Overflow, ScrollbarWidth, ScrollbarGutter, BoxDecorationBreak, BaselineSource }
 import tree { Tree, LayoutTree, LayoutStats, Measurement, NO_NODE }
@@ -18,7 +18,7 @@ import incremental as Incremental
 import replaced { layoutReplaced, preferredRatio, borderRatio }
 import box_tree as Boxes
 import box_tree { BoxTree, BoxKind, BoxNode }
-import silk.list { List }
+import silk.collections.list { List }
 import fragments { FragmentKind, FragmentArena, Fragment }
 import inline_layout { layoutInline }
 import text { TextMeasure, TextError }

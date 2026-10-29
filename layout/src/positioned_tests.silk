@@ -1,10 +1,10 @@
 import fragmentation { FragmentationError }
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.usize
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.num.usize
 import text { TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun }
-import silk.effect { Effect }
-import silk.testing { Testing, AssertionError }
+import silk.core.effect { Effect }
+import silk.testing.testing { Testing, AssertionError }
 import style { Style, Dimension, Edges, Display, DisplayOutside, DisplayInside, Position, Direction, WritingMode, FlexDirection, FlexWrap, Align, OverflowAlignment }
 import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize, abs }
 import tree { Tree, LayoutTree, InvalidNode, NO_NODE }

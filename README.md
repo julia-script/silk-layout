@@ -4,10 +4,10 @@ MIT-licensed block and flexbox layout in safe Silk, with specification-derived a
 
 ## Build and check
 
-The workspace pins published Silk `0.1.0-dev.26+430d979004dc`. Use an LLVM 22 clang; set `SILK_CLANG` to its absolute path if it is not automatically discovered. On Linux x86_64, `export SILK_CLANG=$(scripts/install-llvm)` downloads the official LLVM 22.1.8 release and keeps only clang under `.cache/`.
+The workspace pins published Silk `0.1.0-dev.27+323ceb59e7ee`. Use an LLVM 22 clang; set `SILK_CLANG` to its absolute path if it is not automatically discovered. On Linux x86_64, `export SILK_CLANG=$(scripts/install-llvm)` downloads the official LLVM 22.1.8 release and keeps only clang under `.cache/`.
 
 ```sh
-silk toolchain install 0.1.0-dev.26+430d979004dc
+silk toolchain install 0.1.0-dev.27+323ceb59e7ee
 scripts/check
 silk build --package silk_layout_cli
 python3 scripts/fetch-specs.py

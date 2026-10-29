@@ -1,5 +1,5 @@
-import silk.testing { Testing, AssertionError }
-import silk.usize
+import silk.testing.testing { Testing, AssertionError }
+import silk.num.usize
 import axes { Axes }
 import geometry { Size, ResolvedEdges }
 import style { Style, Align, OverflowAlignment, Dimension, Direction, WritingMode }

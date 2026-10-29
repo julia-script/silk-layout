@@ -1,10 +1,10 @@
 import layout.lib { Style, Dimension, DimensionKind, Edges, Display, DisplayOutside, DisplayInside, BoxSizing, Direction, UnicodeBidi, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, Overflow, ScrollbarWidth, ScrollbarGutter, Position, Float, Clear, Visibility }
 import layout.lib { LineHeight, VerticalAlign, VerticalAlignKind, BaselineSource, TextAlign, TextJustify, TextIndent, TextWrap, WhiteSpaceCollapse, TabSize, BoxDecorationBreak }
 import layout.lib { BreakBetween, BreakInside, MarginBreak }
-import silk.f64
+import silk.num.f64
 import silk.option { Option }
-import silk.i32
-import silk.json_value { Value }
+import silk.num.i32
+import silk.json.value { Value }
 import protocol as P
 import protocol { ProtocolError }
 

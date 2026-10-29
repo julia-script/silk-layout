@@ -1,7 +1,7 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.i32
-import silk.usize
-import silk.list { List }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.num.i32
+import silk.num.usize
+import silk.collections.list { List }
 import geometry {
   Layout,
   Size,

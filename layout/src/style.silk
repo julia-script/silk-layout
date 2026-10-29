@@ -1,4 +1,4 @@
-import silk.ownership { Copy }
+import silk.core.ownership { Copy }
 
 // Values have already passed CSS parsing and cascade. Percentages are fractions.
 // Keeping a percentage coefficient distinguishes 0% from 0px in indefinite axes.

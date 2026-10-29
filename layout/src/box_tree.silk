@@ -1,8 +1,8 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.ownership { Copy }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
 import silk.option { Option }
-import silk.string { String }
+import silk.text.string { String }
 import geometry { Point }
 import style { Style, Display, DisplayOutside, DisplayInside, WritingMode, Direction, Align, Float, Position, BreakBetween, Visibility, DimensionKind, Overflow }
 import tree { Node, Measurement, NO_NODE }

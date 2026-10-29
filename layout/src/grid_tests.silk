@@ -1,7 +1,7 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.string { String }
-import silk.testing { Testing, AssertionError }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.text.string { String }
+import silk.testing.testing { Testing, AssertionError }
 import style { Style, Display, DisplayOutside, DisplayInside, Direction, WritingMode, Float }
 import tree { Tree, InvalidNode, NO_NODE }
 import box_tree as Boxes

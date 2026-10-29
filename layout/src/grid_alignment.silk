@@ -1,4 +1,4 @@
-import silk.usize
+import silk.num.usize
 import axes { Axes }
 import geometry { Size, ResolvedEdges }
 import style { Style, Align, OverflowAlignment, DimensionKind, Direction }

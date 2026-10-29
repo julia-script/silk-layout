@@ -1,6 +1,6 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.ownership { Copy }
-import silk.list { List }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.ownership { Copy }
+import silk.collections.list { List }
 import inline_text { NormalizedText }
 import inline_visual { Plan }
 import text { TextToken, TextAnalysis, TextBreak, TextCursor }

@@ -1,6 +1,6 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.testing { Testing, AssertionError }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.testing.testing { Testing, AssertionError }
 import style { Style, Display, DisplayOutside, DisplayInside, Dimension, BoxSizing, Edges }
 import tree { Tree, InvalidNode }
 import grid_style {

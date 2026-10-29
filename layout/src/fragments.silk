@@ -1,8 +1,8 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.slice { Slice }
-import silk.ownership { Copy }
-import silk.pointer { Pointer }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.collections.slice { Slice }
+import silk.core.ownership { Copy }
+import silk.mem.pointer { Pointer }
 import geometry { Point, Size, Rect, ResolvedEdges, BaselineSet, sameSize, sameRect, sameEdges, sameBaselines, sameOverflow }
 import tree { NO_NODE }
 

@@ -1,4 +1,4 @@
-import silk.ownership { Copy }
+import silk.core.ownership { Copy }
 import style { BreakBetween, BreakInside }
 
 // CSS Break 3/4 §§3–4. Callers supply applicable break points and fragmentation

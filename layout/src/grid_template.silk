@@ -1,8 +1,8 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.f64
-import silk.list { List }
-import silk.ownership { Copy }
-import silk.usize
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.num.f64
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.num.usize
 import context { UNBOUNDED, resolve }
 import geometry { max }
 import grid_style {

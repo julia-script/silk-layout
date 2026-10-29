@@ -17,11 +17,11 @@ import layout.lib {
   GridAutoFlow,
   MAX_GRID_TRACKS
 }
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.json_value { Value }
-import silk.i32
-import silk.f64
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.json.value { Value }
+import silk.num.i32
+import silk.num.f64
 import protocol as P
 import protocol { ProtocolError }
 

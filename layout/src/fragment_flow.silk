@@ -1,6 +1,6 @@
-import silk.allocator { Allocator, OutOfMemoryError }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.option { Option }
-import silk.list { List }
+import silk.collections.list { List }
 import geometry { Measure, OptionalSize, Rect }
 import text { TextMeasure, TextError }
 import tree { Tree, LayoutTree, NO_NODE }

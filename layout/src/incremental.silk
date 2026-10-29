@@ -1,5 +1,5 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
 import context { outOfFlow }
 import style { Float, Dimension, Edges, Position, WritingMode }
 import tree { Tree, NO_NODE }

@@ -1,27 +1,27 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.list { List }
-import silk.bytes { Bytes }
-import silk.slice { Slice }
-import silk.string { String }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.collections.list { List }
+import silk.collections.bytes { Bytes }
+import silk.collections.slice { Slice }
+import silk.text.string { String }
 import silk.option { Option }
-import silk.json_value { Json, Value }
-import silk.json_scanner { JsonError }
-import silk.json_codec { Serialize }
-import silk.json_output { JsonOptions }
-import silk.os_standard_input { OsStandardInput }
-import silk.standard_input { StandardInput, StreamReadError }
-import silk.os_writer { StdoutWriter, StderrWriter }
-import silk.monotonic_clock { MonotonicClock }
-import silk.os_monotonic_clock { OsMonotonicClock }
-import silk.system_clock { Instant, SystemClock }
-import silk.writer { Writer, WriterError }
-import silk.i32
+import silk.json.value { Json, Value }
+import silk.json.scanner { JsonError }
+import silk.json.codec { Serialize }
+import silk.json.output { JsonOptions }
+import silk.io.standard_input_native { OsStandardInput }
+import silk.io.standard_input { StandardInput, StreamReadError }
+import silk.io.writer_native { StdoutWriter, StderrWriter }
+import silk.system.monotonic_clock { MonotonicClock }
+import silk.system.monotonic_clock_native { OsMonotonicClock }
+import silk.system.system_clock { Instant, SystemClock }
+import silk.io.writer { Writer, WriterError }
+import silk.num.i32
 import layout.lib as Engine
 import layout.lib { OptionalSize, NaturalDimensions, Point, ScrollbarMetrics, Tree, NodeId, LayoutTree, InvalidNode }
 import layout.lib { Layout, Rect, Size, ResolvedEdges, BoxKind, FragmentKind, FontMetrics, Measurement, BaselineSet, WritingMode, TextOrientation }
 import layout.lib { TextError, TextFragmentKind }
-import silk.usize
+import silk.num.usize
 import protocol as P
 import protocol { ProtocolError }
 import styles as Styles

@@ -1,4 +1,4 @@
-import silk.ownership { Copy }
+import silk.core.ownership { Copy }
 import geometry { OptionalSize, AvailableSpace, AvailableKind, Size, Point, ResolvedEdges, ScrollbarMetrics, max, clamp }
 import style { Dimension, DimensionKind, Edges, Style, BoxSizing, Position, Display, DisplayInside, DisplayOutside, Overflow, ScrollbarWidth, ScrollbarGutter, Float, WritingMode, TextOrientation, Direction, Align, OverflowAlignment }
 import fragmentation { FragmentInput }

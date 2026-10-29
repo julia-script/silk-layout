@@ -1,4 +1,4 @@
-import silk.ownership { Copy }
+import silk.core.ownership { Copy }
 import style { WritingMode, TextOrientation, Direction, ScrollbarWidth, ScrollbarGutter, MarginBreak }
 import bfc { BfcState }
 

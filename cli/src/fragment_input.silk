@@ -1,8 +1,8 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.i32
-import silk.json_value { Value }
-import silk.list { List }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.num.i32
+import silk.json.value { Value }
+import silk.collections.list { List }
 import silk.option { Option }
 import layout.lib { Fragmentainers, FragmentAncestor, FragmentationError, FragmentainerKind, Rect, Point, WritingMode, Direction }
 import protocol as P

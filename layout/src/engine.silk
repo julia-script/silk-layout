@@ -317,8 +317,10 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
   let padding = Rect { x: box.border.left + box.gutter.left, y: box.border.top + box.gutter.top, width: max(0.0, result.size.width - box.border.horizontal() - box.gutter.horizontal()), height: max(0.0, result.size.height - box.border.vertical() - box.gutter.vertical()) }
   let mut flow = Rect { x: box.inset.left, y: box.inset.top, width: result.contentSize.width, height: result.contentSize.height }
   let measured = nodes.node(id).measurement == Measurement.Content || nodes.node(id).kind == BoxKind.InlineFormatting
+  let grid = nodes.node(id).kind == BoxKind.Grid
   let external = result.scrollableOverflow
-  if measured && external.width > 0.0 && external.height > 0.0 { flow = flow.unionWith(external) }
+  if (measured && external.width > 0.0 && external.height > 0.0)
+    || (grid && (external.width > 0.0 || external.height > 0.0)) { flow = flow.unionWith(external) }
   let margins = FlowMargins.of(nodes.style(id), &result)
   let mut child = nodes.node(id).firstChild
   while child != NO_NODE {
@@ -336,7 +338,18 @@ fn overflowGeometry(nodes: &BoxTree, output: &LayoutPass, id: usize, box: &Resol
   }
   let limits = reachableLimits(style, padding, flow, false)
   let mut overflow = padding
-  if measured {
+  if grid && (external.width > 0.0 || external.height > 0.0) {
+    // Grid §5.3 includes tracks even when the other axis has no tracks.
+    // Unlike border-box overflow, a zero-extent grid axis is not discarded.
+    let tracks = padFlow(external, box.padding)
+    let left = max(tracks.x, limits.left)
+    let right = min(tracks.x + tracks.width, limits.right)
+    let top = max(tracks.y, limits.top)
+    let bottom = min(tracks.y + tracks.height, limits.bottom)
+    if right >= left && bottom >= top {
+      overflow = overflow.unionWith(Rect { x: left, y: top, width: right - left, height: bottom - top })
+    }
+  } else if measured {
     overflow = addOverflow(overflow, external, limits)
     overflow = addFlow(overflow, external, box.padding, limits)
   }

@@ -333,7 +333,7 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
   let mut input = Input.make(viewport)
   if positioned && parent != NO_NODE {
     let mut rect = containingRect(nodes, output, parent, viewport)
-    if GridPositioned.isContainer(nodes, parent) { rect = GridPositioned.containingRect(nodes, output, parent, id, rect) }
+    if GridPositioned.isContainer(nodes, parent) { rect = GridPositioned.containingRect(nodes, output, parent, id, rect, output.fragments.first(parent)) }
     input.parent = OptionalSize.definite(rect.width, rect.height)
   } else if parent != NO_NODE {
     let rect = output.boxes[parent].contentRect()
@@ -633,7 +633,11 @@ effect fn absolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'so
     }
   }
   let originalRect = cbRect
-  if gridContaining { cbRect = GridPositioned.containingRect(nodes, &output, cb, id, cbRect) }
+  if gridContaining {
+    let mut fragment = output.fragments.first(cb)
+    if attached { fragment = containingExisting(nodes, &output, cb, output.frame) }
+    cbRect = GridPositioned.containingRect(nodes, &output, cb, id, cbRect, fragment)
+  }
   let mut containing = viewport
   if cb != NO_NODE || fragmented { containing = OptionalSize.definite(cbRect.width, cbRect.height) }
   let origin = Point { x: cbRect.x, y: cbRect.y }
@@ -1037,10 +1041,31 @@ effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nod
   return result
 }
 
+effect fn prepareGridGeometry<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, fragment: usize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if nodes.style(id).position == Position.Static || !GridPositioned.isContainer(nodes, id) || output.cache.gridGeometry.findFragment(id, fragment) != NO_NODE { return }
+  let metadata = match output.fragmentFullBox(fragment) {
+    Option<FullBoxGeometry>.Some { value } => value
+    Option<FullBoxGeometry>.None => { fail FragmentationError { frame: output.frame, message: "Grid continuation has no full containing-block geometry" } }
+  }
+  let firstFrame = run output.requiredFrame(0)
+  let mut input = usedInput(nodes, &output, id, OptionalSize.definite(firstFrame.rect.width, firstFrame.rect.height))
+  input.parent = metadata.parent
+  input.known = metadata.known
+  input.minimum = metadata.minimum
+  let box = resolveBox(nodes.style(id), &input)
+  input.known = OptionalSize.definite(metadata.content.width + box.inset.horizontal(), metadata.content.height + box.inset.vertical())
+  input.indefiniteWidth = !metadata.content.widthDefinite
+  input.indefiniteHeight = !metadata.content.heightDefinite
+  run GridPositioned.captureShell(nodes, &mut output, &mut measurer, id, fragment, &input)
+}
+
 effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, frame: usize) -> usize ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   if id == NO_NODE || id == 0 { return run output.ensureFrameRoot(frame) }
   let existing = containingExisting(nodes, &output, id, frame)
-  if existing != NO_NODE { return existing }
+  if existing != NO_NODE {
+    run prepareGridGeometry(nodes, &mut output, &mut measurer, id, existing)
+    return existing
+  }
   let first = output.fragments.first(id)
   if first == NO_NODE {
     fail FragmentationError { frame: frame, message: "Positioned descendant has no semantic containing-block geometry" }
@@ -1123,7 +1148,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     point.y = point.y + parentContent.y
     if allocatedItem { point = allocation.location }
     if outOfFlow(nodes.style(id)) {
-      let containing = run frameContainingRect(nodes, &output, parentBox, parent, frame)
+      let containing = run frameContainingRect(nodes, &output, id, parentBox, parent, frame)
       let desired = flowPosition(&output, first)
       let placed = placedInline(nodes, &output, id, parentBox, &input, containing, desired, size)
       point = Point { x: placed.x - parentOrigin.x, y: placed.y - parentOrigin.y }
@@ -1188,10 +1213,11 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     }
     Option<FullBoxGeometry>.None => {}
   }
+  run prepareGridGeometry(nodes, &mut output, &mut measurer, id, emitted.index)
   return emitted.index
 }
 
-effect fn frameContainingRect(nodes: &BoxTree, output: &LayoutPass, cb: usize, parent: usize, frame: usize) -> Rect ! FragmentationError {
+effect fn frameContainingRect(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, parent: usize, frame: usize) -> Rect ! FragmentationError {
   if cb == NO_NODE {
     match output.frames.page(frame) {
       Option<FragmentAncestor>.Some { value } => { return value.rect }
@@ -1205,12 +1231,14 @@ effect fn frameContainingRect(nodes: &BoxTree, output: &LayoutPass, cb: usize, p
     let shift = flowTranslation(output, frame)
     return rect.translated(Point { x: -shift.x, y: -shift.y })
   }
-  return output.fragments.values.get(parent).paddingRect.translated(fragmentPosition(output, parent, false))
+  let rect = output.fragments.values.get(parent).paddingRect.translated(fragmentPosition(output, parent, false))
+  if GridPositioned.isContainer(nodes, cb) { return GridPositioned.containingRect(nodes, output, cb, id, rect, parent) }
+  return rect
 }
 
 effect fn absoluteFrameInput(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, parent: usize, frame: usize, offset: f32, relaxation: BreakRelaxation, original: &Input) -> Input ! FragmentationError {
   let geometry = run output.requiredFrame(frame)
-  let containing = run frameContainingRect(nodes, output, cb, parent, frame)
+  let containing = run frameContainingRect(nodes, output, id, cb, parent, frame)
   let style = nodes.style(id)
   let mut input = original.*
   input.fragmentation = FragmentInput.continuous()
@@ -1524,7 +1552,7 @@ effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     let geometry = run output.requiredFrame(frame)
     let shift = flowTranslation(&output, frame)
     let mut parent = containingExisting(nodes, &output, cb, frame)
-    if parent == NO_NODE && !attached { parent = run containingInstance(nodes, &mut output, &mut measurer, cb, frame) }
+    if !attached { parent = run containingInstance(nodes, &mut output, &mut measurer, cb, frame) }
     output.fragmentParent = parent
     let mut point = Point { x: location.x - shift.x, y: location.y - shift.y }
     let mut input = original.*
@@ -1585,7 +1613,7 @@ effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     let fragment = output.publication(id)
     if fragment != NO_NODE {
       if !unfragmented {
-        let containing = run frameContainingRect(nodes, &output, cb, parent, frame)
+        let containing = run frameContainingRect(nodes, &output, id, cb, parent, frame)
         let inlinePoint = placedInline(nodes, &output, id, cb, &input, containing, location, result.size)
         if output.frames.writingMode == WritingMode.HorizontalTb { point.x = inlinePoint.x }
         else { point.y = inlinePoint.y }

@@ -278,6 +278,7 @@ pub union FlowCursor {
   Grid {
     pub row: usize, pub progress: FractionalProgress, pub gap: FractionalProgress,
     pub columnRepeat: usize, pub rowRepeat: usize,
+    pub consumed: f32, pub boundaryHandled: bool,
   },
 }
 impl Copy for FlowCursor {}

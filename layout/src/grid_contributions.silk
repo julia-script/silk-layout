@@ -363,33 +363,34 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
     || (needMaxContent && !preferredDefinite && sizeDimension.kind != DimensionKind.MinContent)
   let mut smallest = inset
   let mut largest = inset
+  let mut minWasMax = false
   if minProbeNeeded {
-    let measured = run probe(
-      nodes,
-      &mut output,
-      &mut measurer,
-      id,
-      input,
-      horizontal,
-      minConstraint(style, horizontal),
-    )
+    let constraint = minConstraint(style, horizontal)
+    let measured = run probe(nodes, &mut output, &mut measurer, id, input, horizontal, constraint)
     smallest = max(inset, axisSize(measured.size, horizontal))
     ratio = measured.preferredRatio
     borderRatio = measured.ratioBorderBox
+    minWasMax = constraint.kind == AvailableKind.MaxContent
   }
   if maxProbeNeeded {
-    let measured = run probe(
-      nodes,
-      &mut output,
-      &mut measurer,
-      id,
-      input,
-      horizontal,
-      AvailableSpace.maxContent(),
-    )
-    largest = max(inset, axisSize(measured.size, horizontal))
-    ratio = measured.preferredRatio
-    borderRatio = measured.ratioBorderBox
+    // Ordinary block-axis min-content already used this exact max-content
+    // request. Reuse its scalar result instead of rebuilding and looking up a key.
+    if minWasMax {
+      largest = smallest
+    } else {
+      let measured = run probe(
+        nodes,
+        &mut output,
+        &mut measurer,
+        id,
+        input,
+        horizontal,
+        AvailableSpace.maxContent(),
+      )
+      largest = max(inset, axisSize(measured.size, horizontal))
+      ratio = measured.preferredRatio
+      borderRatio = measured.ratioBorderBox
+    }
   }
   let mut available = input.availableHeight
   if horizontal {

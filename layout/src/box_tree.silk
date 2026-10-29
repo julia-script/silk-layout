@@ -115,8 +115,7 @@ impl BoxTree {
         overflow = x }
       let scrolling = x == Overflow.Auto || x == Overflow.Scroll || y == Overflow.Auto || y == Overflow.Scroll
       let clipped = overflow == Overflow.Hidden && dimension.kind != DimensionKind.Auto && maximum.kind == DimensionKind.None
-      // Grid fragmentation is monolithic until Grid §13 is implemented.
-      let monolithic = node.kind == BoxKind.Grid || style.replaced || node.measurement != Measurement.None || inlineLevel || orthogonal || scrolling || clipped
+      let monolithic = style.replaced || node.measurement != Measurement.None || inlineLevel || orthogonal || scrolling || clipped
       let applicable = !outOfFlow(style) && (node.kind == BoxKind.Block || node.kind == BoxKind.Flex || node.kind == BoxKind.Grid)
       let mut before = applicable && style.breakBefore != BreakBetween.Auto
       let mut dynamicBefore = false
@@ -129,9 +128,9 @@ impl BoxTree {
         while child != NO_NODE {
           let item = self.node(child)
           let childStyle = self.style(child)
-          let eligible = !outOfFlow(childStyle) && (node.kind == BoxKind.Flex && childStyle.visibility != Visibility.Collapse || node.kind == BoxKind.Block && childStyle.float == Float.None)
+          let eligible = !outOfFlow(childStyle) && (node.kind == BoxKind.Grid || node.kind == BoxKind.Flex && childStyle.visibility != Visibility.Collapse || node.kind == BoxKind.Block && childStyle.float == Float.None)
           if eligible {
-            if node.kind == BoxKind.Flex {
+            if node.kind == BoxKind.Flex || node.kind == BoxKind.Grid {
               before = before || item.beforeControl
               dynamicBefore = dynamicBefore || item.beforeControl
               after = after || item.afterControl

@@ -541,6 +541,7 @@ async function observeDOM(input, fontAssets, columns) {
   const sides = ['top', 'right', 'bottom', 'left'];
   const defaults = { display: 'block', boxSizing: 'content-box', direction: 'ltr', unicodeBidi: 'normal', writingMode: 'horizontal-tb', textOrientation: 'mixed',
     flexDirection: 'row', flexWrap: 'nowrap', flexGrow: 0, flexShrink: 1, flexBasis: 'auto', order: 0,
+    rowGap: 'normal', columnGap: 'normal',
     gridTemplateRows: 'none', gridTemplateColumns: 'none', gridTemplateAreas: 'none',
     gridAutoRows: 'auto', gridAutoColumns: 'auto', gridAutoFlow: 'row',
     gridRowStart: 'auto', gridRowEnd: 'auto', gridColumnStart: 'auto', gridColumnEnd: 'auto',
@@ -566,7 +567,15 @@ async function observeDOM(input, fontAssets, columns) {
     }
     return dimension(value);
   };
+  const subgridGroup = group => `[${group.names.map(name => CSS.escape(name)).join(' ')}]`;
+  const subgridNames = groups => groups.map(group => Object.hasOwn(group, 'repeat')
+    ? `repeat(${group.repeat.count}, ${group.repeat.lines.map(subgridGroup).join(' ')})`
+    : subgridGroup(group)).join(' ');
   const gridTracks = values => {
+    if (values && typeof values === 'object' && Object.hasOwn(values, 'subgrid')) {
+      const names = subgridNames(values.subgrid);
+      return names ? `subgrid ${names}` : 'subgrid';
+    }
     if (!Array.isArray(values)) return gridTrack(values);
     const parts = [];
     let names = [];

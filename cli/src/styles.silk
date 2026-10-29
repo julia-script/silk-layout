@@ -190,6 +190,17 @@ effect fn dimension(value: &Value) -> Dimension ! ProtocolError {
   }
 }
 
+effect fn gap(value: &Value) -> Dimension ! ProtocolError {
+  match &value.* {
+    Value.String { text: _ } => {
+      let name = run P.text(value)
+      if name == "normal" { return Dimension.normal() }
+    }
+    _ => {}
+  }
+  return run dimension(value)
+}
+
 effect fn edges(value: &Value, initial: Edges) -> Edges ! ProtocolError {
   match &value.* {
     Value.Number { text: _ } => { return Edges.all(run dimension(value)) }
@@ -394,8 +405,8 @@ pub effect fn parse(value: &Value) -> Style ! ProtocolError {
   if P.has(value, "maxWidth") { style.maxWidth = run dimension(run P.required(value, "maxWidth")) }
   if P.has(value, "maxHeight") { style.maxHeight = run dimension(run P.required(value, "maxHeight")) }
   if P.has(value, "flexBasis") { style.flexBasis = run dimension(run P.required(value, "flexBasis")) }
-  if P.has(value, "rowGap") { style.rowGap = run dimension(run P.required(value, "rowGap")) }
-  if P.has(value, "columnGap") { style.columnGap = run dimension(run P.required(value, "columnGap")) }
+  if P.has(value, "rowGap") { style.rowGap = run gap(run P.required(value, "rowGap")) }
+  if P.has(value, "columnGap") { style.columnGap = run gap(run P.required(value, "columnGap")) }
   if P.has(value, "display") { style.display = run parseDisplay(run P.required(value, "display")) }
   if P.has(value, "boxSizing") { style.boxSizing = run parseBoxSizing(run P.required(value, "boxSizing")) }
   if P.has(value, "direction") { style.direction = run parseDirection(run P.required(value, "direction")) }

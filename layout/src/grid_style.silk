@@ -284,8 +284,8 @@ pub enum GridRepeatKind {
   AutoFit
 }
 
-// A repeat references one unexpanded pattern in GridAxis.tracks. Named lines
-// use those same unexpanded line offsets; adjacent groups share an offset.
+// Standalone repeats use unexpanded track offsets, with shared boundary groups.
+// Subgrid repeats instead use distinct line-group offsets, including empty [].
 pub struct GridRepeat {
   pub start: usize,
   pub length: usize,
@@ -296,6 +296,8 @@ pub struct GridRepeat {
 impl Copy for GridRepeat {}
 
 pub struct GridAxis {
+  pub subgridded: bool,
+  pub lineGroups: usize,
   pub tracks: List<GridTrack>,
   pub lines: List<GridNamedLine>,
   pub repeats: List<GridRepeat>
@@ -304,13 +306,27 @@ pub struct GridAxis {
 impl GridAxis {
   pub fn make() -> GridAxis {
     return GridAxis {
+      subgridded: false,
+      lineGroups: 0,
       tracks: List<GridTrack>.make(),
       lines: List<GridNamedLine>.make(),
       repeats: List<GridRepeat>.make(),
     }
   }
 
+  pub fn subgrid() -> GridAxis {
+    let mut result = GridAxis.make()
+    result.subgridded = true
+    return move result
+  }
+
   pub fn valid(self: &Self, names: usize) -> bool {
+    if self.subgridded {
+      return self.validSubgrid(names)
+    }
+    if self.lineGroups != 0 {
+      return false
+    }
     let tracks = self.tracks.asSlice()
     if tracks.length > MAX_GRID_TRACKS {
       return false
@@ -380,6 +396,65 @@ impl GridAxis {
     }
     return true
   }
+
+  fn validSubgrid(self: &Self, names: usize) -> bool {
+    let limit = MAX_GRID_TRACKS + 1
+    if self.tracks.length() != 0 || self.lineGroups > limit {
+      return false
+    }
+    let repeats = self.repeats.asSlice()
+    let mut expanded = self.lineGroups
+    let mut end: usize = 0
+    let mut automatic = false
+    let mut index: usize = 0
+    while index < repeats.length {
+      let repeat = repeats[index]
+      if repeat.start < end || repeat.start > self.lineGroups || repeat.length == 0
+        || repeat.length > self.lineGroups - repeat.start
+        || repeat.count == 0 || repeat.count > MAX_GRID_TRACKS
+        || repeat.kind == GridRepeatKind.AutoFit {
+        return false
+      }
+      if repeat.kind == GridRepeatKind.AutoFill {
+        if automatic || repeat.count != 1 {
+          return false
+        }
+        automatic = true
+      } else {
+        let extra = repeat.length * (repeat.count - 1)
+        if extra > limit - expanded {
+          return false
+        }
+        expanded = expanded + extra
+      }
+      end = repeat.start + repeat.length
+      index = index + 1
+    }
+    let lines = self.lines.asSlice()
+    index = 0
+    while index < lines.length {
+      let line = lines[index]
+      if line.line >= self.lineGroups || line.name == 0 || line.name >= names
+        || line.repeat > repeats.length {
+        return false
+      }
+      let mut owner: usize = 0
+      let mut part: usize = 0
+      while part < repeats.length {
+        let repeat = repeats[part]
+        if line.line >= repeat.start && line.line - repeat.start < repeat.length {
+          owner = part + 1
+          break
+        }
+        part = part + 1
+      }
+      if line.repeat != owner {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
 }
 
 pub struct GridArea {
@@ -428,6 +503,8 @@ impl GridTemplate {
 
   pub fn isInitial(self: &Self) -> bool {
     return self.rows.tracks.length() == 0 && self.columns.tracks.length() == 0
+      && !self.rows.subgridded && !self.columns.subgridded
+      && self.rows.lineGroups == 0 && self.columns.lineGroups == 0
       && self.rows.lines.length() == 0
       && self.columns.lines.length() == 0
       && self.rows.repeats.length() == 0

@@ -108,6 +108,9 @@ fn countingSize(track: &GridTrack, basis: f32, definite: bool) -> f32 {
 // CSS Grid 2 §7.2.3.2. Count complete multi-track patterns, including fixed
 // siblings and integer repeats, without allocating or expanding the template.
 pub fn repeatCount(axis: &GridAxis, sizing: &RepeatSizing) -> usize {
+  if axis.subgridded {
+    return 0
+  }
   let limit = automaticLimit(axis)
   if limit == 0 {
     return 0
@@ -246,6 +249,10 @@ pub effect fn expandAxis(
   if areaTracks > result.explicitTracks {
     result.explicitTracks = areaTracks
   }
+  if axis.subgridded {
+    result.explicitTracks = areaTracks
+    return
+  }
   let repeats = axis.repeats.asSlice()
   if repeats.length == 0 {
     return
@@ -346,15 +353,105 @@ pub effect fn expandAxis(
 }
 
 pub fn expandedTracks<'a>(axis: &'a GridAxis, expanded: &'a ExpandedAxis) -> &'a [GridTrack] {
-  if axis.repeats.length() == 0 {
+  if !axis.subgridded && axis.repeats.length() == 0 {
     return axis.tracks.asSlice()
   }
   return expanded.tracks.asSlice()
 }
 
 pub fn expandedLines<'a>(axis: &'a GridAxis, expanded: &'a ExpandedAxis) -> &'a [GridNamedLine] {
-  if axis.repeats.length() == 0 {
+  if !axis.subgridded && axis.repeats.length() == 0 {
     return axis.lines.asSlice()
   }
   return expanded.lines.asSlice()
+}
+
+// §9 automatic span counts authored line groups after integer expansion;
+// §7.2.3.2 auto-fill contributes no groups without a specified span.
+fn subgridFixedGroups(axis: &GridAxis) -> usize {
+  let mut groups = axis.lineGroups
+  let repeats = axis.repeats.asSlice()
+  let mut index: usize = 0
+  while index < repeats.length {
+    let repeat = repeats[index]
+    if repeat.kind == GridRepeatKind.Count {
+      groups = groups + repeat.length * (repeat.count - 1)
+    } else {
+      groups = groups - repeat.length
+    }
+    index = index + 1
+  }
+  return groups
+}
+
+pub fn subgridSpan(axis: &GridAxis) -> usize {
+  if !axis.subgridded {
+    return 1
+  }
+  let groups = subgridFixedGroups(axis)
+  if groups > 1 {
+    return groups - 1
+  }
+  return 1
+}
+
+// Expand only local names. The caller merges inherited names afterwards.
+// Validated name-repeat patterns count distinct groups, never shared endpoints.
+pub effect fn expandSubgridNames(
+  axis: &GridAxis,
+  explicitTracks: usize,
+  result: &mut List<GridNamedLine>,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  result.clear()
+  if !axis.subgridded {
+    return
+  }
+  let mut last = explicitTracks
+  if last > MAX_GRID_TRACKS {
+    last = MAX_GRID_TRACKS
+  }
+  let fixed = subgridFixedGroups(axis)
+  let repeats = axis.repeats.asSlice()
+  let mut automatic: usize = 0
+  let mut index: usize = 0
+  while index < repeats.length {
+    let repeat = repeats[index]
+    if repeat.kind == GridRepeatKind.AutoFill && fixed < last + 1 {
+      // Enough complete patterns to cover every line; §9 truncates excess.
+      automatic = (last + 1 - fixed + repeat.length - 1) / repeat.length
+    }
+    index = index + 1
+  }
+  let lines = axis.lines.asSlice()
+  index = 0
+  while index < lines.length {
+    let line = lines[index]
+    let mut destination = line.line
+    let mut part: usize = 0
+    while part < repeats.length {
+      let repeat = repeats[part]
+      if repeat.start + repeat.length > line.line {
+        break
+      }
+      destination = destination - repeat.length
+        + repeat.length * repetitions(&repeat, automatic)
+      part = part + 1
+    }
+    let mut count: usize = 1
+    let mut stride: usize = 0
+    if line.repeat != 0 {
+      let repeat = repeats[line.repeat - 1]
+      count = repetitions(&repeat, automatic)
+      stride = repeat.length
+    }
+    let mut iteration: usize = 0
+    while iteration < count && destination <= last {
+      run result.append(GridNamedLine { line: destination, name: line.name, repeat: 0 })
+      destination = destination + stride
+      iteration = iteration + 1
+    }
+    index = index + 1
+  }
 }

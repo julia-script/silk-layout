@@ -101,15 +101,26 @@ effect fn component(value: &Value, axis: &mut GridAxis, tree: &mut Tree, repeat:
   if P.has(value, "names") {
     run P.fields(value, &["names"])
     let names = run P.array(run P.required(value, "names"))
+    let mut offset = axis.tracks.length()
+    if axis.subgridded {
+      if axis.lineGroups > MAX_GRID_TRACKS {
+        fail P.invalid("subgrid axis exceeds 10001 line groups")
+      }
+      offset = axis.lineGroups
+      axis.lineGroups = axis.lineGroups + 1
+    }
     let mut index: usize = 0
     while index < names.length {
       let name = run tree.internGridName(run P.text(run P.item(&names[index])))
       run axis.lines.append(
-        GridNamedLine { line: axis.tracks.length(), name: name, repeat: repeat },
+        GridNamedLine { line: offset, name: name, repeat: repeat },
       )
       index = index + 1
     }
   } else {
+    if axis.subgridded {
+      fail P.invalid("subgrid accepts only line-name groups")
+    }
     if axis.tracks.length() >= MAX_GRID_TRACKS {
       fail P.invalid("grid axis exceeds 10000 tracks")
     }
@@ -124,12 +135,19 @@ effect fn axis(value: &Value, tree: &mut Tree) -> GridAxis
   match &value.* {
     Value.String { text: _ } => {
       let keyword = run P.text(value)
+      if keyword == "subgrid" {
+        return GridAxis.subgrid()
+      }
       if keyword != "none" {
-        fail P.invalid("grid template requires an array or none")
+        fail P.invalid("grid template requires an array, none, or subgrid")
       }
       return move result
     }
     _ => {}
+  }
+  if P.has(value, "subgrid") {
+    run P.fields(value, &["subgrid"])
+    return run subgridAxis(run P.required(value, "subgrid"), &mut tree)
   }
   let entries = run P.array(value)
   let mut index: usize = 0
@@ -184,6 +202,59 @@ effect fn axis(value: &Value, tree: &mut Tree) -> GridAxis
   }
   if result.tracks.length() == 0 || !result.valid(tree.gridNames.length()) {
     fail P.invalid("invalid grid track list or repeat grammar")
+  }
+  return move result
+}
+
+effect fn subgridAxis(value: &Value, tree: &mut Tree) -> GridAxis
+  ! ProtocolError | GridError | OutOfMemoryError
+  ? &mut Allocator {
+  let mut result = GridAxis.subgrid()
+  let entries = run P.array(value)
+  let mut index: usize = 0
+  while index < entries.length {
+    let entry = run P.item(&entries[index])
+    if P.has(entry, "repeat") {
+      run P.fields(entry, &["repeat"])
+      let repeat = run P.required(entry, "repeat")
+      run P.fields(repeat, &["count", "lines"])
+      let countValue = run P.required(repeat, "count")
+      let mut kind = GridRepeatKind.Count
+      let mut count: usize = 1
+      match &countValue.* {
+        Value.String { text: _ } => {
+          let name = run P.text(countValue)
+          if name != "auto-fill" {
+            fail P.invalid("subgrid name-repeat accepts only auto-fill or a positive count")
+          }
+          kind = GridRepeatKind.AutoFill
+        }
+        _ => {
+          let parsed = run P.integer(countValue)
+          if parsed <= 0 || parsed > 10000 {
+            fail P.invalid("grid repeat count must be 1..10000")
+          }
+          count = i32.toUsize(parsed)
+        }
+      }
+      let start = result.lineGroups
+      let pattern = run P.array(run P.required(repeat, "lines"))
+      let mut part: usize = 0
+      while part < pattern.length {
+        let repeatIndex = result.repeats.length() + 1
+        run component(run P.item(&pattern[part]), &mut result, &mut tree, repeatIndex)
+        part = part + 1
+      }
+      run result.repeats.append(GridRepeat {
+        start: start, length: result.lineGroups - start, count: count, kind: kind,
+      })
+    } else {
+      run component(entry, &mut result, &mut tree, 0)
+    }
+    index = index + 1
+  }
+  if !result.valid(tree.gridNames.length()) {
+    fail P.invalid("invalid subgrid line-name list or repeat grammar")
   }
   return move result
 }

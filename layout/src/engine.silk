@@ -534,6 +534,31 @@ fn widthFreeTrees(nodes: &BoxTree, shapes: &mut List<u16>) {
   }
 }
 
+// widthFreeTrees after only the boxes in `changed` got new shapes: each one
+// and its ancestors are recomputed from their children. A walk goes up to the
+// root, so the last walk through a box sees all of its changed descendants.
+fn widthFreeTreesAt(nodes: &BoxTree, shapes: &mut List<u16>, changed: &[usize]) {
+  let count = shapes.length()
+  let slice = shapes.asMutSlice()
+  let mut at: usize = 0
+  while at < changed.length {
+    let mut id = changed[at]
+    while id != NO_NODE && id < count {
+      let mut shape = slice[id] & ~(KEY_WIDTH_FREE_TREE | KEY_CONTENT_FREE_TREE)
+      if shape & KEY_WIDTH_FREE != 0 { shape = shape | KEY_WIDTH_FREE_TREE }
+      if shape & KEY_CONTENT_FREE != 0 { shape = shape | KEY_CONTENT_FREE_TREE }
+      let mut child = nodes.node(id).firstChild
+      while child != NO_NODE {
+        if child < count { shape = shape & ~((KEY_WIDTH_FREE_TREE | KEY_CONTENT_FREE_TREE) & ~slice[child]) }
+        child = nodes.node(child).nextSibling
+      }
+      slice[id] = shape
+      id = nodes.node(id).parent
+    }
+    at = at + 1
+  }
+}
+
 // What a flex container reads of an item's style to collect it.
 pub const ITEM_OUT_OF_FLOW: u8 = 1
 pub const ITEM_ORDERED: u8 = 2
@@ -1918,7 +1943,9 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       if parent != NO_NODE { shapes[parent] = keyShape(&nodes, parent) }
       at = at + 1
     }
-    if restyled.length() != 0 { widthFreeTrees(&nodes, &mut facts.keyShapes) }
+    // A few restyled boxes refresh only their ancestors' tree bits.
+    if restyled.length() > 64 { widthFreeTrees(&nodes, &mut facts.keyShapes) }
+    else if restyled.length() != 0 { widthFreeTreesAt(&nodes, &mut facts.keyShapes, restyled.asSlice()) }
     // Every style a visit depends on (position, overflow, display) regenerates
     // boxes when it changes; see Tree.setStyle.
     if !restoring {

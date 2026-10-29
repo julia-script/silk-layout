@@ -32,7 +32,7 @@ The integrated regression gates pass the following focused corpus. These counts 
 
 | Coverage | Passing cases |
 |---|---:|
-| Native layout tests | 260 |
+| Native layout tests | 261 |
 | Malformed adapter requests | 241 |
 | Adapter bidi cases | 9 |
 | Normative specification fixtures | 646 |
@@ -83,6 +83,10 @@ Grid containers are **monolithic in fragmented layout**: internal row breaks and
 Grid probes and final layout share item placement across retained computes, keyed by box identity and both resolved automatic repetition counts. A changed count rebuilds expanded names, placement and auto-fit occupancy. `LayoutCache.gridMemos` owns the existing pooled item/track buffers and sparse-row occupancy bitmaps; `clearBox` invalidates a changed container and `remap` clears identities without discarding capacity. Only occupied rows receive bitmap words, and fully definite grids do not build occupancy. Expanded-template storage is lazy; ordinary numeric grids borrow authored tracks without copying them. Placement and sizing scratch share an owned lease, so retaining placement adds no list copies or second scratch allocation. Track sizes are recomputed for each request. Fragmented computes still invalidate retained results, but preserve their scratch capacity.
 
 Original native regressions exercise viewport changes within and across an automatic-repeat count boundary, then order changes, hide/show box renumbering and template replacement. They assert hand-derived item rectangles rather than cache implementation details.
+
+Grid contribution probes reuse their scalar result when the block-axis min-content and max-content requests are identical; they do not rebuild and search an identical size-cache key. Width probes use the engine's axis-only request contract, retaining full-size requests for aspect ratios and natural dimensions. Contribution and item-area constraints use the existing zero-edge resolution shortcut rather than resolving known-zero edges repeatedly. The hot track-policy scan is inlined to expose unused policy fields to the compiler at each caller.
+
+Cross-axis change checks defer otherwise-unused maximum contributions until a changed minimum or min-content contribution triggers track re-sizing. Intrinsic authored constraints and baseline groups still obtain the maxima they require. Native cases distinguish a changed min-content contribution, which must re-size using the new maximum, from a maximum-only change, which must not trigger another sizing pass.
 
 Baseline scratch is allocated only for containers requesting baseline self-alignment. Retained per-item samples and sparse used-track sharing groups avoid allocating a full group record for every possible track. Ordinary final placement still uses `layoutNode` and `LayoutPass.place`; neither baseline alignment nor track distribution adds fields to `Layout` or copies its record.
 

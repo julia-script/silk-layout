@@ -38,13 +38,16 @@ import style {
   WritingMode,
   Direction,
   Overflow,
-  BoxSizing
+  BoxSizing,
+  Align
 }
 import tree { Tree, LayoutTree, InvalidNode }
 import box_tree as Boxes
 import context { Input, UNBOUNDED }
 import layout_pass { LayoutPass }
 import grid_contributions { ItemContribution, measureContribution }
+import grid_style { GridTemplate, GridTrack, GridBreadth, GridBreadthKind, GridError }
+import engine { compute }
 
 struct ContributionMeasure {
   calls: usize
@@ -70,7 +73,6 @@ impl Measure for ContributionMeasure {
   }
 
   fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
-    drop key
     provider.calls = provider.calls + 1
     let mut width: f32 = 91.0
     let mut height: f32 = 67.0
@@ -79,6 +81,22 @@ impl Measure for ContributionMeasure {
     }
     if request.height.kind == AvailableKind.MinContent {
       height = 17.0
+    }
+
+    // Both recheck fixtures grow their maximum after rows resolve; only key 1
+    // also changes the minimum that triggers another column-sizing pass.
+    if key != 0 {
+      width = 20.0
+      height = 30.0
+      if request.height.kind == AvailableKind.Definite {
+        width = 80.0
+      }
+      if request.width.kind == AvailableKind.MinContent {
+        width = 10.0
+        if key == 1 && request.height.kind == AvailableKind.Definite {
+          width = 40.0
+        }
+      }
     }
     if request.known.widthDefinite {
       width = request.known.width
@@ -513,4 +531,71 @@ test effect fn gridCyclicReplacedContributionTransfersOppositeMinimumFloor()
     ItemContribution { minimum: 34.0, minContent: 34.0, maxContent: 91.0, usedMinimum: 34.0 },
   )
     |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid 2 §12.1: changed min-content contributions trigger one column rerun,
+// using the newly resolved row space for both minimum and maximum contributions.
+// A changed maximum alone does not trigger it. The first track is initially
+// minmax(10px, 20px); resolving the 30px row changes maxima to 80px in both
+// cases, but only the first case changes the minimum to 40px.
+effect fn checkCrossAxisRecheck()
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let expectedWidths: [f32; 2] = [80.0, 20.0]
+  let mut index: usize = 0
+  while index < expectedWidths.length {
+    let mut style = Style.make()
+    style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+    style.alignItems = Align.Start
+    let mut tree = run Tree.make(move style)
+    let root = tree.root()
+    let mut template = GridTemplate.make()
+    run template.columns.tracks.append(
+      GridTrack.minmax(
+        GridBreadth { kind: GridBreadthKind.MinContent, length: 0.0, percent: 0.0 },
+        GridBreadth { kind: GridBreadthKind.MaxContent, length: 0.0, percent: 0.0 },
+      ),
+    )
+    run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+    run tree.setGrid(root, move template)
+    let item = run tree.append(root, Style.make())
+    run tree.setMeasurement(item, index + 1)
+    let mut markerStyle = Style.make()
+    markerStyle.height = Dimension.px(10.0)
+    let marker = run tree.append(root, move markerStyle)
+    let mut output = LayoutTree.make()
+    let mut provider = ContributionMeasure { calls: 0 }
+    run compute(&tree, &mut output, &mut provider, OptionalSize.definite(300.0, 200.0))
+    let itemBounds = run output.sourceBounds(item)
+    let markerBounds = run output.sourceBounds(marker)
+    let rootBounds = run output.sourceBounds(root)
+    run Testing.expect(
+      itemBounds.x == 0.0 && itemBounds.y == 0.0 && itemBounds.width == expectedWidths[index]
+        && itemBounds.height == 30.0
+        && markerBounds.x == expectedWidths[index]
+        && markerBounds.y == 0.0
+        && markerBounds.width == 10.0
+        && markerBounds.height == 10.0
+        && rootBounds.width == 300.0
+        && rootBounds.height == 30.0,
+      "only a changed min-content contribution reruns columns with the new maximum",
+    )
+    index = index + 1
+  }
+}
+
+test effect fn gridCrossAxisRecheckRefreshesMaximaOnlyAfterMinimumChanges()
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run checkCrossAxisRecheck() |> Effect.provideMut<Allocator>(&mut allocator)
 }

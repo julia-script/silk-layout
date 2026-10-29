@@ -18,7 +18,7 @@ import style { Style, Dimension, DimensionKind, Direction, Align, Position }
 import context { Input, ResolvedBox, UNBOUNDED, childrenInput, resolveBox, resolve }
 import box_tree { BoxTree }
 import layout_pass { LayoutPass }
-import engine { layoutNode, layoutNodeInPlace, probeNode }
+import engine { layoutNode, layoutNodeInPlace, probeNode, shapedBox }
 import text { TextMeasure, TextError }
 import fragmentation { FragmentationError }
 import axes { Axes }
@@ -67,6 +67,8 @@ fn stretchContent(value: Align) -> bool {
 // Grid §6.2: the area supplies both available space and the percentage basis.
 // Only stretch fixes an auto preferred size; other values use fit-content.
 fn itemInput(
+  output: &LayoutPass,
+  id: usize,
   base: &Input,
   style: &Style,
   parent: &Style,
@@ -87,7 +89,7 @@ fn itemInput(
   if request.parent.heightDefinite {
     request.availableHeight = AvailableSpace.definite(request.parent.height)
   }
-  let resolved = resolveBox(style, &request)
+  let resolved = shapedBox(output, style, id, &request)
   let margin = axis.edges(resolved.margin)
   let mut known = OptionalSize.none()
   if area.widthDefinite && selfAlignment(style, parent, true) == Align.Stretch
@@ -129,7 +131,7 @@ fn trackPolicy(
   end: usize,
   gap: f32,
   constraint: AvailableKind,
-) -> TrackPolicy {
+) -> TrackPolicy with Intrinsic.inlineAlways() {
   let mut result = TrackPolicy {
     automatic: false,
     fixed: true,
@@ -213,6 +215,8 @@ fn cyclicTracks(tracks: &[GridTrack]) -> bool {
 
 // Contributions stay in item order. Only the pure track solver groups spans.
 // This also lets §12.1 compare the new min-content contributions in one walk.
+// Checks need only minimum/min-content; a triggered sizing pass collects maxima.
+// Baseline groups retain all three contribution kinds during either pass.
 effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   nodes: &BoxTree<'source>,
   output: &mut LayoutPass<'pass, 'source>,
@@ -226,6 +230,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
   sizing: &AxisSizing,
   crossSizing: &AxisSizing,
   crossFinal: bool,
+  checkOnly: bool,
   baselines: &mut GridBaselines,
 ) -> bool
   ! OutOfMemoryError | TextError | FragmentationError
@@ -285,7 +290,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
           area.widthDefinite = true
         }
       }
-      let request = itemInput(base, nodes.style(item.id), parent, axis, area)
+      let request = itemInput(&output, item.id, base, nodes.style(item.id), parent, axis, area)
       let mut measured = ItemContribution {
         minimum: 0.0,
         minContent: 0.0,
@@ -304,7 +309,7 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
           policy.cap,
           crossPolicy.cap,
           policy.needMin,
-          policy.needMax,
+          policy.needMax && (!checkOnly || aligned),
         )
         contribution.minimum = measured.minimum
         contribution.minContent = measured.minContent
@@ -435,6 +440,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     &sizing,
     crossSizing,
     crossFinal,
+    false,
     &mut baselines,
   )
   let mut natural = run finishTracks(&mut own, &sizing, &mut work)
@@ -469,6 +475,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
       &sizing,
       crossSizing,
       crossFinal,
+      false,
       &mut baselines,
     )
     natural = run finishTracks(&mut own, &sizing, &mut work)
@@ -692,6 +699,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     &columnSizing,
     &rowSizing,
     true,
+    true,
     &mut baselines,
   )
   if columnsChanged {
@@ -727,6 +735,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       &lease.value.columns,
       &rowSizing,
       &columnSizing,
+      true,
       true,
       &mut baselines,
     )
@@ -823,6 +832,8 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       let itemStyle = nodes.style(item.id)
       if pass == 0 {
         let mut request = itemInput(
+          &output,
+          item.id,
           &base,
           itemStyle,
           style,

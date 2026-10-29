@@ -1,15 +1,15 @@
 import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.core.effect { Effect }
 import silk.testing.testing { Testing, AssertionError }
-import grid_scratch { GridScratchPool }
+import grid_scratch { GridMemos }
 import grid_placement { GridItem }
 
-// Placement belongs to one compute; a box id can identify different source
-// content after box regeneration. Retained capacity must not retain that list.
-test effect fn gridScratchResetInvalidatesPlacementIdentity()
+// A box id can identify different source content after box regeneration.
+// Clearing retained placement must preserve storage, not the old box identity.
+test effect fn gridMemosClearInvalidatesPlacementIdentity()
   ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut pool = GridScratchPool.make()
+  let mut pool = GridMemos.make()
   let mut first = run pool.take(3, 8) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(first.fresh, "first request needs placement")
   run first.value.items.append(GridItem.make(7)) |> Effect.provideMut<Allocator>(&mut allocator)
@@ -17,10 +17,10 @@ test effect fn gridScratchResetInvalidatesPlacementIdentity()
   let repeated = run pool.take(3, 8) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     !repeated.fresh && repeated.value.items.asSlice()[0].id == 7,
-    "probes share placement within a compute",
+    "probes share placement until the cache invalidates it",
   )
   pool.put(move repeated)
-  pool.reset()
+  pool.clear()
   let regenerated = run pool.take(3, 12) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     regenerated.fresh && regenerated.value.items.length() == 0,
@@ -34,7 +34,7 @@ test effect fn gridScratchResetInvalidatesPlacementIdentity()
 test effect fn nestedGridScratchKeepsParentAndChildSeparate()
   ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut pool = GridScratchPool.make()
+  let mut pool = GridMemos.make()
   let mut parent = run pool.take(0, 8) |> Effect.provideMut<Allocator>(&mut allocator)
   run parent.value.items.append(GridItem.make(1)) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut child = run pool.take(1, 8) |> Effect.provideMut<Allocator>(&mut allocator)

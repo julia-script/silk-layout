@@ -52,8 +52,8 @@ impl GridTemplateScratch {
   }
 }
 
-// Placement is shared by this compute's probes and final layout. Track sizes
-// are request-dependent and are initialized again before each sizing pass.
+// Placement survives computes while its box identity and styles remain valid.
+// Track sizes are request-dependent and initialized again before each sizing pass.
 pub struct GridScratch {
   pub items: List<GridItem>,
   pub bounds: GridBounds,
@@ -90,22 +90,39 @@ pub struct GridLease {
   slot: usize
 }
 
-pub struct GridScratchPool {
+struct GridMemoSlot {
+  valid: bool,
+  value: GridScratch,
+}
+
+// Cache-owned placement and pooled sizing storage share one lease: retaining
+// placement must not copy item lists or add a second set of scratch allocations.
+pub struct GridMemos {
   index: List<usize>,
-  slots: List<GridScratch>,
+  slots: List<GridMemoSlot>,
   used: usize,
 }
 
-impl GridScratchPool {
-  pub fn make() -> GridScratchPool {
-    return GridScratchPool { index: List<usize>.make(), slots: List<GridScratch>.make(), used: 0 }
+impl GridMemos {
+  pub fn make() -> GridMemos {
+    return GridMemos { index: List<usize>.make(), slots: List<GridMemoSlot>.make(), used: 0 }
   }
 
-  // Box ids can change meaning between computes. Keep every list's capacity,
-  // but lazily rebuild the index only if this compute actually encounters grid.
-  pub fn reset(self: &mut Self) {
+  // A fresh cache or remapped box identity invalidates placement, not capacity.
+  pub fn clear(self: &mut Self) {
     self.index.clear()
     self.used = 0
+  }
+
+  pub fn dropBox(self: &mut Self, id: usize) {
+    if id >= self.index.length() {
+      return
+    }
+    let slot = self.index.get(id)
+    if slot != usize.MAX {
+      let slots = self.slots.asMutSlice()
+      slots[slot].valid = false
+    }
   }
 
   pub effect fn take(self: &mut Self, boxId: usize, boxCount: usize) -> GridLease
@@ -116,17 +133,21 @@ impl GridScratchPool {
       run self.index.appendRepeated(usize.MAX, additional)
     }
     let mut slot = self.index.get(boxId)
-    let fresh = slot == usize.MAX
+    let mut fresh = slot == usize.MAX
     if fresh {
       slot = self.used
       if slot == self.slots.length() {
-        run self.slots.append(GridScratch.make())
+        run self.slots.append(GridMemoSlot { valid: false, value: GridScratch.make() })
       }
       self.used = self.used + 1
       self.index.set(boxId, slot)
     }
     let slots = self.slots.asMutSlice()
-    let mut value = Intrinsic.replace(slots[slot], GridScratch.make())
+    fresh = fresh || !slots[slot].valid
+
+    // An abandoned lease cannot leave an empty slot marked as prepared.
+    slots[slot].valid = false
+    let mut value = Intrinsic.replace(slots[slot].value, GridScratch.make())
     if fresh {
       value.items.clear()
       value.bounds = GridBounds.empty()
@@ -138,6 +159,8 @@ impl GridScratchPool {
 
   pub fn put(self: &mut Self, lease: GridLease) {
     let slots = self.slots.asMutSlice()
-    slots[lease.slot] = move lease.value
+    let slot = lease.slot
+    slots[slot].value = move lease.value
+    slots[slot].valid = true
   }
 }

@@ -27,7 +27,7 @@ effect fn captureBox(store: &mut GridGeometryStore, id: usize, x: f32, width: f3
   let columns: [TrackState; 1] = [column]
   let rows: [TrackState; 1] = [row]
   let names = LineNames.make()
-  run store.capture(id, &columns, 0, 1, &names, &rows, 0, 1, &names)
+  run store.capture(id, 0, &columns, 0, 1, &names, &rows, 0, 1, &names)
 }
 
 fn area(store: &GridGeometryStore, id: usize) -> Rect {
@@ -348,7 +348,7 @@ test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
     |> Effect.provideMut<Allocator>(&mut allocator)
   let columns: [TrackState; 1] = [TrackState.fixed(45.0)]
   let rows: [TrackState; 1] = [TrackState.fixed(35.0)]
-  run store.capture(0, &columns, 0, 1, &names, &rows, 0, 1, &names)
+  run store.capture(0, 0, &columns, 0, 1, &names, &rows, 0, 1, &names)
     |> Effect.provideMut<Allocator>(&mut allocator)
   store.commit()
   run prepareLineNames(&empty, &areas, labels.asSlice(), true, &mut names)
@@ -372,7 +372,7 @@ test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
     "clearing source names does not change the retained named area",
   )
   store.clear()
-  run store.capture(0, &columns, 0, 1, &names, &rows, 0, 1, &names)
+  run store.capture(0, 0, &columns, 0, 1, &names, &rows, 0, 1, &names)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let replaced = containingArea(
     &Style.make(),
@@ -386,4 +386,49 @@ test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
     replaced.x == 0.0 && replaced.width == 330.0,
     "reused axis buffers discard removed names instead of exposing stale lines",
   )
+}
+
+test effect fn gridGeometryJournalsExactInheritedRequestIdentity()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridGeometryStore.make()
+  let tracks = [TrackState.fixed(40.0)]
+  let names = LineNames.make()
+  run store.capture(0, 5, &tracks, 0, 1, &names, &tracks, 0, 1, &names)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  store.commit()
+  let marker = store.checkpoint()
+  run store.capture(0, 9, &tracks, 0, 1, &names, &tracks, 0, 1, &names)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(store.get(store.find(0)).gridContext == 9,
+    "equal rectangles retain the exact new inherited request identity")
+  store.restore(marker)
+  run Testing.expect(store.get(store.find(0)).gridContext == 5,
+    "rollback restores accepted geometry and its identity together")
+  let toOld: [usize; 2] = [NO_NODE, 0]
+  let toNew: [usize; 1] = [1]
+  run store.remap(&toOld, &toNew) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(store.get(store.find(1)).gridContext == 5,
+    "owner remapping preserves rather than guesses the accepted identity")
+  run store.capture(1, 0, &tracks, 0, 1, &names, &tracks, 0, 1, &names)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(store.get(store.find(1)).gridContext == 0,
+    "a genuine ordinary-grid publication explicitly replaces inherited context")
+}
+
+test effect fn gridGeometryStaticInheritedProvenanceIsKeyOnly()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridGeometryStore.make()
+  run store.captureContext(1, 5) |> Effect.provideMut<Allocator>(&mut allocator)
+  store.commit()
+  let marker = store.checkpoint()
+  run store.captureContext(1, 9) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(store.get(store.find(1)).gridContext == 9
+    && store.get(store.find(1)).columns.tracks.length() == 0
+    && store.get(store.find(1)).rows.tracks.length() == 0,
+    "static inherited grids publish exact keys without unused track copies")
+  store.restore(marker)
+  run Testing.expect(store.get(store.find(1)).gridContext == 5,
+    "static inherited provenance rolls back with the same geometry journal")
 }

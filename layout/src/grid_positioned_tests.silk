@@ -671,7 +671,7 @@ effect fn expectSubgridShellRects(output: &mut LayoutTree, source: NodeId, inset
 // grids. Grid 2 §10.1 supplies 100/136/64px areas: parent columns are80/1fr
 // and 10% right padding leaves180/216/144px end edges on200/240/160px pages.
 // Section13 leaves break choice to the engine; height150 consumes60+60+30.
-effect fn subgridFutureShells()
+effect fn subgridFutureShells(nested: bool)
   ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
   ? &mut Allocator {
   let mut rootStyle = gridStyle()
@@ -686,7 +686,15 @@ effect fn subgridFutureShells()
   run template.columns.tracks.append(GridTrack.breadth(GridBreadth.flex(1.0)))
   run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
   run tree.setGrid(root, move template)
-  let subgrid = run positionedSubgrid(&mut tree, root)
+  let mut parent = root
+  if nested {
+    parent = run positionedSubgrid(&mut tree, root)
+    let mut staticStyle = inheritedPositionedStyle()
+    staticStyle.position = Position.Static
+    staticStyle.padding = Edges.all(Dimension.px(0.0))
+    run tree.setStyle(parent, move staticStyle)
+  }
+  let subgrid = run positionedSubgrid(&mut tree, parent)
   let mut childStyle = absoluteStyle()
   childStyle.inset.bottom = Dimension.auto()
   childStyle.height = Dimension.px(150.0)
@@ -722,5 +730,11 @@ effect fn subgridFutureShells()
 test effect fn positionedSubgridFuturePageShellsUseInheritedAxes()
   ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
-  run subgridFutureShells() |> Effect.provideMut<Allocator>(&mut allocator)
+  run subgridFutureShells(false) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+test effect fn positionedSubgridFutureShellsReconstructStaticInheritedAncestors()
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run subgridFutureShells(true) |> Effect.provideMut<Allocator>(&mut allocator)
 }

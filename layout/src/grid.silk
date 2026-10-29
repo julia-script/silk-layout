@@ -542,6 +542,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
   // adjustment of this physical axis owns a previous pass: collectInherited
   // can reconstruct the opposite axis at this phase, with no memo dependency.
   let mut priorTracks = List<TrackState>.make()
+  let mut hasEstimate = false
   let priorGap = sizing.usedGap
   if inherited.phase >= 3
     && sizing.columns == (inherited.firstColumns == (inherited.phase == 3)) {
@@ -552,7 +553,12 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
       itemIndex = itemIndex + 1
     }
     if needsEstimate {
-      run priorTracks.appendSlice(own.tracks.asSlice())
+      let replacement = match move output.cache.gridMemos.subgridEstimates.pop() {
+        Option<List<TrackState>>.Some { value } => move value
+        Option<List<TrackState>>.None => List<TrackState>.make()
+      }
+      priorTracks = Intrinsic.replace(own.tracks, move replacement)
+      hasEstimate = true
     }
   }
   sizing.resolvedCyclic = false
@@ -636,6 +642,7 @@ effect fn sizeAxis<'pass, 'source, M: Measure + TextMeasure>(
     natural = run finishTracks(&mut own, &sizing, &mut work)
   }
   alignTracks(own.tracks.asMutSlice(), natural, sizing.size, parent, sizing.columns)
+  if hasEstimate { run output.cache.gridMemos.subgridEstimates.append(move priorTracks) }
 }
 
 fn applyMinimum(request: &mut Input, horizontal: bool, minimum: f32) with Intrinsic.inlineAlways() {

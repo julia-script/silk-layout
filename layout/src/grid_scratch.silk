@@ -116,6 +116,7 @@ pub struct GridMemos {
   pub fragmentScratch: List<GridFragmentScratch>,
   pub subgridWork: List<ContributionWork>,
   pub baselineOffsets: List<List<BaselineOffset>>,
+  pub subgridEstimates: List<List<TrackState>>,
 }
 
 impl GridMemos {
@@ -127,6 +128,7 @@ impl GridMemos {
       fragmentScratch: List<GridFragmentScratch>.make(),
       subgridWork: List<ContributionWork>.make(),
       baselineOffsets: List<List<BaselineOffset>>.make(),
+      subgridEstimates: List<List<TrackState>>.make(),
     }
   }
 

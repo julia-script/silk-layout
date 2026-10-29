@@ -1,0 +1,102 @@
+{
+  "name": "grid-align-maximize-before-end",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-track-sizing",
+    "https://drafts.csswg.org/css-grid-2/#grid-align"
+  ],
+  "derivation": "Four minmax(min-content, 56px) columns and three 2px gaps have max-content width 230px. A 13px item spanning the middle two columns establishes 5.5px intrinsic bases after subtracting the 2px intervening gutter. Grid 12.6 maximization freezes those middle tracks at 56px and redistributes the remaining free space to the outer tracks until all four reach 56px. No free space remains for justify-content:end. Column starts are 0, 58, 116 and 174; the spanning item absorbs 101px in its auto left margin and starts at 159px.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "inline-grid",
+          "gridTemplateColumns": [
+            {
+              "repeat": {
+                "count": 4,
+                "tracks": [
+                  {
+                    "minmax": [
+                      "min-content",
+                      56
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ],
+          "columnGap": 2,
+          "justifyContent": "end",
+          "justifyItems": "start",
+          "alignItems": "start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 0,
+          "height": 1,
+          "gridRowStart": 1,
+          "gridColumnStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 0,
+          "height": 1,
+          "gridRowStart": 1,
+          "gridColumnStart": 4
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 13,
+          "height": 8,
+          "marginLeft": "auto",
+          "gridRowStart": 2,
+          "gridColumnStart": 2,
+          "gridColumnEnd": {
+            "span": 2
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 230,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 174,
+        "y": 0
+      },
+      {
+        "x": 159,
+        "y": 10
+      }
+    ]
+  }
+}

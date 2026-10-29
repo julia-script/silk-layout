@@ -1,0 +1,66 @@
+{
+  "name": "grid-align-auto-margin-overflow-unsafe",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-margins",
+    "https://drafts.csswg.org/css-align-3/#overflow-values"
+  ],
+  "derivation": "A 70px item plus 10px fixed end margin overflows its 50px area by 30px. Auto start margins resolve to zero, but unsafe center/end remain active, giving -15px/-30px offsets.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 50,
+          "height": 50,
+          "gridTemplateColumns": [
+            50
+          ],
+          "gridTemplateRows": [
+            50
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 70,
+          "height": 70,
+          "marginLeft": "auto",
+          "marginTop": "auto",
+          "marginRight": 10,
+          "marginBottom": 10,
+          "justifySelf": "center",
+          "justifySelfSafety": "unsafe",
+          "alignSelf": "end",
+          "alignSelfSafety": "unsafe"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 50
+      },
+      {
+        "x": -15,
+        "y": -30,
+        "width": 70,
+        "height": 70
+      }
+    ]
+  }
+}

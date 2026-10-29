@@ -1,0 +1,94 @@
+{
+  "name": "grid-baseline-mirrored-font-export",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "baseline",
+    "font-metrics",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline",
+    "https://drafts.csswg.org/css-grid-2/#grid-baselines"
+  ],
+  "derivation": "The sideways-rl font has alphabetic 8 and central 5, so its central mirror is displaced by -6. First item synthesized logical baseline is 20. Opposite sideways-lr last baseline is 0, normalized to 6; a 14px shift joins the first group. In a 60px block extent, physical x is 40 and 36. Both exported tables use the container font at logical alphabetic baseline 20.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "fonts": [
+      {
+        "fontSize": 10,
+        "ascent": 8,
+        "descent": 2,
+        "lineGap": 0,
+        "xHeight": 5,
+        "capHeight": 7,
+        "subscriptOffset": 2,
+        "superscriptOffset": 3,
+        "baselines": {
+          "alphabetic": 8,
+          "ideographic": 10,
+          "central": 5,
+          "mathematical": 5
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "writingMode": "sideways-rl",
+          "width": 60,
+          "height": 40,
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            60
+          ],
+          "alignItems": "baseline",
+          "fontKey": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "sideways-rl",
+          "width": 20,
+          "height": 20
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "sideways-lr",
+          "width": 10,
+          "height": 20,
+          "alignSelf": "last baseline"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 60,
+        "height": 40,
+        "firstBaseline": 20,
+        "lastBaseline": 20
+      },
+      {
+        "x": 40,
+        "y": 0
+      },
+      {
+        "x": 36,
+        "y": 20
+      }
+    ]
+  }
+}

@@ -139,7 +139,7 @@ impl TextMeasure for TextHost {
             unit: unit,
             start: start,
             end: end,
-            advance: usize.toF64(end - start) * 5.0,
+            advance: usize.toF32(end - start) * 5.0,
             fontKey: token.fontKey,
             bidiLevel: request.analysis.level,
             shapeKey: 0,
@@ -160,10 +160,10 @@ fn gridStyle() -> Style {
 effect fn expectBounds(
   output: &mut LayoutTree,
   source: NodeId,
-  x: f64,
-  y: f64,
-  width: f64,
-  height: f64,
+  x: f32,
+  y: f32,
+  width: f32,
+  height: f32,
 )
   ! InvalidNode | AssertionError<'static> {
   let actual = run output.sourceBounds(source)

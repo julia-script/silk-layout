@@ -1,12 +1,12 @@
 import layout.lib { Size, Rect, Measure, MeasureRequest, Measured, NaturalDimensions, AvailableKind, WritingMode, Direction, ScrollbarWidth, ScrollbarGutter, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, BaselineSet }
-import silk.list { List }
-import silk.ownership { Copy }
-import silk.json_value { Value }
-import silk.f64
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.json.value { Value }
+import silk.num.f64
 import protocol as P
 import protocol { ProtocolError }
 import layout.lib { TextMeasure, TextError, TextContext, TextBreak, TextAnalysis, TextShapeRequest, TextRun }
-import silk.allocator { Allocator, OutOfMemoryError }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
 import text_profile as TextProfile
 
 // Opaque fixture boxes plus a bounded ASCII/control-character text service.

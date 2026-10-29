@@ -1,9 +1,9 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.list { List }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.collections.list { List }
 import silk.option { Option }
-import silk.ownership { Copy }
-import silk.usize
+import silk.core.ownership { Copy }
+import silk.num.usize
 import context { Input, ResolvedBox, resolveBox, overflowForAxis, scrollbarGutter }
 import geometry { Layout, Point, Rect, OptionalSize, AvailableSpace, AvailableKind, ScrollbarMetrics, ResolvedEdges, Size, max }
 import style { Style, Overflow, ScrollbarWidth }

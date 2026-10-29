@@ -1,4 +1,4 @@
-import silk.testing { Testing, AssertionError }
+import silk.testing.testing { Testing, AssertionError }
 import geometry { Layout, Size, BaselineSet, OptionalSize, AvailableKind }
 import style { Style, WritingMode, Direction, Dimension }
 import grid_tracks { TrackState }

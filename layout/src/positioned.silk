@@ -1,5 +1,5 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
 import geometry { Layout, Point, Size, Rect, ResolvedEdges, OptionalSize, AvailableSpace, Measure, max, min, clamp, abs }
 import style { Style, Position, DimensionKind, Direction, WritingMode, Align, FlexDirection, FlexWrap, OverflowAlignment, Overflow, Float, BoxDecorationBreak }
 import tree { NO_NODE }
@@ -14,7 +14,7 @@ import breaks { FragmentainerKind, BreakRelaxation }
 import fragment_position { instance, physicalPosition, flowPosition, flowTranslation, blockStart }
 import silk.option { Option }
 import fragment_box as FragmentBox
-import silk.list { List }
+import silk.collections.list { List }
 import fragment_fit { WidowCheck, WidowDecision, collectWidows, validateWidows }
 import axes { Axes }
 import block { inlineOffset }

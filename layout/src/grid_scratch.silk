@@ -1,6 +1,6 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.usize
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.num.usize
 import grid_placement { GridItem, GridBounds, PlacementScratch }
 import grid_tracks { TrackState, TrackContribution }
 import grid_lines { LineNames }

@@ -1,8 +1,8 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.ownership { Copy }
-import silk.i32
-import silk.usize
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.num.i32
+import silk.num.usize
 import geometry { Layout, BaselineSet, FontRequest, Measure, Size, Point, max, min }
 import style { Style, WritingMode, Direction, Align, Dimension, DimensionKind }
 import axes { Axes }

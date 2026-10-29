@@ -1,7 +1,7 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.i32
-import silk.usize
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.num.i32
+import silk.num.usize
 import axes { Axes }
 import box_tree { BoxTree }
 import context {

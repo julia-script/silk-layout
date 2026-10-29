@@ -1,14 +1,14 @@
-import silk.box { Box }
-import silk.json_value { Json, Value, JsonChild }
-import silk.list { List }
+import silk.mem.box { Box }
+import silk.json.value { Json, Value, JsonChild }
+import silk.collections.list { List }
 import silk.option { Option }
-import silk.string { String }
-import silk.os_writer { StderrWriter }
-import silk.ownership { Copy }
-import silk.effect { Effect }
-import silk.writer { Writer, WriterError }
-import silk.json_scanner { JsonError }
-import silk.json_output { JsonOptions }
+import silk.text.string { String }
+import silk.io.writer_native { StderrWriter }
+import silk.core.ownership { Copy }
+import silk.core.effect { Effect }
+import silk.io.writer { Writer, WriterError }
+import silk.json.scanner { JsonError }
+import silk.json.output { JsonOptions }
 import layout.lib { TextError }
 
 pub struct ProtocolError {}

@@ -1,6 +1,6 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.string { String }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.text.string { String }
 import text { TextToken, TextTokenKind, TextCursor, TextError }
 import style { WhiteSpaceCollapse }
 import tree { Node, NO_NODE }

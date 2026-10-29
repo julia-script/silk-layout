@@ -1,8 +1,8 @@
-import silk.ownership { Copy }
+import silk.core.ownership { Copy }
 import geometry { FontMetrics, ResolvedEdges }
 import text { TextCursor }
 import style { TabSize }
-import silk.f64
+import silk.num.f64
 
 pub struct FontBox {
   pub metrics: FontMetrics,

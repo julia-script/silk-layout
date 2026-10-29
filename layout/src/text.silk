@@ -1,8 +1,8 @@
-import silk.allocator { Allocator, OutOfMemoryError }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.format { Debug, Format, Formatter }
-import silk.list { List }
-import silk.ownership { Copy }
-import silk.writer { Writer, WriterError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.io.writer { Writer, WriterError }
 import style { WritingMode, TextOrientation, Direction, UnicodeBidi, WhiteSpaceCollapse, TextJustify }
 
 pub struct TextError { pub source: usize, pub message: string<'static> }

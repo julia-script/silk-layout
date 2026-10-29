@@ -1,11 +1,11 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.list { List }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.collections.list { List }
 import silk.option { Option }
 import geometry { Layout, Point, Rect, Size }
 import style { Direction, WritingMode }
 import fragmentation { Fragmentainer, Fragmentainers, FragmentAncestor, FragmentationError, ResumeStore, FlowCursor }
-import silk.testing { Testing, AssertionError }
+import silk.testing.testing { Testing, AssertionError }
 import style { BreakBetween, BreakInside }
 import breaks { FragmentainerKind, PageSide, BreakRelaxation, BreakKinds, ForcedBreaks, FractionalProgress, avoidsBetween, avoidsInside, allowsBoundary, allowsLineBreak, nextRelaxation }
 import fragments { FragmentArena, FragmentKind, TextFragment, TextFragmentKind }

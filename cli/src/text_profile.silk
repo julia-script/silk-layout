@@ -1,9 +1,9 @@
 import layout.lib { FontMetrics, WritingMode, Direction, UnicodeBidi, WhiteSpaceCollapse, TextJustify, TextError, TextContext, TextToken, TextTokenKind, TextCursor, TextBreak, TextBreakKind, TextAnalysis, TextParagraph, TextLevel, TextShapeRequest, TextRun }
-import silk.list { List }
-import silk.ownership { Copy }
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.string { String }
-import silk.usize
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.text.string { String }
+import silk.num.usize
 import protocol as P
 
 // Bounded fixture repertoire, not a Unicode database or a font fallback. Rules

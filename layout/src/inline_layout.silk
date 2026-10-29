@@ -1,9 +1,9 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.list { List }
-import silk.ownership { Copy }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.core.effect { Effect }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
 import silk.option { Option }
-import silk.string { String }
+import silk.text.string { String }
 import geometry { Layout, Measure, FontRequest, FontMetrics, BaselineSet, Size, Point, Rect, ResolvedEdges, OptionalSize, AvailableSpace, AvailableKind, max, min }
 import style { Style, LineHeight, VerticalAlignKind, BaselineSource, WritingMode, TextOrientation, Direction, UnicodeBidi, TextAlign, TextWrap, BoxDecorationBreak, MarginBreak, Float, DisplayInside, DisplayOutside, DimensionKind, Position }
 import tree { Node, NO_NODE }

@@ -1,6 +1,6 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.ownership { Copy }
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
 import box_tree { BoxTree }
 import inline_items { Item, ItemKind, Scope, tabAdvance }
 import inline_text as TextFlow

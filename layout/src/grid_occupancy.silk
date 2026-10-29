@@ -1,9 +1,9 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.ownership { Copy }
-import silk.u64
-import silk.u32
-import silk.usize
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.num.u64
+import silk.num.u32
+import silk.num.usize
 import grid_style { MAX_GRID_TRACKS }
 import tree { NO_NODE }
 

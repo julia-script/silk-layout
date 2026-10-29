@@ -1,8 +1,8 @@
-import silk.ownership { Copy }
-import silk.list { List }
-import silk.string { String }
+import silk.core.ownership { Copy }
+import silk.collections.list { List }
+import silk.text.string { String }
 import silk.format { Debug, Formatter }
-import silk.writer { Writer, WriterError }
+import silk.io.writer { Writer, WriterError }
 
 pub const MAX_GRID_TRACKS: usize = 10000
 

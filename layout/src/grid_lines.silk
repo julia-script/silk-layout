@@ -1,9 +1,9 @@
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.list { List }
-import silk.ownership { Copy }
-import silk.string { String }
-import silk.i32
-import silk.usize
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.text.string { String }
+import silk.num.i32
+import silk.num.usize
 import grid_style { GridLine, GridLineKind, GridNamedLine, GridArea, MAX_GRID_TRACKS }
 
 pub struct GridSpan {

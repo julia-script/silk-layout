@@ -760,7 +760,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   // `store` for a box whose layout from this compute is already stored, after
   // its parent placed it: only its location, used margins and clearance change,
   // so they are written in place rather than copying the whole layout again.
-  pub effect fn place(self: &mut Self, id: usize, location: Point, usedMargin: ResolvedEdges, hasClearance: bool, publish: bool) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn place(self: &mut Self, id: usize, location: Point, usedMargin: ResolvedEdges, hasClearance: bool, publish: bool) ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
     run self.preserveLayout(id)
     run self.touchPlacement(id)
     if publish {

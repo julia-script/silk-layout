@@ -1772,10 +1772,11 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
     let mut positioned = false
     let mut fixed = false
     let mut overflow = fragment.scrollableOverflow
+    let inside = overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height
     // The childless in-flow fast path below, without reading the style.
     if marked && id != NO_NODE && kind == FragmentKind.Box && fragment.firstChild == NO_NODE && !nonpainting && parentId == limitsParent && parentCovers
       && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0 && !output.outOfFlowBoxes.get(id)
-      && overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height {
+      && inside {
       if output.frame == NO_NODE || single { output.boxes[id].scrollableOverflow = overflow }
       continue
     }
@@ -1794,7 +1795,7 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
         // parentCovers below, set by an earlier sibling).
         if fragment.firstChild == NO_NODE && !positioned && !nonpainting && parentId == limitsParent && parentCovers
           && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0
-          && overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height {
+          && inside {
           continue
         }
         overflow = propagatedOverflow(style, overflow, paddingRect)
@@ -1818,7 +1819,9 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
             if output.frame == NO_NODE { normal = output.boxes[cb].normalFlowOverflow() }
             let parentStyle = nodes.style(cb)
             parentLimits = reachableLimits(parentStyle, parent.paddingRect, normal, cb == 0)
-            parentCovers = output.frame == NO_NODE && usedOverflowForAxis(parentStyle, true) == Overflow.Visible && usedOverflowForAxis(parentStyle, false) == Overflow.Visible
+            // Unscrollable overflow, visible or clipped, starts as the padding box
+            // and every child's margin box (see overflowGeometry).
+            parentCovers = output.frame == NO_NODE && !scrollable(usedOverflowForAxis(parentStyle, true)) && !scrollable(usedOverflowForAxis(parentStyle, false))
             limitsParent = parentId
           }
           limits = parentLimits
@@ -1841,7 +1844,11 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
           combined = addOverflow(combined, margin, limits)
         }
         let fragments = output.fragments.values.asMutSlice()
-        let grown = addOverflow(combined, overflow, limits)
+        // A covered box's overflow inside its border box adds nothing either.
+        // Skipping it keeps the parent's edges from re-rounding, which is what
+        // the plain pass relies on to skip unmarked fragments.
+        let mut grown = combined
+        if !covered || !inside { grown = addOverflow(combined, overflow, limits) }
         fragments[parentId].scrollableOverflow = grown
         if plain && (grown.x < 0.0 || grown.y < 0.0 || grown.x + grown.width > fragments[parentId].size.width || grown.y + grown.height > fragments[parentId].size.height) {
           let marks = output.overflowMarks.asMutSlice()
@@ -2037,8 +2044,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   // Layout an absolute ancestor before visiting any of its source descendants.
   output.outOfFlowBoxes.clear()
   run output.outOfFlowBoxes.appendRepeated(false, output.boxes.length)
-  // Whether no box is out of flow, interrupted, or a parent with clipped or
-  // scrolled overflow.
+  // Whether no box is fixed, interrupted, or a scroll container with children.
   let mut plainParents = true
   let mut at: usize = 0
   while at < output.visits.length() {
@@ -2048,11 +2054,14 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
       plainParents = false
       run interruptions(nodes, &mut output, id)
     }
-    if nodes.node(id).firstChild != NO_NODE && (usedOverflowForAxis(style, true) != Overflow.Visible || usedOverflowForAxis(style, false) != Overflow.Visible) { plainParents = false }
+    if nodes.node(id).firstChild != NO_NODE && (scrollable(usedOverflowForAxis(style, true)) || scrollable(usedOverflowForAxis(style, false))) { plainParents = false }
     if outOfFlow(style) {
-      plainParents = false
+      if style.position == Position.Fixed { plainParents = false }
       output.outOfFlowBoxes.set(id, true)
       run absolute(nodes, &mut output, &mut measurer, id, viewport, false, &viewportStyle)
+      // Its border box always adds to its containing block's overflow.
+      let placed = output.publication(id)
+      if placed != NO_NODE { run output.overflowEscapes.append(placed) }
     }
     else if output.boxes[id].hasBox() && generatedParent(nodes, id) == NO_NODE && nodes.node(id).kind != BoxKind.Inline {
       let layout = output.boxes[id]
@@ -2080,9 +2089,9 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   let mut moved = false
   if relative { moved = run positionRelative(nodes, &mut output, viewport) }
   if moved || visual { output.fragments.offsetting() }
-  // Every box is an unmoved in-flow box fragment under the root, and every
-  // parent's overflow is visible and so already covers its children's
-  // border and margin boxes (see overflowGeometry).
+  // Every box is an unmoved box fragment under the root, every in-flow one
+  // under a parent whose visible overflow already covers its border and
+  // margin boxes (see overflowGeometry), and every absolute one marked.
   let plain = plainParents && !moved && !visual && output.fragments.plain
     && output.frame == NO_NODE && output.fragments.settled.length() == 0 && output.stats.reusedLayouts == 0
   if plain { run markOverflowEscapes(&mut output) }

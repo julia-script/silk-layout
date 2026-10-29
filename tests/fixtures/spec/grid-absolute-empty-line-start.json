@@ -1,0 +1,72 @@
+{
+  "name": "grid-absolute-empty-line-start",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#grid-placement-errors",
+    "https://drafts.csswg.org/css-grid-2/#grid-align"
+  ],
+  "derivation": "Grid \u00a711.5 keeps the empty axes' sole line at content flow-start despite end/center distribution. The start is(10,10), and auto ends use the padding rectangle(0,0,120,100), leaving110\u00d790.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 120,
+          "height": 100,
+          "paddingLeft": 10,
+          "paddingRight": 10,
+          "paddingTop": 10,
+          "paddingBottom": 10,
+          "columnGap": 5,
+          "rowGap": 5,
+          "gridTemplateColumns": "none",
+          "gridTemplateRows": "none",
+          "justifyContent": "end",
+          "alignContent": "center"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": 0,
+            "right": 0,
+            "top": 0,
+            "bottom": 0
+          },
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 120,
+        "height": 100
+      },
+      {
+        "x": 10,
+        "y": 10,
+        "width": 110,
+        "height": 90
+      }
+    ]
+  }
+}

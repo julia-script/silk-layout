@@ -1,0 +1,529 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.num.usize
+import silk.core.effect { Effect }
+import silk.testing.testing { Testing, AssertionError }
+import fragmentation { FragmentationError, Fragmentainers, FragmentAncestor }
+import silk.option { Option }
+import breaks { FragmentainerKind }
+import fragment_flow { computeFragmented }
+import text {
+  TextMeasure,
+  TextError,
+  TextContext,
+  TextBreak,
+  TextAnalysis,
+  TextShapeRequest,
+  TextRun
+}
+import style {
+  Style,
+  Dimension,
+  Edges,
+  Display,
+  DisplayOutside,
+  DisplayInside,
+  Position,
+  BreakBetween,
+  WritingMode,
+  Direction
+}
+import geometry {
+  Measure,
+  MeasureRequest,
+  Measured,
+  BaselineSet,
+  NaturalDimensions,
+  ScrollbarRequest,
+  ScrollbarMetrics,
+  FontRequest,
+  FontMetrics,
+  Size,
+  Rect,
+  Point,
+  OptionalSize
+}
+import grid_style { GridTemplate, GridTrack, GridBreadth, GridLine, GridLineKind, GridError }
+import tree { Tree, LayoutTree, NodeId, InvalidNode }
+import engine { compute }
+
+struct EmptyMeasure {}
+
+impl Measure for EmptyMeasure {
+  fn font(provider: &mut Self, request: FontRequest) -> FontMetrics {
+    drop provider
+    drop request
+    return FontMetrics.zero()
+  }
+
+  fn scrollbars(provider: &mut Self, request: ScrollbarRequest) -> ScrollbarMetrics {
+    drop provider
+    drop request
+    return ScrollbarMetrics.zero()
+  }
+
+  fn natural(provider: &mut Self, key: usize) -> NaturalDimensions {
+    drop provider
+    drop key
+    return NaturalDimensions.none()
+  }
+
+  fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
+    drop provider
+    drop key
+    let mut size = Size { width: 0.0, height: 0.0 }
+    if request.known.widthDefinite {
+      size.width = request.known.width
+    }
+    if request.known.heightDefinite {
+      size.height = request.known.height
+    }
+    return Measured {
+      size: size,
+      scrollableOverflow: Rect.zero(),
+      contentBlockSize: 0.0,
+      firstBaselines: BaselineSet.zero(),
+      lastBaselines: BaselineSet.zero(),
+      hasBaseline: false,
+      hasLineBoxes: false,
+    }
+  }
+}
+
+impl TextMeasure for EmptyMeasure {
+  fn beginTextLayout(provider: &mut Self) {
+    drop provider
+  }
+
+  effect fn analyze(
+    provider: &mut Self,
+    context: TextContext,
+    output: &mut List<TextBreak>,
+  ) -> TextAnalysis
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if context.tokens.length > 0 {
+      source = context.tokens[0].source
+    }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+
+  effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>)
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    drop output
+    let mut source = usize.MAX
+    if request.start.unit < request.context.tokens.length {
+      source = request.context.tokens[request.start.unit].source
+    }
+    fail TextError { source: source, message: "box-only fixture does not support text" }
+  }
+}
+
+fn gridStyle() -> Style {
+  let mut style = Style.make()
+  style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  style.position = Position.Relative
+  style.width = Dimension.px(300.0)
+  style.height = Dimension.px(200.0)
+  style.columnGap = Dimension.px(10.0)
+  style.rowGap = Dimension.px(20.0)
+  return move style
+}
+
+fn absoluteStyle() -> Style {
+  let mut style = Style.make()
+  style.position = Position.Absolute
+  style.inset = Edges.all(Dimension.px(0.0))
+  return move style
+}
+
+effect fn tracks(
+  tree: &mut Tree,
+  owner: NodeId,
+  firstColumn: f64,
+  secondColumn: f64,
+  firstRow: f64,
+  secondRow: f64,
+)
+  ! OutOfMemoryError | InvalidNode | GridError
+  ? &mut Allocator {
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(firstColumn)))
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(secondColumn)))
+  run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(firstRow)))
+  run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(secondRow)))
+  run tree.setGrid(owner, move template)
+}
+
+effect fn place(tree: &mut Tree, child: NodeId, column: i32, row: i32)
+  ! OutOfMemoryError | InvalidNode | GridError
+  ? &mut Allocator {
+  let mut template = GridTemplate.make()
+  template.placement.columnStart = GridLine { kind: GridLineKind.Line, number: column, name: 0 }
+  template.placement.columnEnd = GridLine { kind: GridLineKind.Line, number: column + 1, name: 0 }
+  template.placement.rowStart = GridLine { kind: GridLineKind.Line, number: row, name: 0 }
+  template.placement.rowEnd = GridLine { kind: GridLineKind.Line, number: row + 1, name: 0 }
+  run tree.setGrid(child, move template)
+}
+
+effect fn layout(tree: &Tree, output: &mut LayoutTree)
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode
+  ? &mut Allocator {
+  let mut measure = EmptyMeasure {}
+  run compute(tree, &mut output, &mut measure, OptionalSize.definite(500.0, 500.0))
+}
+
+effect fn expectRect(
+  output: &mut LayoutTree,
+  source: NodeId,
+  x: f64,
+  y: f64,
+  width: f64,
+  height: f64,
+)
+  ! InvalidNode | AssertionError<'static> {
+  let actual = run output.sourceBounds(source)
+  run Testing.expect(
+    actual.x == x && actual.y == y && actual.width == width && actual.height == height,
+    "absolute grid bounds match the hand-derived track area",
+  )
+}
+
+effect fn expectFresh(tree: &Tree, output: &mut LayoutTree, source: NodeId)
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static>
+  ? &mut Allocator {
+  let mut fresh = LayoutTree.make()
+  run layout(tree, &mut fresh)
+  let actual = run output.sourceBounds(source)
+  let expected = run fresh.sourceBounds(source)
+  run Testing.expect(
+    actual.x == expected.x && actual.y == expected.y && actual.width == expected.width
+      && actual.height == expected.height,
+    "retained absolute grid geometry matches an independent fresh layout",
+  )
+}
+
+// Grid 2 §10.1: each absolute child resolves its own containing area.
+// Columns are [0,80] and [90,210]; rows are [0,50] and [70,160].
+// Zero insets and auto sizes fill those areas, not the 300x200 grid box.
+effect fn siblingAreas()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(gridStyle())
+  let root = tree.root()
+  run tracks(&mut tree, root, 80.0, 120.0, 50.0, 90.0)
+  let first = run tree.append(root, absoluteStyle())
+  let second = run tree.append(root, absoluteStyle())
+  run place(&mut tree, first, 1, 1)
+  run place(&mut tree, second, 2, 2)
+  let mut output = LayoutTree.make()
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, first, 0.0, 0.0, 80.0, 50.0)
+  run expectRect(&mut output, second, 90.0, 70.0, 120.0, 90.0)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, first, 0.0, 0.0, 80.0, 50.0)
+  run expectRect(&mut output, second, 90.0, 70.0, 120.0, 90.0)
+}
+
+test effect fn absoluteGridSiblingsKeepDistinctAreasAcrossComputes()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run siblingAreas() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Only the out-of-flow child's placement changes; the container's tracks
+// remain reusable. Its new origin is (80 + 10, 50 + 20), not the old (0,0).
+effect fn placementEdit()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(gridStyle())
+  let root = tree.root()
+  run tracks(&mut tree, root, 80.0, 120.0, 50.0, 90.0)
+  let child = run tree.append(root, absoluteStyle())
+  run place(&mut tree, child, 1, 1)
+  let mut output = LayoutTree.make()
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 0.0, 0.0, 80.0, 50.0)
+  run place(&mut tree, child, 2, 2)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 90.0, 70.0, 120.0, 90.0)
+  run expectFresh(&tree, &mut output, child)
+  run place(&mut tree, child, 1, 2)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 0.0, 70.0, 80.0, 90.0)
+}
+
+test effect fn absoluteGridPlacementEditReadsRetainedTracks()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run placementEdit() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Replacing just the template moves line 2 to (40 + 10, 30 + 20)
+// and changes the second track extents from 120x90 to 160x110.
+effect fn templateEdit()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(gridStyle())
+  let root = tree.root()
+  run tracks(&mut tree, root, 80.0, 120.0, 50.0, 90.0)
+  let child = run tree.append(root, absoluteStyle())
+  run place(&mut tree, child, 2, 2)
+  let mut output = LayoutTree.make()
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 90.0, 70.0, 120.0, 90.0)
+  run tracks(&mut tree, root, 40.0, 160.0, 30.0, 110.0)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 50.0, 50.0, 160.0, 110.0)
+  run expectFresh(&tree, &mut output, child)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 50.0, 50.0, 160.0, 110.0)
+}
+
+test effect fn absoluteGridTemplateEditReplacesRetainedGeometry()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run templateEdit() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Appending beneath an earlier sibling shifts generated box IDs without
+// changing either grid. Distinct templates expose geometry assigned to the
+// wrong owner. The grid border origins are y=20 and y=220, respectively.
+effect fn structuralEdit()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(Style.make())
+  let root = tree.root()
+  let mut earlierStyle = Style.make()
+  earlierStyle.height = Dimension.px(20.0)
+  let earlier = run tree.append(root, move earlierStyle)
+  let firstGrid = run tree.append(root, gridStyle())
+  run tracks(&mut tree, firstGrid, 80.0, 120.0, 50.0, 90.0)
+  let first = run tree.append(firstGrid, absoluteStyle())
+  run place(&mut tree, first, 2, 2)
+  let secondGrid = run tree.append(root, gridStyle())
+  run tracks(&mut tree, secondGrid, 40.0, 160.0, 30.0, 110.0)
+  let second = run tree.append(secondGrid, absoluteStyle())
+  run place(&mut tree, second, 2, 2)
+  let mut output = LayoutTree.make()
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, first, 90.0, 90.0, 120.0, 90.0)
+  run expectRect(&mut output, second, 50.0, 270.0, 160.0, 110.0)
+  let mut addedStyle = Style.make()
+  addedStyle.height = Dimension.px(0.0)
+  let added = run tree.append(earlier, move addedStyle)
+  drop added
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, first, 90.0, 90.0, 120.0, 90.0)
+  run expectRect(&mut output, second, 50.0, 270.0, 160.0, 110.0)
+  run expectFresh(&tree, &mut output, first)
+  run expectFresh(&tree, &mut output, second)
+}
+
+test effect fn absoluteGridOwnersSurviveUnrelatedBoxRemapping()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run structuralEdit() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// A positioned non-grid uses its entire padding box; a static grid ceases
+// to be the containing block. The outer relative root then supplies 500x400.
+// Returning to relative Grid must publish the original area again.
+effect fn modeAndPositionEdit()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut rootStyle = Style.make()
+  rootStyle.position = Position.Relative
+  rootStyle.width = Dimension.px(500.0)
+  rootStyle.height = Dimension.px(400.0)
+  let mut tree = run Tree.make(move rootStyle)
+  let root = tree.root()
+  let mut spacerStyle = Style.make()
+  spacerStyle.height = Dimension.px(20.0)
+  let spacer = run tree.append(root, move spacerStyle)
+  drop spacer
+  let grid = run tree.append(root, gridStyle())
+  run tracks(&mut tree, grid, 80.0, 120.0, 50.0, 90.0)
+  let child = run tree.append(grid, absoluteStyle())
+  run place(&mut tree, child, 2, 2)
+  let mut output = LayoutTree.make()
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 90.0, 90.0, 120.0, 90.0)
+  let mut block = gridStyle()
+  block.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
+  run tree.setStyle(grid, move block)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 0.0, 20.0, 300.0, 200.0)
+  run expectFresh(&tree, &mut output, child)
+  run tree.setStyle(grid, gridStyle())
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 90.0, 90.0, 120.0, 90.0)
+  let mut unpositioned = gridStyle()
+  unpositioned.position = Position.Static
+  run tree.setStyle(grid, move unpositioned)
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 0.0, 0.0, 500.0, 400.0)
+  run expectFresh(&tree, &mut output, child)
+  run tree.setStyle(grid, gridStyle())
+  run layout(&tree, &mut output)
+  run expectRect(&mut output, child, 90.0, 90.0, 120.0, 90.0)
+}
+
+test effect fn absoluteGridModeAndPositionTransitionsDiscardStaleAreas()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run modeAndPositionEdit() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+fn pageFrames<'a>(pages: &'a [Rect]) -> Fragmentainers<'a> {
+  return Fragmentainers {
+    rects: Option<&'a [Rect]>.Some { value: pages },
+    repeatStep: Option<Point>.None,
+    contexts: Option<&'a [FragmentainerKind]>.None,
+    ancestors: Option<&'a [FragmentAncestor]>.None,
+    kind: FragmentainerKind.Page,
+    writingMode: WritingMode.HorizontalTb,
+    direction: Direction.Ltr,
+    firstPageRight: true,
+    rectoOnRight: true,
+  }
+}
+
+// A fixed grid fills each page's initial containing block. After the fixed
+// first column/row and gaps, its second area is 70x30 on a 100x60 page
+// and 130x50 on a 160x80 page. Capturing a probe or the previous page's
+// geometry would give the second repeated child the wrong extents.
+effect fn fixedGridPages()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(Style.make())
+  let root = tree.root()
+  let mut firstStyle = Style.make()
+  firstStyle.height = Dimension.px(10.0)
+  let first = run tree.append(root, move firstStyle)
+  drop first
+  let mut secondStyle = Style.make()
+  secondStyle.height = Dimension.px(10.0)
+  secondStyle.breakBefore = BreakBetween.Page
+  let second = run tree.append(root, move secondStyle)
+  drop second
+  let mut fixedStyle = absoluteStyle()
+  fixedStyle.position = Position.Fixed
+  fixedStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  fixedStyle.columnGap = Dimension.px(10.0)
+  fixedStyle.rowGap = Dimension.px(20.0)
+  let fixed = run tree.append(root, move fixedStyle)
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.flex(1.0)))
+  run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+  run template.rows.tracks.append(GridTrack.breadth(GridBreadth.flex(1.0)))
+  run tree.setGrid(fixed, move template)
+  let child = run tree.append(fixed, absoluteStyle())
+  run place(&mut tree, child, 2, 2)
+  let pages = [
+    Rect { x: 0.0, y: 0.0, width: 100.0, height: 60.0 },
+    Rect { x: 0.0, y: 200.0, width: 160.0, height: 80.0 },
+  ]
+  let frames = pageFrames(&pages)
+  let mut output = LayoutTree.make()
+  let mut measure = EmptyMeasure {}
+  run computeFragmented(&tree, &mut output, &mut measure, OptionalSize.none(), move frames)
+  let expected = [
+    Rect { x: 30.0, y: 30.0, width: 70.0, height: 30.0 },
+    Rect { x: 30.0, y: 230.0, width: 130.0, height: 50.0 },
+  ]
+  let mut rects = run output.sourceRects(child)
+  let mut count: usize = 0
+  while true {
+    let actual = match move rects.next() {
+      Option<Rect>.Some { value } => value
+      Option<Rect>.None => {
+        break
+      }
+    }
+    run Testing.expect(
+      count < expected.length,
+      "the absolute child appears only once per fixed grid repetition",
+    )
+    let wanted = expected[count]
+    run Testing.expect(
+      actual.x == wanted.x && actual.y == wanted.y && actual.width == wanted.width
+        && actual.height == wanted.height,
+      "each fixed grid repetition uses its own page-sized track geometry",
+    )
+    count = count + 1
+  }
+  run Testing.expect(count == 2, "the absolute grid child repeats on both differently sized pages")
+}
+
+test effect fn absoluteChildOfFixedGridUsesEachPagesGeometry()
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run fixedGridPages() |> Effect.provideMut<Allocator>(&mut allocator)
+}

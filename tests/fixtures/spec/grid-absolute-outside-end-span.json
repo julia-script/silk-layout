@@ -1,0 +1,78 @@
+{
+  "name": "grid-absolute-outside-end-span",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "position"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#abspos-items",
+    "https://drafts.csswg.org/css-grid-2/#grid-placement-errors",
+    "https://drafts.csswg.org/css-grid-2/#grid-align"
+  ],
+  "derivation": "Resolve end line5 to logical4 and its two-track start span to2. The absent end becomes the padding end120; the surviving start is10+20+5+30+5=70, leaving50px.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "boxSizing": "border-box",
+          "width": 120,
+          "height": 100,
+          "paddingLeft": 10,
+          "paddingRight": 10,
+          "paddingTop": 10,
+          "paddingBottom": 10,
+          "columnGap": 5,
+          "rowGap": 5,
+          "gridTemplateColumns": [
+            20,
+            30,
+            40
+          ],
+          "gridTemplateRows": [
+            20
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "inset": {
+            "left": 0,
+            "right": 0,
+            "top": 0,
+            "bottom": 0
+          },
+          "gridColumnStart": {
+            "span": 2
+          },
+          "gridColumnEnd": 5
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 120,
+        "height": 100
+      },
+      {
+        "x": 70,
+        "y": 0,
+        "width": 50,
+        "height": 100
+      }
+    ]
+  }
+}

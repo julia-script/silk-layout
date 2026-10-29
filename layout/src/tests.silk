@@ -14,3 +14,5 @@ import grid_line_tests
 import grid_template_tests
 import grid_alignment_tests
 import grid_baseline_tests
+import grid_absolute_tests
+import grid_geometry_tests

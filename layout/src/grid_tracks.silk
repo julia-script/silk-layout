@@ -12,6 +12,9 @@ import grid_style { GridBreadth, GridBreadthKind, GridTrack, GridTrackKind }
 pub struct TrackState {
   pub base: f32,
   pub position: f32,
+  // Inherited edge MBP can leave a negative geometric breadth. Keep its
+  // endpoint independent of the nonnegative sizing base (Grid 2 §9).
+  pub endAdjustment: f32,
   pub growthLimit: f32,
   pub factor: f32,
   pub cap: f32,
@@ -32,6 +35,7 @@ impl TrackState {
     return TrackState {
       base: max(0.0, size),
       position: 0.0,
+      endAdjustment: 0.0,
       growthLimit: max(0.0, size),
       factor: 0.0,
       cap: max(0.0, size),
@@ -54,6 +58,10 @@ impl TrackState {
     result.cap = UNBOUNDED
     result.factor = max(0.0, factor)
     return result
+  }
+
+  pub fn endPosition(self: &Self) -> f32 with Intrinsic.inlineAlways() {
+    return self.position + self.base + self.endAdjustment
   }
 }
 
@@ -923,5 +931,5 @@ pub fn positionTracks(tracks: &mut [TrackState], gap: f32) -> f32 {
 // Positions must be current; the caller supplies a nonempty, in-range span.
 pub fn spanSize(tracks: &[TrackState], start: usize, end: usize) -> f32 {
   let last = &tracks[end - 1]
-  return last.position - tracks[start].position + last.base
+  return max(0.0, last.endPosition() - tracks[start].position)
 }

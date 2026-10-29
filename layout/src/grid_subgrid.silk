@@ -90,12 +90,13 @@ effect fn copyAxis(
     } else {
       if track.maximum == GridBreadthKind.Length { track.base = track.cap }
       track.position = extent
-      extent = extent + track.base
+      extent = track.endPosition()
       if index + 1 < end { extent = extent + gap }
     }
     run result.tracks.append(track)
     index = index + 1
   }
+  extent = max(0.0, extent)
   result.extent = extent
   if reverse {
     let values = result.tracks.asMutSlice()
@@ -109,7 +110,7 @@ effect fn copyAxis(
     }
     index = 0
     while index < values.length {
-      values[index].position = extent - values[index].position - values[index].base
+      values[index].position = extent - values[index].endPosition()
       index = index + 1
     }
   }
@@ -293,17 +294,14 @@ pub effect fn usedTracks(
   while index < tracks.length {
     let mut track = tracks[index]
     let mut low = track.position - start + delta
-    let mut high = track.position + track.base - start - delta
+    let mut high = track.endPosition() - start - delta
     if index == 0 { low = 0.0 }
-    if index + 1 == tracks.length {
-      high = track.position + track.base - start - end
-      // The terminal line is the content edge, even when edge MBP consumes
-      // the entire last track. Flooring its breadth must not move that line
-      // outward and enlarge every item spanning into it (§9).
-      low = max(0.0, min(low, high))
-    }
+    if index + 1 == tracks.length { high = track.endPosition() - start - end }
     let adjustment = (high - low) - track.base
     track.base = max(0.0, high - low)
+    // Neither an interior start nor an outer end moves when the sizing
+    // breadth floors at zero. A spanning item still uses the original end.
+    track.endAdjustment = min(0.0, high - low)
     track.position = low
     if track.cap < UNBOUNDED { track.cap = max(0.0, track.cap + adjustment) }
     if track.growthLimit < UNBOUNDED { track.growthLimit = max(0.0, track.growthLimit + adjustment) }

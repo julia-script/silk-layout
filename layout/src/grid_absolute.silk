@@ -52,7 +52,7 @@ impl GridAxisGeometry {
     let mut at: usize = 0
     while at < tracks.length {
       run self.tracks.append(
-        TrackEdges { start: tracks[at].position, end: tracks[at].position + tracks[at].base },
+        TrackEdges { start: tracks[at].position, end: tracks[at].endPosition() },
       )
       at = at + 1
     }

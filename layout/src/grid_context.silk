@@ -72,6 +72,7 @@ fn sameAxis(a: &InheritedAxis, b: &InheritedAxis) -> bool {
     // Private TrackState scratch is not inherited; all public sizing and
     // positioning dependencies are compared, including collapsed gutters.
     if x.base != y.base || x.position != y.position || x.growthLimit != y.growthLimit
+      || x.endAdjustment != y.endAdjustment
       || x.factor != y.factor || x.cap != y.cap || x.minimum != y.minimum || x.maximum != y.maximum
       || x.fitContent != y.fitContent || x.collapsed != y.collapsed { return false }
     at = at + 1

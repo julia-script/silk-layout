@@ -32,6 +32,7 @@ effect fn descriptor(change: usize) -> GridContext ! OutOfMemoryError ? &mut All
   if change == 9 { track.maximum = GridBreadthKind.Auto }
   if change == 10 { track.fitContent = true }
   if change == 11 { track.collapsed = true }
+  if change == 34 { track.endAdjustment = -1.0 }
   run context.columns.tracks.append(track)
   run context.columns.tracks.append(TrackState.fixed(40.0))
   let mut line = GridNamedLine { line: 1, name: 4, repeat: 0 }
@@ -78,7 +79,7 @@ test effect fn inheritedContextKeysCompareCompleteDependencies()
   let equal = run bind(&mut store, 3, 0) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(key == equal && key & 3 == 1, "equal horizontal columns retain their width identity")
   let mut change: usize = 1
-  while change <= 33 {
+  while change <= 34 {
     let baseline = run bind(&mut store, 3, 0) |> Effect.provideMut<Allocator>(&mut allocator)
     let changed = run bind(&mut store, 3, change) |> Effect.provideMut<Allocator>(&mut allocator)
     run Testing.expect(changed != baseline && !store.valid(3, baseline), "every descriptor dependency invalidates the previous identity")

@@ -2,11 +2,12 @@ import silk.core.ownership { Copy }
 
 // Values have already passed CSS parsing and cascade. Percentages are fractions.
 // Keeping a percentage coefficient distinguishes 0% from 0px in indefinite axes.
-pub enum DimensionKind { Auto, Length, Percent, Calc, MinContent, MaxContent, FitContent, Content, None }
+pub enum DimensionKind { Auto, Length, Percent, Calc, MinContent, MaxContent, FitContent, Content, None, Normal }
 pub struct Dimension { pub kind: DimensionKind, pub value: f32, pub percent: f32 }
 impl Copy for Dimension {}
 impl Dimension {
   pub fn auto() -> Dimension { return Dimension { kind: DimensionKind.Auto, value: 0.0, percent: 0.0 } }
+  pub fn normal() -> Dimension { return Dimension { kind: DimensionKind.Normal, value: 0.0, percent: 0.0 } }
   pub fn px(value: f32) -> Dimension { return Dimension { kind: DimensionKind.Length, value: value, percent: 0.0 } }
   pub fn pct(value: f32) -> Dimension { return Dimension { kind: DimensionKind.Percent, value: 0.0, percent: value } }
   pub fn calc(length: f32, percent: f32) -> Dimension { return Dimension { kind: DimensionKind.Calc, value: length, percent: percent } }
@@ -176,7 +177,7 @@ impl Style {
       justifyContentSafety: OverflowAlignment.Default, alignContentSafety: OverflowAlignment.Default,
       alignItemsSafety: OverflowAlignment.Default, alignSelfSafety: OverflowAlignment.Default,
       justifySelfSafety: OverflowAlignment.Default, justifyItemsSafety: OverflowAlignment.Default,
-      rowGap: Dimension.px(0.0), columnGap: Dimension.px(0.0),
+      rowGap: Dimension.normal(), columnGap: Dimension.normal(),
       overflowX: Overflow.Visible, overflowY: Overflow.Visible,
       scrollbarWidth: ScrollbarWidth.Auto, scrollbarGutter: ScrollbarGutter.Auto,
       position: Position.Static, float: Float.None, clear: Clear.None, visibility: Visibility.Visible,

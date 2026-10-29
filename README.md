@@ -153,6 +153,9 @@ The grid adapter accepts only parsed longhands, not CSS track-list strings or sh
 | `gridTemplateAreas` | Rectangular array of nonempty rows of cell-name strings; `"."` marks an empty cell, `[]` clears the template; every named area must form a rectangle | `[]` |
 | `gridAutoFlow` | `"row"`, `"column"`, `"row dense"`, `"column dense"` | `"row"` |
 | `gridRowStart`, `gridRowEnd`, `gridColumnStart`, `gridColumnEnd` | `"auto"`, nonzero integer, identifier, `{"line":-2,"name":"edge"}`, or `{"span":2,"name":"edge"}`; `name` is optional | `"auto"` |
+| `rowGap`, `columnGap` | A gap dimension or `"normal"`; normal resolves to zero in standalone Grid and Flex | `"normal"` |
+
+The native gap default is `Dimension.normal()` (`DimensionKind.Normal`), distinct from an explicitly authored zero without adding fields to `Style`.
 
 A track size is a nonnegative pixel number, `{"percent":0.5}`, `{"length":10,"percent":0.5}`, `"auto"`, `"min-content"`, `"max-content"`, `{"fr":1}`, `{"minmax":[20,{"fr":1}]}`, or `{"fitContent":{"percent":0.5}}`. `minmax` has exactly two breadths: its minimum cannot be flexible; neither breadth is itself `minmax` or `fitContent`. `fitContent` takes a length/percentage. Numeric values must be finite; flex factors and direct length/percentage sizes must be nonnegative. A `calc` dimension may have signed coefficients; its resolved size is range-clamped during track sizing, not while parsing coefficients.
 

@@ -10,6 +10,9 @@ pub struct Input {
   // Available-space constraints, never percentage-resolution bases.
   pub parentMaxSize: Size, pub scrollportSize: Size,
   pub known: OptionalSize,
+  // Grid-owned inherited dependencies: low bits 1/2 mark physical width/height;
+  // upper bits are a non-recycled descriptor identity. Zero is ordinary layout.
+  pub gridContext: usize,
   // Border-box lower bounds, not preferred sizes or percentage bases.
   // Intrinsic queries ignore the bound in their queried axis.
   pub minimum: Size,
@@ -38,7 +41,7 @@ impl Input {
     let mut height = AvailableSpace.maxContent()
     if parent.widthDefinite { width = AvailableSpace.definite(parent.width) }
     if parent.heightDefinite { height = AvailableSpace.definite(parent.height) }
-    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), minimum: Size { width: 0.0, height: 0.0 }, availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, baselines: true, fullSize: true, fragmentation: FragmentInput.continuous() }
+    return Input { parent: parent, initialContainingBlock: parent, parentMaxSize: Size { width: UNBOUNDED, height: UNBOUNDED }, scrollportSize: Size { width: UNBOUNDED, height: UNBOUNDED }, known: OptionalSize.none(), gridContext: 0, minimum: Size { width: 0.0, height: 0.0 }, availableWidth: width, availableHeight: height, blockRoot: false, blockify: false, atomicInline: false, intrinsicWidth: false, intrinsicHeight: false, shrinkToFit: false, indefiniteWidth: false, indefiniteHeight: false, parentWritingMode: WritingMode.HorizontalTb, parentTextOrientation: TextOrientation.Mixed, parentJustifyItems: Align.Normal, parentJustifyItemsSafety: OverflowAlignment.Default, bfcContentOrigin: Point { x: 0.0, y: 0.0 }, performLayout: true, baselines: true, fullSize: true, fragmentation: FragmentInput.continuous() }
   }
   pub fn effectiveMinimum(self: &Self) -> Size with Intrinsic.inlineAlways() {
     let mut result = self.minimum
@@ -92,6 +95,7 @@ pub fn resolves(value: Dimension, definite: bool) -> bool {
   return value.kind == DimensionKind.Length || ((value.kind == DimensionKind.Percent || value.kind == DimensionKind.Calc) && definite)
 }
 pub fn resolve(value: Dimension, basis: f32, definite: bool, fallback: f32) -> f32 {
+  if value.kind == DimensionKind.Normal { return 0.0 }
   if value.kind == DimensionKind.Length { return value.value }
   if definite && (value.kind == DimensionKind.Percent || value.kind == DimensionKind.Calc) { return value.value + value.percent * basis }
   return fallback
@@ -140,9 +144,9 @@ pub fn resolveBoxEdges(style: &Style, input: &Input, zeroEdges: bool) -> Resolve
   if style.boxSizing == BoxSizing.BorderBox { addWidth = 0.0
     addHeight = 0.0 }
   let mut size = OptionalSize.none()
-  if !input.intrinsicWidth && resolves(style.width, input.parent.widthDefinite) { size.width = max(inset.horizontal(), resolve(style.width, input.parent.width, input.parent.widthDefinite, 0.0) + addWidth)
+  if input.gridContext & 1 == 0 && !input.intrinsicWidth && resolves(style.width, input.parent.widthDefinite) { size.width = max(inset.horizontal(), resolve(style.width, input.parent.width, input.parent.widthDefinite, 0.0) + addWidth)
     size.widthDefinite = true }
-  if !input.intrinsicHeight && resolves(style.height, input.parent.heightDefinite) { size.height = max(inset.vertical(), resolve(style.height, input.parent.height, input.parent.heightDefinite, 0.0) + addHeight)
+  if input.gridContext & 2 == 0 && !input.intrinsicHeight && resolves(style.height, input.parent.heightDefinite) { size.height = max(inset.vertical(), resolve(style.height, input.parent.height, input.parent.heightDefinite, 0.0) + addHeight)
     size.heightDefinite = true }
   if input.known.widthDefinite { size.width = input.known.width
     size.widthDefinite = true }
@@ -153,6 +157,15 @@ pub fn resolveBoxEdges(style: &Style, input: &Input, zeroEdges: bool) -> Resolve
     gutter: ResolvedEdges.zero(), scrollbarMetrics: ScrollbarMetrics.zero(),
     min: Size { width: max(input.minimum.width, max(inset.horizontal(), minimumLength(style.minWidth, input.parent.width, input.parent.widthDefinite) + addWidth)), height: max(input.minimum.height, max(inset.vertical(), minimumLength(style.minHeight, input.parent.height, input.parent.heightDefinite) + addHeight)) },
     max: Size { width: max(inset.horizontal(), resolve(style.maxWidth, input.parent.width, input.parent.widthDefinite, UNBOUNDED) + addWidth), height: max(inset.vertical(), resolve(style.maxHeight, input.parent.height, input.parent.heightDefinite, UNBOUNDED) + addHeight) },
+  }
+  // Grid 2 §9: authored constraints cannot resize inherited tracks.
+  if input.gridContext & 1 != 0 {
+    result.min.width = max(input.minimum.width, inset.horizontal())
+    result.max.width = UNBOUNDED
+  }
+  if input.gridContext & 2 != 0 {
+    result.min.height = max(input.minimum.height, inset.vertical())
+    result.max.height = UNBOUNDED
   }
   if input.intrinsicWidth {
     result.min.width = inset.horizontal()
@@ -187,13 +200,22 @@ pub fn childrenInput(input: &Input, style: &Style, box: &ResolvedBox, parent: Op
     subtractHeight = box.inset.vertical()
   }
   let requestMinimum = input.effectiveMinimum()
-  let minimum = Size {
+  let mut minimum = Size {
     width: max(requestMinimum.width - box.inset.horizontal(), max(0.0, resolve(style.minWidth, input.parent.width, input.parent.widthDefinite, 0.0) - subtractWidth)),
     height: max(requestMinimum.height - box.inset.vertical(), max(0.0, resolve(style.minHeight, input.parent.height, input.parent.heightDefinite, 0.0) - subtractHeight)),
   }
   result.parentMaxSize = Size {
     width: max(minimum.width, resolve(style.maxWidth, input.parent.width, input.parent.widthDefinite, UNBOUNDED) - subtractWidth),
     height: max(minimum.height, resolve(style.maxHeight, input.parent.height, input.parent.heightDefinite, UNBOUNDED) - subtractHeight),
+  }
+  // The ignored subgrid min/max must not reappear as orthogonal-child limits.
+  if input.gridContext & 1 != 0 {
+    minimum.width = max(0.0, requestMinimum.width - box.inset.horizontal())
+    result.parentMaxSize.width = UNBOUNDED
+  }
+  if input.gridContext & 2 != 0 {
+    minimum.height = max(0.0, requestMinimum.height - box.inset.vertical())
+    result.parentMaxSize.height = UNBOUNDED
   }
   result.scrollportSize = input.scrollportSize
   if scrollable(usedOverflowForAxis(style, true)) || scrollable(usedOverflowForAxis(style, false)) {

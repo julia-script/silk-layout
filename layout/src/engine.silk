@@ -203,7 +203,15 @@ effect fn contentAlgorithm<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   if nodes.node(id).measurement == Measurement.Content { return measureLeaf(nodes, &mut measurer, id, &request, &resolved, &bfc) }
   if nodes.style(id).replaced { return replacedContents(nodes.style(id), &request, &resolved, natural) }
   if isFlex(nodes.style(id)) { return run layoutFlex(nodes, &mut output, &mut measurer, id, &request, &resolved) }
-  if isGrid(nodes.style(id)) { return run layoutGrid(nodes, &mut output, &mut measurer, id, &request, &resolved) }
+  if isGrid(nodes.style(id)) {
+    if request.performLayout { return run layoutGrid(nodes, &mut output, &mut measurer, id, &request, &resolved) }
+    // The caller's accepted binding precedes this marker. A size-only Grid
+    // walk may bind descendants, but cannot replace their accepted finals.
+    let contexts = output.cache.gridContexts.checkpoint()
+    let result = run layoutGrid(nodes, &mut output, &mut measurer, id, &request, &resolved)
+    output.cache.gridContexts.restore(contexts)
+    return result
+  }
   return run layoutBlock(nodes, &mut output, &mut measurer, id, nodes.style(id), &request, &resolved, &mut bfc)
 }
 
@@ -602,6 +610,9 @@ fn cacheKey(shape: u16, input: &Input, viewportFree: bool) -> Input {
 pub fn constraintFreeProbe(shape: u16) -> bool { return shape & KEY_FIXED == 0 && shape & KEY_EMPTY != 0 }
 pub fn normalizeKey(shape: u16, key: &mut Input, viewportFree: bool) {
   key.minimum = key.effectiveMinimum()
+  // Style-only key shapes cannot discard inherited-axis dependencies.
+  // Preserve the complete request; ordinary key-zero normalization is unchanged.
+  if key.gridContext != 0 { return }
   // Only replaced boxes and orthogonal flows read the initial containing
   // block and the scrollport limits; see Incremental.markSubtrees.
   if viewportFree {
@@ -1072,9 +1083,11 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   let style = nodes.style(id)
   let node = nodes.node(id)
   let display = effectiveDisplay(style, &input)
+  let inheritedWidth = input.gridContext & 1 != 0
+  let inheritedHeight = input.gridContext & 2 != 0
   // Only flex-item blockification suppresses a declared in-flow float.
   let floating = style.float != Float.None && !input.blockify && !outOfFlow(style)
-  if plainSizing(style, node, &input, fragmented, &display) {
+  if input.gridContext == 0 && plainSizing(style, node, &input, fragmented, &display) {
     // What the general path below reduces to for a horizontal in-flow block
     // in a horizontal parent, with no aspect ratio, natural size, intrinsic
     // size keyword or scrollbar: only fill-available inline sizing applies.
@@ -1103,15 +1116,15 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   let mut natural = NaturalDimensions.none()
   if node.measurement == Measurement.Natural { natural = Measure.natural(&mut measurer, node.measureKey) }
   sizing.natural = natural
-  if !input.known.widthDefinite && !input.intrinsicWidth {
+  if !inheritedWidth && !input.known.widthDefinite && !input.intrinsicWidth {
     if style.width.kind == DimensionKind.MinContent { sizing.request.availableWidth = AvailableSpace.minContent() }
     if style.width.kind == DimensionKind.MaxContent { sizing.request.availableWidth = AvailableSpace.maxContent() }
   }
-  if !input.known.heightDefinite && !input.intrinsicHeight {
+  if !inheritedHeight && !input.known.heightDefinite && !input.intrinsicHeight {
     if style.height.kind == DimensionKind.MinContent { sizing.request.availableHeight = AvailableSpace.minContent() }
     if style.height.kind == DimensionKind.MaxContent { sizing.request.availableHeight = AvailableSpace.maxContent() }
   }
-  if !input.intrinsicWidth {
+  if !inheritedWidth && !input.intrinsicWidth {
     if style.minWidth.kind == DimensionKind.MinContent || style.minWidth.kind == DimensionKind.MaxContent {
       let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, style.minWidth.kind == DimensionKind.MinContent)
       sizing.box.min.width = max(sizing.box.min.width, minimum)
@@ -1120,7 +1133,7 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
       sizing.box.max.width = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, style.maxWidth.kind == DimensionKind.MinContent)
     }
   }
-  if !input.intrinsicHeight {
+  if !inheritedHeight && !input.intrinsicHeight {
     if style.minHeight.kind == DimensionKind.MinContent || style.minHeight.kind == DimensionKind.MaxContent {
       let minimum = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, style.minHeight.kind == DimensionKind.MinContent)
       sizing.box.min.height = max(sizing.box.min.height, minimum)
@@ -1144,7 +1157,7 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   if ratioBorder { ratioInsetWidth = 0.0
     ratioInsetHeight = 0.0 }
   if sizing.box.size.heightDefinite { sizing.box.size.height = clamp(sizing.box.size.height, sizing.box.min.height, sizing.box.max.height) }
-  if ratio > 0.0 && sizing.box.size.heightDefinite && !sizing.box.size.widthDefinite && !input.intrinsicWidth && !(stretchInline && parentInlineHorizontal) {
+  if !inheritedWidth && ratio > 0.0 && sizing.box.size.heightDefinite && !sizing.box.size.widthDefinite && !input.intrinsicWidth && !(stretchInline && parentInlineHorizontal) {
     sizing.box.size.width = max(0.0, sizing.box.size.height - ratioInsetHeight) * ratio + ratioInsetWidth
     sizing.box.size.widthDefinite = true
     ratioWidth = true
@@ -1156,40 +1169,40 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
   let orthogonal = horizontal != parentInlineHorizontal && !style.replaced
   let autoWidth = style.width.kind == DimensionKind.Auto || ((style.width.kind == DimensionKind.Percent || style.width.kind == DimensionKind.Calc) && !input.parent.widthDefinite)
   let autoHeight = style.height.kind == DimensionKind.Auto || ((style.height.kind == DimensionKind.Percent || style.height.kind == DimensionKind.Calc) && !input.parent.heightDefinite)
-  if orthogonal && horizontal && !input.intrinsicWidth && (autoWidth || style.width.kind == DimensionKind.FitContent) && sizing.request.availableWidth.kind == AvailableKind.MaxContent && input.parent.widthDefinite {
+  if !inheritedWidth && orthogonal && horizontal && !input.intrinsicWidth && (autoWidth || style.width.kind == DimensionKind.FitContent) && sizing.request.availableWidth.kind == AvailableKind.MaxContent && input.parent.widthDefinite {
     sizing.request.availableWidth = AvailableSpace.definite(input.parent.width)
   }
-  if orthogonal && !horizontal && !input.intrinsicHeight && (autoHeight || style.height.kind == DimensionKind.FitContent) && sizing.request.availableHeight.kind == AvailableKind.MaxContent && input.parent.heightDefinite {
+  if !inheritedHeight && orthogonal && !horizontal && !input.intrinsicHeight && (autoHeight || style.height.kind == DimensionKind.FitContent) && sizing.request.availableHeight.kind == AvailableKind.MaxContent && input.parent.heightDefinite {
     sizing.request.availableHeight = AvailableSpace.definite(input.parent.height)
   }
-  let orthogonalWidth = orthogonal && horizontal && !sizing.box.size.widthDefinite && !input.intrinsicWidth && (autoWidth || style.width.kind == DimensionKind.FitContent) && sizing.request.availableWidth.kind != AvailableKind.MinContent && (node.kind == BoxKind.Block || sizing.request.availableWidth.kind == AvailableKind.MaxContent)
-  let orthogonalHeight = orthogonal && !horizontal && !sizing.box.size.heightDefinite && !input.intrinsicHeight && !(ratio > 0.0 && sizing.box.size.widthDefinite) && (autoHeight || style.height.kind == DimensionKind.FitContent) && sizing.request.availableHeight.kind != AvailableKind.MinContent && (node.kind == BoxKind.Block || sizing.request.availableHeight.kind == AvailableKind.MaxContent)
+  let orthogonalWidth = !inheritedWidth && orthogonal && horizontal && !sizing.box.size.widthDefinite && !input.intrinsicWidth && (autoWidth || style.width.kind == DimensionKind.FitContent) && sizing.request.availableWidth.kind != AvailableKind.MinContent && (node.kind == BoxKind.Block || sizing.request.availableWidth.kind == AvailableKind.MaxContent)
+  let orthogonalHeight = !inheritedHeight && orthogonal && !horizontal && !sizing.box.size.heightDefinite && !input.intrinsicHeight && !(ratio > 0.0 && sizing.box.size.widthDefinite) && (autoHeight || style.height.kind == DimensionKind.FitContent) && sizing.request.availableHeight.kind != AvailableKind.MinContent && (node.kind == BoxKind.Block || sizing.request.availableHeight.kind == AvailableKind.MaxContent)
   if orthogonalWidth { sizing.request.availableWidth = orthogonalAvailable(&input, sizing.request.availableWidth, true) }
   if orthogonalHeight { sizing.request.availableHeight = orthogonalAvailable(&input, sizing.request.availableHeight, false) }
   let ordinaryBlock = display.outsideIs(DisplayOutside.Block) && !style.replaced && !floating && !outOfFlow(style)
   let fillWidth = !orthogonalWidth && ((!input.shrinkToFit && style.writingMode == WritingMode.HorizontalTb && !(fitInline && parentInlineHorizontal)) || (stretchInline && parentInlineHorizontal))
-  if !sizing.box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && (ordinaryBlock || (stretchInline && parentInlineHorizontal)) && sizing.request.availableWidth.kind == AvailableKind.Definite && fillWidth {
+  if !inheritedWidth && !sizing.box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto && (ordinaryBlock || (stretchInline && parentInlineHorizontal)) && sizing.request.availableWidth.kind == AvailableKind.Definite && fillWidth {
     sizing.box.size.width = max(sizing.box.inset.horizontal(), sizing.request.availableWidth.value - sizing.box.margin.horizontal())
     sizing.box.size.widthDefinite = true
   }
   let fillHeight = !orthogonalHeight && ((!input.shrinkToFit && style.writingMode != WritingMode.HorizontalTb && !(fitInline && !parentInlineHorizontal)) || (stretchInline && !parentInlineHorizontal))
-  if !sizing.box.size.heightDefinite && !input.intrinsicHeight && style.height.kind == DimensionKind.Auto && (ordinaryBlock || (stretchInline && !parentInlineHorizontal)) && sizing.request.availableHeight.kind == AvailableKind.Definite && fillHeight {
+  if !inheritedHeight && !sizing.box.size.heightDefinite && !input.intrinsicHeight && style.height.kind == DimensionKind.Auto && (ordinaryBlock || (stretchInline && !parentInlineHorizontal)) && sizing.request.availableHeight.kind == AvailableKind.Definite && fillHeight {
     sizing.box.size.height = clamp(max(sizing.box.inset.vertical(), sizing.request.availableHeight.value - sizing.box.margin.vertical()), sizing.box.min.height, sizing.box.max.height)
     sizing.box.size.heightDefinite = true
-    if ratio > 0.0 && !sizing.box.size.widthDefinite && !input.intrinsicWidth {
+    if !inheritedWidth && ratio > 0.0 && !sizing.box.size.widthDefinite && !input.intrinsicWidth {
       sizing.box.size.width = max(0.0, sizing.box.size.height - ratioInsetHeight) * ratio + ratioInsetWidth
       sizing.box.size.widthDefinite = true
       ratioWidth = true
     }
   }
   let fitWidth = orthogonalWidth || (!style.replaced && (input.shrinkToFit || display.outsideIs(DisplayOutside.Inline) || floating || outOfFlow(style))) || style.width.kind == DimensionKind.FitContent || (fitInline && parentInlineHorizontal)
-  if !sizing.box.size.widthDefinite && !input.intrinsicWidth && fitWidth && sizing.request.availableWidth.kind == AvailableKind.Definite {
+  if !inheritedWidth && !sizing.box.size.widthDefinite && !input.intrinsicWidth && fitWidth && sizing.request.availableWidth.kind == AvailableKind.Definite {
     let smallest = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, true)
     let largest = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, true, false)
     sizing.box.size.width = max(smallest, min(max(0.0, sizing.request.availableWidth.value - sizing.box.margin.horizontal()), largest))
     sizing.box.size.widthDefinite = true
   }
-  if !sizing.box.size.heightDefinite && !input.intrinsicHeight && (orthogonalHeight || style.height.kind == DimensionKind.FitContent || (fitInline && !parentInlineHorizontal)) && sizing.request.availableHeight.kind == AvailableKind.Definite {
+  if !inheritedHeight && !sizing.box.size.heightDefinite && !input.intrinsicHeight && (orthogonalHeight || style.height.kind == DimensionKind.FitContent || (fitInline && !parentInlineHorizontal)) && sizing.request.availableHeight.kind == AvailableKind.Definite {
     let smallest = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, true)
     let largest = run intrinsic(nodes, &mut output, &mut measurer, id, &input, natural, false, false)
     sizing.box.size.height = max(smallest, min(max(0.0, sizing.request.availableHeight.value - sizing.box.margin.vertical()), largest))
@@ -1206,7 +1219,7 @@ effect fn prepareSizing<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
     }
   }
   if sizing.box.size.widthDefinite { sizing.box.size.width = clamp(sizing.box.size.width, sizing.box.min.width, sizing.box.max.width) }
-  if ratio > 0.0 && sizing.box.size.widthDefinite && !sizing.box.size.heightDefinite && !input.intrinsicHeight {
+  if !inheritedHeight && ratio > 0.0 && sizing.box.size.widthDefinite && !sizing.box.size.heightDefinite && !input.intrinsicHeight {
     sizing.box.size.height = max(0.0, sizing.box.size.width - ratioInsetWidth) / ratio + ratioInsetHeight
     sizing.box.size.heightDefinite = true
     ratioHeight = true
@@ -1403,7 +1416,7 @@ effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
   // the dependent axis remain indefinite during this intrinsic transfer.
   if ratio > 0.0 && !style.replaced {
     let mut transferred = false
-    if style.writingMode == WritingMode.HorizontalTb && !sizing.box.size.heightDefinite && !input.intrinsicHeight && style.height.kind == DimensionKind.Auto {
+    if input.gridContext & 2 == 0 && style.writingMode == WritingMode.HorizontalTb && !sizing.box.size.heightDefinite && !input.intrinsicHeight && style.height.kind == DimensionKind.Auto {
       let mut height = max(0.0, result.size.width - ratioInsetWidth) / ratio + ratioInsetHeight
       if style.minHeight.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, false)) {
         let mut contentMinimum = result.size.height
@@ -1420,7 +1433,7 @@ effect fn layoutAdjustedBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &Bo
       sizing.request.indefiniteHeight = !sizing.box.size.widthDefinite || sizing.request.indefiniteWidth
       transferred = true
     }
-    if style.writingMode != WritingMode.HorizontalTb && !sizing.box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto {
+    if input.gridContext & 1 == 0 && style.writingMode != WritingMode.HorizontalTb && !sizing.box.size.widthDefinite && !input.intrinsicWidth && style.width.kind == DimensionKind.Auto {
       let mut width = max(0.0, result.size.height - ratioInsetHeight) * ratio + ratioInsetWidth
       if style.minWidth.kind == DimensionKind.Auto && !scrollable(overflowForAxis(style, true)) {
         let mut contentMinimum = result.size.width
@@ -1845,6 +1858,14 @@ fn adoptSubtree(nodes: &BoxTree, output: &mut LayoutTree, scratch: &[Layout], id
 // splices it into the previous output; see cutoffCandidates.
 effect fn cutoffBox<'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutTree, facts: &mut BoxFacts, measurer: &mut M, id: usize, range: FinalRange, probes: &[CachedProbe], first: usize, end: usize) -> bool ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let final = output.cache.result(id).*
+  // A retained request may outlive its inherited version (invalidation, probe
+  // rollback or remap). Re-enter the parent Grid instead of guessing a context.
+  if !output.cache.gridContexts.valid(id, final.input.gridContext) { return false }
+  let mut contextProbe = first
+  while contextProbe < end {
+    if !output.cache.gridContexts.valid(id, probes[contextProbe].input.gridContext) { return false }
+    contextProbe = contextProbe + 1
+  }
   let count = nodes.boxes.length()
   let mut scratchBoxes = Intrinsic.replace(output.scratchBoxes, List<Layout>.make())
   let have = scratchBoxes.length()

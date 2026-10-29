@@ -1,0 +1,479 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import silk.core.option { Option }
+import silk.num.usize
+import grid_tracks { TrackState }
+import grid_style { GridNamedLine, GridArea }
+import tree { NO_NODE }
+
+// Ancestor baseline groups are an inherited layout dependency, not a
+// post-layout translation: descendants must rebuild overflow and baselines.
+pub struct BaselineOffset {
+  pub id: usize,
+  pub horizontal: bool,
+  pub shift: f32,
+}
+
+impl Copy for BaselineOffset {}
+
+// Grid 2 §9. The parent algorithm supplies tracks and names already mapped
+// into the child's logical axes and local line space. Storage never places
+// items or reads Style; every inherited dependency is carried by this value.
+pub struct InheritedAxis {
+  pub active: bool,
+  pub definite: bool,
+  pub tracks: List<TrackState>,
+  pub lines: List<GridNamedLine>,
+  pub gap: f32,
+  pub extent: f32,
+}
+
+impl InheritedAxis {
+  pub fn make() -> InheritedAxis {
+    return InheritedAxis {
+      active: false,
+      definite: false,
+      tracks: List<TrackState>.make(),
+      lines: List<GridNamedLine>.make(),
+      gap: 0.0,
+      extent: 0.0,
+    }
+  }
+
+  fn clear(self: &mut Self) {
+    self.active = false
+    self.definite = false
+    self.tracks.clear()
+    self.lines.clear()
+    self.gap = 0.0
+    self.extent = 0.0
+  }
+}
+
+pub struct GridContext {
+  pub vertical: bool,
+  // Grid 2 §12.1: 0 full/final, 1 first axis, 2 second axis, 3 adjust first,
+  // 4 adjust second. The first axis is expressed in this child's writing mode.
+  pub phase: usize,
+  pub firstColumns: bool,
+  pub columns: InheritedAxis,
+  pub rows: InheritedAxis,
+  pub areas: List<GridArea>,
+  pub baselineOffsets: List<BaselineOffset>,
+}
+
+impl GridContext {
+  pub fn make(vertical: bool) -> GridContext {
+    return GridContext {
+      vertical: vertical,
+      phase: 0,
+      firstColumns: true,
+      columns: InheritedAxis.make(),
+      rows: InheritedAxis.make(),
+      areas: List<GridArea>.make(),
+      baselineOffsets: List<BaselineOffset>.make(),
+    }
+  }
+
+  fn dimensions(self: &Self) -> usize {
+    let mut bits: usize = 0
+    if self.columns.active {
+      if self.vertical {
+        bits = bits | 2
+      } else {
+        bits = bits | 1
+      }
+    }
+    if self.rows.active {
+      if self.vertical {
+        bits = bits | 1
+      } else {
+        bits = bits | 2
+      }
+    }
+    return bits
+  }
+}
+
+fn sameAxis(a: &InheritedAxis, b: &InheritedAxis) -> bool {
+  if a.active != b.active || a.definite != b.definite || a.gap != b.gap || a.extent != b.extent
+    || a.tracks.length() != b.tracks.length()
+    || a.lines.length() != b.lines.length() {
+    return false
+  }
+  let mut at: usize = 0
+  while at < a.tracks.length() {
+    let x = &a.tracks.asSlice()[at]
+    let y = &b.tracks.asSlice()[at]
+
+    // Private TrackState scratch is not inherited; all public sizing and
+    // positioning dependencies are compared, including collapsed gutters.
+    if x.base != y.base || x.position != y.position || x.growthLimit != y.growthLimit
+      || x.endAdjustment != y.endAdjustment
+      || x.factor != y.factor
+      || x.cap != y.cap
+      || x.minimum != y.minimum
+      || x.maximum != y.maximum
+      || x.fitContent != y.fitContent
+      || x.collapsed != y.collapsed {
+      return false
+    }
+    at = at + 1
+  }
+  at = 0
+  while at < a.lines.length() {
+    let x = a.lines.get(at)
+    let y = b.lines.get(at)
+    if x.line != y.line || x.name != y.name || x.repeat != y.repeat {
+      return false
+    }
+    at = at + 1
+  }
+  return true
+}
+
+fn sameContext(a: &GridContext, b: &GridContext) -> bool {
+  if a.vertical != b.vertical || a.phase != b.phase || a.firstColumns != b.firstColumns
+    || !sameAxis(&a.columns, &b.columns)
+    || !sameAxis(&a.rows, &b.rows)
+    || a.areas.length() != b.areas.length()
+    || a.baselineOffsets.length() != b.baselineOffsets.length() {
+    return false
+  }
+  let mut at: usize = 0
+  while at < a.areas.length() {
+    let x = a.areas.get(at)
+    let y = b.areas.get(at)
+    if x.name != y.name || x.columnStart != y.columnStart || x.columnEnd != y.columnEnd
+      || x.rowStart != y.rowStart
+      || x.rowEnd != y.rowEnd {
+      return false
+    }
+    at = at + 1
+  }
+  at = 0
+  while at < a.baselineOffsets.length() {
+    let x = a.baselineOffsets.get(at)
+    let y = b.baselineOffsets.get(at)
+    if x.id != y.id || x.horizontal != y.horizontal || x.shift != y.shift {
+      return false
+    }
+    at = at + 1
+  }
+  return true
+}
+
+struct Slot {
+  context: GridContext,
+  key: usize,
+  id: usize,
+  previous: usize,
+  nextFree: usize,
+}
+
+// One current version per box, with old versions retained only while a
+// checkpoint can restore them. Slot recycling never recycles identity. The
+// counter survives clear/remap/drop, so old Input/cache keys cannot alias a
+// different descriptor. A lookup checks both box and exact key in O(1).
+pub struct GridContextStore {
+  heads: List<usize>,
+  slots: List<Slot>,
+  journal: List<usize>,
+  free: usize,
+  identity: usize,
+}
+
+impl GridContextStore {
+  pub fn make() -> GridContextStore {
+    return GridContextStore {
+      heads: List<usize>.make(),
+      slots: List<Slot>.make(),
+      journal: List<usize>.make(),
+      free: NO_NODE,
+      identity: 0,
+    }
+  }
+
+  // Reuse only released versions; active and rollback-visible descriptors
+  // remain immutable. Moving the buffers out needs no allocation or copying.
+  pub fn take(self: &mut Self, vertical: bool) -> GridContext {
+    if self.free == NO_NODE {
+      return GridContext.make(vertical)
+    }
+    let index = self.free
+    let mut context = Intrinsic.replace(
+      self.slots.asMutSlice()[index].context,
+      GridContext.make(vertical),
+    )
+    context.vertical = vertical
+    context.phase = 0
+    context.firstColumns = true
+    context.columns.clear()
+    context.rows.clear()
+    context.areas.clear()
+    context.baselineOffsets.clear()
+    return move context
+  }
+
+  effect fn ensureFree(self: &mut Self)
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    if self.free == NO_NODE {
+      let index = self.slots.length()
+      run self.slots.append(
+        Slot {
+          context: GridContext.make(false),
+          key: 0,
+          id: NO_NODE,
+          previous: NO_NODE,
+          nextFree: NO_NODE,
+        },
+      )
+      self.free = index
+    }
+  }
+
+  fn find(self: &Self, id: usize) -> usize {
+    if id >= self.heads.length() {
+      return NO_NODE
+    }
+    return self.heads.get(id)
+  }
+
+  // A transaction may inspect its own just-produced binding. This is not an
+  // accepted-layout lookup; positioned reconstruction uses GridGeometry's key.
+  pub fn currentKey(self: &Self, id: usize) -> usize {
+    let index = self.find(id)
+    if index == NO_NODE {
+      return 0
+    }
+    return self.slots.asSlice()[index].key
+  }
+
+  pub fn valid(self: &Self, id: usize, key: usize) -> bool {
+    if key == 0 {
+      return true
+    }
+    let index = self.find(id)
+    return index != NO_NODE && self.slots.asSlice()[index].key == key
+  }
+
+  pub fn get<'a>(self: &'a Self, id: usize, key: usize) -> Option<&'a GridContext> {
+    let index = self.find(id)
+    if key == 0 || index == NO_NODE || self.slots.asSlice()[index].key != key {
+      return Option<&'a GridContext>.None
+    }
+    return Option<&'a GridContext>.Some { value: &self.slots.asSlice()[index].context }
+  }
+
+  // Takes ownership even on equality: callers need not retain descriptor
+  // buffers. Publish only after every fallible reservation has succeeded.
+  pub effect fn bind(self: &mut Self, id: usize, context: GridContext) -> usize
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    let previous = self.find(id)
+    if previous != NO_NODE && sameContext(&self.slots.asSlice()[previous].context, &context) {
+      // Equal incoming buffers become the spare for the next parent probe.
+      run self.ensureFree()
+      let index = self.free
+      let slots = self.slots.asMutSlice()
+      slots[index].context = move context
+      return self.slots.asSlice()[previous].key
+    }
+
+    // Exhaustion must fail rather than wrap into a still-cached identity.
+    if self.identity > usize.MAX - 4 {
+      fail OutOfMemoryError {}
+    }
+    if id >= self.heads.length() {
+      let additional = id + 1 - self.heads.length()
+      run self.heads.appendRepeated(NO_NODE, additional)
+    }
+    run self.ensureFree()
+    let index = self.free
+    run self.journal.append(index)
+    self.identity = self.identity + 4
+    let key = self.identity | context.dimensions()
+    let slot = &mut self.slots.asMutSlice()[index]
+    self.free = slot.nextFree
+    slot.context = move context
+    slot.key = key
+    slot.id = id
+    slot.previous = previous
+    slot.nextFree = NO_NODE
+    self.heads.set(id, index)
+    return key
+  }
+
+  pub fn checkpoint(self: &Self) -> usize {
+    return self.journal.length()
+  }
+
+  // Detach only a version produced since this probe's marker. An equal
+  // pre-existing input remains owned by its original transaction.
+  pub fn retainSince(self: &mut Self, id: usize, marker: usize) -> usize {
+    let index = self.find(id)
+    if index == NO_NODE {
+      return NO_NODE
+    }
+    let mut at = self.journal.length()
+    while at > marker {
+      at = at - 1
+      if self.journal.get(at) == index {
+        self.journal.set(at, NO_NODE)
+        self.heads.set(id, self.slots.asSlice()[index].previous)
+        let slots = self.slots.asMutSlice()
+        slots[index].previous = NO_NODE
+        return index
+      }
+    }
+    return NO_NODE
+  }
+
+  pub effect fn publish(self: &mut Self, id: usize, index: usize)
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    run self.journal.append(index)
+    let previous = self.find(id)
+    let slot = &mut self.slots.asMutSlice()[index]
+    slot.id = id
+    slot.previous = previous
+    self.heads.set(id, index)
+  }
+
+  fn release(self: &mut Self, index: usize) {
+    let slot = &mut self.slots.asMutSlice()[index]
+    slot.id = NO_NODE
+    slot.key = 0
+    slot.previous = NO_NODE
+    slot.nextFree = self.free
+    self.free = index
+  }
+
+  // The input binding must precede its probe checkpoint. Descendant bindings
+  // made by the probe are speculative; restoring never changes that input.
+  pub fn restore(self: &mut Self, marker: usize) {
+    let mut count = self.journal.length()
+    while count > marker {
+      count = count - 1
+      let index = self.journal.get(count)
+      if index == NO_NODE {
+        continue
+      }
+      let slot = &self.slots.asSlice()[index]
+      self.heads.set(slot.id, slot.previous)
+      self.release(index)
+    }
+    self.journal.truncate(count)
+  }
+
+  // Only outside outstanding checkpoints. Forward order consumes an entry
+  // before its successor releases it; no historical interning accumulates.
+  pub fn commit(self: &mut Self) {
+    let mut at: usize = 0
+    while at < self.journal.length() {
+      let index = self.journal.get(at)
+      if index == NO_NODE {
+        at = at + 1
+        continue
+      }
+      let previous = self.slots.asSlice()[index].previous
+      if previous != NO_NODE {
+        self.release(previous)
+      }
+      let slots = self.slots.asMutSlice()
+      slots[index].previous = NO_NODE
+      at = at + 1
+    }
+    self.journal.clear()
+  }
+
+  pub fn clear(self: &mut Self) {
+    self.heads.clear()
+    self.journal.clear()
+    self.free = NO_NODE
+    let mut at = self.slots.length()
+    while at > 0 {
+      at = at - 1
+      self.release(at)
+    }
+  }
+
+  pub fn dropBox(self: &mut Self, id: usize) {
+    if self.heads.length() == 0 {
+      return
+    }
+    self.commit()
+    let index = self.find(id)
+    if index == NO_NODE {
+      return
+    }
+    self.heads.set(id, NO_NODE)
+    self.release(index)
+  }
+
+  // Box matching preserves accepted identities at their new box ids, while
+  // removed boxes release their descriptors. Like drop/clear, not in layout.
+  pub effect fn remap(self: &mut Self, toOld: &[usize], toNew: &[usize])
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    if self.heads.length() == 0 {
+      return
+    }
+    let mut needed: usize = 0
+    let mut id: usize = 0
+    while id < toOld.length {
+      let old = toOld[id]
+      if old != NO_NODE && self.find(old) != NO_NODE {
+        needed = id + 1
+      }
+      id = id + 1
+    }
+    if needed > self.heads.length() {
+      let additional = needed - self.heads.length()
+      run self.heads.reserve(additional)
+    }
+    self.commit()
+    self.heads.clear()
+    run self.heads.appendRepeated(NO_NODE, needed)
+    let mut at: usize = 0
+    while at < self.slots.length() {
+      let old = self.slots.asSlice()[at].id
+      if old != NO_NODE {
+        let mut next = NO_NODE
+        if old < toNew.length {
+          next = toNew[old]
+        }
+
+        // Renumbering preserves logical member identity just as it preserves
+        // the owner. A removed member instead invalidates the whole group.
+        let offsets = self.slots.asSlice()[at].context.baselineOffsets.asSlice()
+        let mut member: usize = 0
+        while next != NO_NODE && member < offsets.length {
+          let oldMember = offsets[member].id
+          if oldMember >= toNew.length {
+            next = NO_NODE
+          } else if toNew[oldMember] == NO_NODE {
+            next = NO_NODE
+          }
+          member = member + 1
+        }
+        if next == NO_NODE {
+          self.release(at)
+        } else {
+          let slots = self.slots.asMutSlice()
+          slots[at].id = next
+          let offsets = slots[at].context.baselineOffsets.asMutSlice()
+          let mut member: usize = 0
+          while member < offsets.length {
+            offsets[member].id = toNew[offsets[member].id]
+            member = member + 1
+          }
+          self.heads.set(next, at)
+        }
+      }
+      at = at + 1
+    }
+  }
+}

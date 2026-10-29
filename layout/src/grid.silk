@@ -21,6 +21,7 @@ import box_tree { BoxTree }
 import layout_pass { LayoutPass }
 import engine { layoutNode, layoutNodeInPlace, probeNode, shapedBox }
 import text { TextMeasure, TextError }
+import tree { NO_NODE }
 import fragmentation { FragmentationError, FlowCursor, BoundaryProbe, ResumeCheckpoint }
 import fragment_box as FragmentBox
 import grid_fragment as Fragments
@@ -1126,10 +1127,17 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       rowNames,
     )
     if output.frame != NO_NODE {
-      output.cache.gridGeometry.setFragment(id, output.publication(id), result.contentRect(), result.paddingRect())
+      let fragment = output.publication(id)
+      output.cache.gridGeometry.setFragment(
+        id,
+        fragment,
+        result.contentRect(),
+        result.paddingRect(),
+      )
     }
     if fragmented {
-      let scratch = &output.cache.gridMemos.fragmentScratch.asSlice()[output.cache.gridMemos.fragmentScratch.length() - 1]
+      let scratch = &output.cache.gridMemos.fragmentScratch.asSlice()[output.cache.gridMemos.fragmentScratch.length()
+        - 1]
       output.cache.gridGeometry.captureRows(id, scratch)
     }
   }

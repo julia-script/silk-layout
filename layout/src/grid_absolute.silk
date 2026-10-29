@@ -133,7 +133,9 @@ fn axisArea(
   let mut high = paddingStart + paddingSize
   if span.hasStart {
     let mut position = lineEdge(axis, span.start, true)
-    if axis.reversed { position = axis.extent - position }
+    if axis.reversed {
+      position = axis.extent - position
+    }
     if reverse {
       high = contentStart + contentSize - position
     } else {
@@ -142,7 +144,9 @@ fn axisArea(
   }
   if span.hasEnd {
     let mut position = lineEdge(axis, span.end, false)
-    if axis.reversed { position = axis.extent - position }
+    if axis.reversed {
+      position = axis.extent - position
+    }
     if reverse {
       low = contentStart + contentSize - position
     } else {

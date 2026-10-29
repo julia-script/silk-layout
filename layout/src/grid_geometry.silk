@@ -48,7 +48,9 @@ impl GridGeometryStore {
     let mut index = self.find(id)
     while index != NO_NODE {
       let slot = &self.slots.asSlice()[index]
-      if slot.geometry.fragment == fragment { return index }
+      if slot.geometry.fragment == fragment {
+        return index
+      }
       index = slot.previous
     }
     return NO_NODE
@@ -67,10 +69,14 @@ impl GridGeometryStore {
   pub fn inheritRows(self: &mut Self, id: usize) {
     let index = self.find(id)
     let previous = self.slots.asSlice()[index].previous
-    if previous == NO_NODE { return }
+    if previous == NO_NODE {
+      return
+    }
     let count = self.slots.asSlice()[index].geometry.rows.tracks.length()
     if self.slots.asSlice()[previous].geometry.fragment == NO_NODE
-      || self.slots.asSlice()[previous].geometry.rows.tracks.length() != count { return }
+      || self.slots.asSlice()[previous].geometry.rows.tracks.length() != count {
+      return
+    }
     let reversed = self.slots.asSlice()[previous].geometry.rows.reversed
     let extent = self.slots.asSlice()[previous].geometry.rows.extent
     let mut at: usize = 0
@@ -79,8 +85,9 @@ impl GridGeometryStore {
       self.slots.asMutSlice()[index].geometry.rows.tracks.set(at, edges)
       at = at + 1
     }
-    self.slots.asMutSlice()[index].geometry.rows.reversed = reversed
-    self.slots.asMutSlice()[index].geometry.rows.extent = extent
+    let rows = &mut self.slots.asMutSlice()[index].geometry.rows
+    rows.reversed = reversed
+    rows.extent = extent
   }
 
   pub fn captureRows(self: &mut Self, id: usize, scratch: &GridFragmentScratch) {
@@ -95,10 +102,14 @@ impl GridGeometryStore {
         let logical = logicalRow(ordinal, scratch.rows.length(), scratch.reversed)
         let edge = &mut rows.tracks.asMutSlice()[logical]
         if scratch.reversed {
-          if row.starts { edge.end = row.consumedStart }
+          if row.starts {
+            edge.end = row.consumedStart
+          }
           edge.start = row.consumedEnd
         } else {
-          if row.starts { edge.start = row.consumedStart }
+          if row.starts {
+            edge.start = row.consumedStart
+          }
           edge.end = row.consumedEnd
         }
         rows.extent = max(rows.extent, row.consumedEnd)
@@ -122,7 +133,8 @@ impl GridGeometryStore {
       }
     }
     self.heads.set(id, self.slots.asSlice()[index].previous)
-    self.slots.asMutSlice()[index].previous = NO_NODE
+    let slot = &mut self.slots.asMutSlice()[index]
+    slot.previous = NO_NODE
     return index
   }
 
@@ -130,8 +142,10 @@ impl GridGeometryStore {
     ! OutOfMemoryError
     ? &mut Allocator {
     run self.journal.append(index)
-    self.slots.asMutSlice()[index].previous = self.find(id)
-    self.slots.asMutSlice()[index].id = id
+    let previous = self.find(id)
+    let slot = &mut self.slots.asMutSlice()[index]
+    slot.previous = previous
+    slot.id = id
     self.heads.set(id, index)
   }
 
@@ -208,7 +222,9 @@ impl GridGeometryStore {
     while count > marker {
       count = count - 1
       let index = self.journal.get(count)
-      if index == NO_NODE { continue }
+      if index == NO_NODE {
+        continue
+      }
       let slot = &self.slots.asSlice()[index]
       self.heads.set(slot.id, slot.previous)
       self.release(index)

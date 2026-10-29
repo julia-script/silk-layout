@@ -147,7 +147,11 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
   let frameAxis = Axes.make(output.frames.writingMode)
-  run scratch.prepare(grid.items, grid.rows.length, grid.axis.reverseBlock != frameAxis.reverseBlock)
+  run scratch.prepare(
+    grid.items,
+    grid.rows.length,
+    grid.axis.reverseBlock != frameAxis.reverseBlock,
+  )
   let style = nodes.style(id)
   let logical = grid.axis.box(box.*)
   let sharing = baselines.any()
@@ -307,6 +311,7 @@ struct ItemFit {
   normalComplete: bool,
   published: bool,
 }
+
 impl Copy for ItemFit {}
 
 effect fn fitItem<'pass, 'source, M: Measure + TextMeasure>(
@@ -368,8 +373,7 @@ effect fn fitItem<'pass, 'source, M: Measure + TextMeasure>(
   }
   let mut aligned = allocation.offset.y - grid.rows[row].position
   if scratch.reversed {
-    aligned = spanSize(grid.rows, row, i32.toUsize(item.row.end))
-      - aligned - allocation.size.height
+    aligned = spanSize(grid.rows, row, i32.toUsize(item.row.end)) - aligned - allocation.size.height
   }
   if explicitMargins {
     aligned = aligned - authoredStart
@@ -844,8 +848,9 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
   if blocked && fallbackCursor > 0.0 && !forcedBefore {
     output.restoreCheckpoint(fallback)
     index = fallbackRow
-    while index < scratch.rows.length {
-      scratch.rows.asMutSlice()[index].accepted = false
+    while index < scratch.rows.length() {
+      let row = &mut scratch.rows.asMutSlice()[index]
+      row.accepted = false
       index = index + 1
     }
     cursor = fallbackCursor
@@ -882,8 +887,9 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
   state.skipped = waiting && !published && cursor == 0.0
   if state.blocked || state.skipped {
     index = 0
-    while index < scratch.rows.length {
-      scratch.rows.asMutSlice()[index].accepted = false
+    while index < scratch.rows.length() {
+      let row = &mut scratch.rows.asMutSlice()[index]
+      row.accepted = false
       index = index + 1
     }
   }

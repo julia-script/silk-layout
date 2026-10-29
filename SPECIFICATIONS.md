@@ -24,15 +24,15 @@ Use [CSS 2.1](https://www.w3.org/TR/2011/REC-CSS2-20110607/) and its errata for 
 
 These references define the target, not a claim that every feature of the referenced modules is implemented. The identified block/flex audits cover host-supplied fragmentation, outer float break boundaries, margin adjacency, phantom-line geometry, scrolling, orthogonal/baseline interactions, and bidi static-position/source geometry. Reproduced defects have regression coverage; underspecified or approximation-permitting cases use the explicit policies below. Composable source-text breaking/shaping and justification measurement use a separate replaceable service; the CLI exercises only a bounded ASCII/Bidi_Control horizontal profile, not a complete Unicode/font backend. Full conformance must not be inferred from the focused regression corpus.
 
-### Grid phase 8 boundary
+### Grid implementation boundary
 
 Grid 2 was added by the explicit standards-baseline command `python3 scripts/fetch-specs.py --update --only css-grid-2`, without refreshing any existing snapshot. Its pinned document identifies source revision `700ba7b5e6ea39623b68a2a0575c2bb89c640d54`; the lock records SHA-256 `f5ce236d797b15a39e884376402c395f39cee2a8a452f1f03613e1a28711b7bd`.
 
-The integrated phase-8 regression gates pass the following focused corpus. These counts are not a claim of complete CSS conformance.
+The integrated regression gates pass the following focused corpus. These counts are not a claim of complete CSS conformance.
 
 | Coverage | Passing cases |
 |---|---:|
-| Native layout tests | 258 |
+| Native layout tests | 260 |
 | Malformed adapter requests | 241 |
 | Adapter bidi cases | 9 |
 | Normative specification fixtures | 646 |
@@ -80,7 +80,9 @@ Twenty-two original native cases cover resolver/projection boundaries, retained 
 
 Grid containers are **monolithic in fragmented layout**: internal row breaks and grid-specific break propagation from [Grid §13](https://drafts.csswg.org/css-grid-2/#pagination) are not implemented. This is a known coverage gap, not a specification-permitted substitute for the grid fragmentation algorithm.
 
-Grid probes and final layout share item placement within a compute, keyed by both resolved automatic repetition counts. A changed count rebuilds expanded names, placement and auto-fit occupancy. A grid-specific scratch pool retains nested grids' item/track buffers and sparse-row occupancy bitmaps across normal, early-cutoff and fragmented computes. Only occupied rows receive bitmap words, and fully definite grids do not build occupancy. Expanded-template storage is lazy; ordinary numeric grids borrow authored tracks without copying them. The box-id index is rebuilt lazily when a compute encounters a grid; no item identity survives into the next compute. Track sizes are recomputed for each request. This is scratch reuse, not cross-compute placement caching.
+Grid probes and final layout share item placement across retained computes, keyed by box identity and both resolved automatic repetition counts. A changed count rebuilds expanded names, placement and auto-fit occupancy. `LayoutCache.gridMemos` owns the existing pooled item/track buffers and sparse-row occupancy bitmaps; `clearBox` invalidates a changed container and `remap` clears identities without discarding capacity. Only occupied rows receive bitmap words, and fully definite grids do not build occupancy. Expanded-template storage is lazy; ordinary numeric grids borrow authored tracks without copying them. Placement and sizing scratch share an owned lease, so retaining placement adds no list copies or second scratch allocation. Track sizes are recomputed for each request. Fragmented computes still invalidate retained results, but preserve their scratch capacity.
+
+Original native regressions exercise viewport changes within and across an automatic-repeat count boundary, then order changes, hide/show box renumbering and template replacement. They assert hand-derived item rectangles rather than cache implementation details.
 
 Baseline scratch is allocated only for containers requesting baseline self-alignment. Retained per-item samples and sparse used-track sharing groups avoid allocating a full group record for every possible track. Ordinary final placement still uses `layoutNode` and `LayoutPass.place`; neither baseline alignment nor track distribution adds fields to `Layout` or copies its record.
 

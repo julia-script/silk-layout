@@ -538,7 +538,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   let mut base = childrenInput(input, style, box, OptionalSize.none())
   base.performLayout = false
   base.baselines = false
-  let mut lease = run output.gridScratch.take(id, nodes.boxes.length())
+  let mut lease = run output.cache.gridMemos.take(id, nodes.boxes.length())
   let prepared = needsPreparation(template)
   if prepared {
     run prepareTemplate(nodes, id, lease.fresh, input, &logical, &limits, &axis, &mut lease.value)
@@ -800,7 +800,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
     height: gridSize.height,
   }
   if !input.performLayout && !input.baselines {
-    output.gridScratch.put(move lease)
+    output.cache.gridMemos.put(move lease)
     return result
   }
   let sharing = baselines.any()
@@ -993,6 +993,6 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
       rowNames,
     )
   }
-  output.gridScratch.put(move lease)
+  output.cache.gridMemos.put(move lease)
   return result
 }

@@ -112,9 +112,7 @@ effect fn component(value: &Value, axis: &mut GridAxis, tree: &mut Tree, repeat:
     let mut index: usize = 0
     while index < names.length {
       let name = run tree.internGridName(run P.text(run P.item(&names[index])))
-      run axis.lines.append(
-        GridNamedLine { line: offset, name: name, repeat: repeat },
-      )
+      run axis.lines.append(GridNamedLine { line: offset, name: name, repeat: repeat })
       index = index + 1
     }
   } else {
@@ -245,9 +243,9 @@ effect fn subgridAxis(value: &Value, tree: &mut Tree) -> GridAxis
         run component(run P.item(&pattern[part]), &mut result, &mut tree, repeatIndex)
         part = part + 1
       }
-      run result.repeats.append(GridRepeat {
-        start: start, length: result.lineGroups - start, count: count, kind: kind,
-      })
+      run result.repeats.append(
+        GridRepeat { start: start, length: result.lineGroups - start, count: count, kind: kind },
+      )
     } else {
       run component(entry, &mut result, &mut tree, 0)
     }

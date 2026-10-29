@@ -30,17 +30,23 @@ pub fn isContainer(nodes: &BoxTree, id: usize) -> bool {
 // a real request, not a fallback for a descriptor invalidated by remapping.
 pub fn acceptedContext(output: &LayoutPass, id: usize) -> usize {
   let mut fragment = NO_NODE
-  if output.frame != NO_NODE { fragment = instance(output, id, output.frame) }
+  if output.frame != NO_NODE {
+    fragment = instance(output, id, output.frame)
+  }
   return fragmentContext(output, id, fragment)
 }
 
 pub fn fragmentContext(output: &LayoutPass, id: usize, fragment: usize) -> usize {
   if fragment != NO_NODE {
     let found = output.cache.gridGeometry.findFragment(id, fragment)
-    if found != NO_NODE { return output.cache.gridGeometry.get(found).gridContext }
+    if found != NO_NODE {
+      return output.cache.gridGeometry.get(found).gridContext
+    }
   }
   let slot = output.cache.gridGeometry.find(id)
-  if slot != NO_NODE { return output.cache.gridGeometry.get(slot).gridContext }
+  if slot != NO_NODE {
+    return output.cache.gridGeometry.get(slot).gridContext
+  }
   if output.cache.recordedRange(id).valid || output.cache.keptRange(id).valid {
     return output.cache.result(id).input.gridContext
   }
@@ -72,11 +78,16 @@ fn restoreArea(value: &GridContext, input: &mut Input) {
 
 pub fn restoreInput(output: &LayoutPass, id: usize, input: &mut Input) {
   input.gridContext = acceptedContext(output, id)
+
   // Fragment metadata already supplies that accepted instance's area. Another
   // absolute sibling may since have made a different frame's binding current.
-  if output.frame != NO_NODE { return }
+  if output.frame != NO_NODE {
+    return
+  }
   match move output.cache.gridContexts.get(id, input.gridContext) {
-    Option<&GridContext>.Some { value } => { restoreArea(value, &mut input) }
+    Option<&GridContext>.Some { value } => {
+      restoreArea(value, &mut input)
+    }
     Option<&GridContext>.None => {}
   }
 }
@@ -90,14 +101,24 @@ pub fn inheritsAllocation(nodes: &BoxTree, parent: usize, child: usize) -> bool 
 // descriptor that produced it. Re-enter just the parent Grid transaction for
 // this child, without escaping engine's general size-probe rollback contract.
 pub effect fn allocateInheritedShell<'pass, 'source, M: Measure + TextMeasure>(
-  nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M,
-  child: usize, parentFragment: usize, initial: OptionalSize, childInput: &mut Input,
-) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  nodes: &BoxTree<'source>,
+  output: &mut LayoutPass<'pass, 'source>,
+  measurer: &mut M,
+  child: usize,
+  parentFragment: usize,
+  initial: OptionalSize,
+  childInput: &mut Input,
+) -> Layout
+  ! OutOfMemoryError | TextError | FragmentationError
+  ? &mut Allocator {
   let parent = output.fragments.values.get(parentFragment).box
   let metadata = match output.fragmentFullBox(parentFragment) {
     Option<FullBoxGeometry>.Some { value } => value
     Option<FullBoxGeometry>.None => {
-      fail FragmentationError { frame: output.frame, message: "Inherited shell parent has no accepted full geometry" }
+      fail FragmentationError {
+        frame: output.frame,
+        message: "Inherited shell parent has no accepted full geometry",
+      }
     }
   }
   let mut input = Input.make(initial)
@@ -113,21 +134,32 @@ pub effect fn allocateInheritedShell<'pass, 'source, M: Measure + TextMeasure>(
       input.parentTextOrientation = nodes.style(ancestor).textOrientation
     }
   }
+
   // Rebuild each inherited ancestor against this exact fragment's geometry,
   // even when a previous absolute sibling has already visited a later page.
   // Ordinary ancestors terminate the recursion with a genuine key-zero input.
   let inheritedParent = ancestor != NO_NODE && inheritsAllocation(nodes, ancestor, parent)
   if inheritedParent {
-    let allocation = run allocateInheritedShell(nodes, &mut output, &mut measurer,
-      parent, ancestorFragment, initial, &mut input)
+    let allocation = run allocateInheritedShell(
+      nodes,
+      &mut output,
+      &mut measurer,
+      parent,
+      ancestorFragment,
+      initial,
+      &mut input,
+    )
     input.known = OptionalSize.definite(allocation.size.width, allocation.size.height)
     input.indefiniteWidth = !allocation.widthDefinite
     input.indefiniteHeight = !allocation.heightDefinite
   }
   let mut box = resolveBox(nodes.style(parent), &input)
   if !inheritedParent {
-    input.known = OptionalSize.definite(metadata.content.width + box.inset.horizontal(),
-      metadata.content.height + box.inset.vertical())
+    input.known = OptionalSize.definite(
+      metadata.content.width + box.inset.horizontal(),
+      metadata.content.height + box.inset.vertical(),
+    )
+
     // Direct Grid dispatch bypasses engine's second box resolution. Its track
     // sizing reads ResolvedBox, so install the accepted border-box allocation
     // there as well as in the request before resolving flexible tracks.
@@ -140,6 +172,7 @@ pub effect fn allocateInheritedShell<'pass, 'source, M: Measure + TextMeasure>(
   input.fragmentation = FragmentInput.continuous()
   let checkpoint = output.checkpoint()
   let marker = output.cache.gridContexts.checkpoint()
+
   // Calling Grid directly is essential: contentAlgorithm would restore the
   // child's allocation binding before this narrowly scoped snapshot.
   drop run layoutGrid(nodes, &mut output, &mut measurer, parent, &input, &box)
@@ -155,7 +188,10 @@ pub effect fn allocateInheritedShell<'pass, 'source, M: Measure + TextMeasure>(
   if !finalPhase {
     output.restoreCheckpoint(checkpoint)
     output.closeCheckpoint(checkpoint)
-    fail FragmentationError { frame: output.frame, message: "Grid shell allocation has no final inherited context" }
+    fail FragmentationError {
+      frame: output.frame,
+      message: "Grid shell allocation has no final inherited context",
+    }
   }
   let retained = output.cache.gridContexts.retainSince(child, marker)
   let mut result = output.boxes[child]
@@ -163,7 +199,9 @@ pub effect fn allocateInheritedShell<'pass, 'source, M: Measure + TextMeasure>(
   result.location.y = result.location.y - box.inset.top
   output.restoreCheckpoint(checkpoint)
   output.closeCheckpoint(checkpoint)
-  if retained != NO_NODE { run output.cache.gridContexts.publish(child, retained) }
+  if retained != NO_NODE {
+    run output.cache.gridContexts.publish(child, retained)
+  }
   childInput.gridContext = key
   return result
 }
@@ -184,12 +222,24 @@ pub effect fn captureShell<'pass, 'source, M: Measure + TextMeasure>(
   if !output.cache.gridContexts.valid(id, request.gridContext) {
     let parentFragment = output.fragments.values.get(fragment).parent
     let mut parent = NO_NODE
-    if parentFragment != NO_NODE { parent = output.fragments.values.get(parentFragment).box }
-    if parent == NO_NODE || !inheritsAllocation(nodes, parent, id) {
-      fail FragmentationError { frame: output.frame, message: "Grid shell has no inherited parent to refresh its request" }
+    if parentFragment != NO_NODE {
+      parent = output.fragments.values.get(parentFragment).box
     }
-    let allocation = run allocateInheritedShell(nodes, &mut output, &mut measurer,
-      id, parentFragment, request.initialContainingBlock, &mut request)
+    if parent == NO_NODE || !inheritsAllocation(nodes, parent, id) {
+      fail FragmentationError {
+        frame: output.frame,
+        message: "Grid shell has no inherited parent to refresh its request",
+      }
+    }
+    let allocation = run allocateInheritedShell(
+      nodes,
+      &mut output,
+      &mut measurer,
+      id,
+      parentFragment,
+      request.initialContainingBlock,
+      &mut request,
+    )
     request.known = OptionalSize.definite(allocation.size.width, allocation.size.height)
     request.indefiniteWidth = !allocation.widthDefinite
     request.indefiniteHeight = !allocation.heightDefinite

@@ -7,16 +7,40 @@ import silk.testing.testing { Testing, AssertionError }
 import fragmentation { FragmentationError }
 import style { Style, Dimension, Display, DisplayOutside, DisplayInside, Align }
 import geometry {
-  Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions,
-  ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize
+  Measure,
+  MeasureRequest,
+  Measured,
+  BaselineSet,
+  NaturalDimensions,
+  ScrollbarRequest,
+  ScrollbarMetrics,
+  FontRequest,
+  FontMetrics,
+  Size,
+  Rect,
+  OptionalSize
 }
 import text {
-  TextMeasure, TextError, TextContext, TextCursor, TextBreak, TextBreakKind,
-  TextAnalysis, TextShapeRequest, TextRun
+  TextMeasure,
+  TextError,
+  TextContext,
+  TextCursor,
+  TextBreak,
+  TextBreakKind,
+  TextAnalysis,
+  TextShapeRequest,
+  TextRun
 }
 import grid_style {
-  GridTemplate, GridAxis, GridTrack, GridBreadth, GridBreadthKind, GridError,
-  GridLine, GridLineKind, GridNamedLine
+  GridTemplate,
+  GridAxis,
+  GridTrack,
+  GridBreadth,
+  GridBreadthKind,
+  GridError,
+  GridLine,
+  GridLineKind,
+  GridNamedLine
 }
 import tree { Tree, LayoutTree, NodeId, InvalidNode }
 import engine { compute }
@@ -53,42 +77,72 @@ impl Measure for TextHost {
     drop provider
     drop key
     let mut size = Size { width: 0.0, height: 0.0 }
-    if request.known.widthDefinite { size.width = request.known.width }
-    if request.known.heightDefinite { size.height = request.known.height }
+    if request.known.widthDefinite {
+      size.width = request.known.width
+    }
+    if request.known.heightDefinite {
+      size.height = request.known.height
+    }
     return Measured {
-      size: size, scrollableOverflow: Rect.zero(), contentBlockSize: 0.0,
-      firstBaselines: BaselineSet.zero(), lastBaselines: BaselineSet.zero(),
-      hasBaseline: false, hasLineBoxes: false,
+      size: size,
+      scrollableOverflow: Rect.zero(),
+      contentBlockSize: 0.0,
+      firstBaselines: BaselineSet.zero(),
+      lastBaselines: BaselineSet.zero(),
+      hasBaseline: false,
+      hasLineBoxes: false,
     }
   }
 }
 
 impl TextMeasure for TextHost {
-  fn beginTextLayout(provider: &mut Self) { drop provider }
-
-  effect fn analyze(provider: &mut Self, context: TextContext, output: &mut List<TextBreak>)
-    -> TextAnalysis ! OutOfMemoryError | TextError ? &mut Allocator {
+  fn beginTextLayout(provider: &mut Self) {
     drop provider
-    run output.append(TextBreak {
-      at: TextCursor { unit: context.tokens.length, offset: 0 }, kind: TextBreakKind.Soft,
-    })
+  }
+
+  effect fn analyze(
+    provider: &mut Self,
+    context: TextContext,
+    output: &mut List<TextBreak>,
+  ) -> TextAnalysis
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
+    drop provider
+    run output.append(
+      TextBreak {
+        at: TextCursor { unit: context.tokens.length, offset: 0 },
+        kind: TextBreakKind.Soft,
+      },
+    )
     return TextAnalysis.uniform(context.tokens.length, 0, 0, true)
   }
 
   effect fn shape(provider: &mut Self, request: TextShapeRequest, output: &mut List<TextRun>)
-    ! OutOfMemoryError | TextError ? &mut Allocator {
+    ! OutOfMemoryError | TextError
+    ? &mut Allocator {
     drop provider
     let mut unit = request.start.unit
     while unit < request.end.unit || (unit == request.end.unit && request.end.offset != 0) {
       let token = request.context.tokens[unit]
       let mut start: usize = 0
       let mut end = String.byteLength(token.text)
-      if unit == request.start.unit { start = request.start.offset }
-      if unit == request.end.unit { end = request.end.offset }
-      run output.append(TextRun.Text {
-        unit: unit, start: start, end: end, advance: usize.toF32(end - start) * 5.0,
-        fontKey: token.fontKey, bidiLevel: request.analysis.level, shapeKey: 0,
-      })
+      if unit == request.start.unit {
+        start = request.start.offset
+      }
+      if unit == request.end.unit {
+        end = request.end.offset
+      }
+      run output.append(
+        TextRun.Text {
+          unit: unit,
+          start: start,
+          end: end,
+          advance: usize.toF32(end - start) * 5.0,
+          fontKey: token.fontKey,
+          bidiLevel: request.analysis.level,
+          shapeKey: 0,
+        },
+      )
       unit = unit + 1
     }
   }
@@ -111,7 +165,8 @@ fn spanningStyle() -> Style {
 }
 
 effect fn columns(first: f32, second: f32, height: f32) -> GridTemplate
-  ! OutOfMemoryError ? &mut Allocator {
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let mut template = GridTemplate.make()
   run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(first)))
   run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(second)))
@@ -120,7 +175,8 @@ effect fn columns(first: f32, second: f32, height: f32) -> GridTemplate
 }
 
 effect fn inheritedColumns(height: f32) -> GridTemplate
-  ! OutOfMemoryError ? &mut Allocator {
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let mut template = GridTemplate.make()
   template.columns = GridAxis.subgrid()
   template.placement.columnStart = line(1)
@@ -130,15 +186,25 @@ effect fn inheritedColumns(height: f32) -> GridTemplate
   return move template
 }
 
-effect fn expectBounds(output: &mut LayoutTree, source: NodeId,
-  x: f32, y: f32, width: f32, height: f32) ! InvalidNode | AssertionError<'static> {
+effect fn expectBounds(
+  output: &mut LayoutTree,
+  source: NodeId,
+  x: f32,
+  y: f32,
+  width: f32,
+  height: f32,
+)
+  ! InvalidNode | AssertionError<'static> {
   let actual = run output.sourceBounds(source)
-  run Testing.expect(actual.x == x && actual.y == y && actual.width == width && actual.height == height,
-    "retained subgrid geometry equals the hand-derived rectangle")
+  run Testing.expect(
+    actual.x == x && actual.y == y && actual.width == width && actual.height == height,
+    "retained subgrid geometry equals the hand-derived rectangle",
+  )
 }
 
 effect fn layout(tree: &Tree, output: &mut LayoutTree, host: &mut TextHost)
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode ? &mut Allocator {
+  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode
+  ? &mut Allocator {
   run compute(tree, &mut output, &mut host, OptionalSize.definite(300.0, 200.0))
 }
 
@@ -151,9 +217,11 @@ effect fn expectFresh(tree: &Tree, output: &mut LayoutTree, host: &mut TextHost,
   while index < sources.length {
     let actual = run output.sourceBounds(sources[index])
     let expected = run fresh.sourceBounds(sources[index])
-    run Testing.expect(actual.x == expected.x && actual.y == expected.y
-      && actual.width == expected.width && actual.height == expected.height,
-      "retained source geometry equals an independent fresh compute")
+    run Testing.expect(
+      actual.x == expected.x && actual.y == expected.y && actual.width == expected.width
+        && actual.height == expected.height,
+      "retained source geometry equals an independent fresh compute",
+    )
     index = index + 1
   }
 }
@@ -163,7 +231,12 @@ effect fn expectFresh(tree: &Tree, output: &mut LayoutTree, host: &mut TextHost,
 // even when their parent's 100px area is identical. Normal gaps follow the parent;
 // a standalone template stops inheriting both track sizes and line names.
 effect fn inheritedTrackNameGapTransitions()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
   ? &mut Allocator {
   let mut rootStyle = gridStyle()
   rootStyle.width = Dimension.px(100.0)
@@ -195,11 +268,15 @@ effect fn inheritedTrackNameGapTransitions()
     }
     let mut template = run columns(firstWidth, secondWidth, 20.0)
     let mut namedLine: usize = 0
-    if stage >= 2 { namedLine = 1 }
+    if stage >= 2 {
+      namedLine = 1
+    }
     run template.columns.lines.append(GridNamedLine { line: namedLine, name: name, repeat: 0 })
     run tree.setGrid(root, move template)
     let mut gap: f32 = 0.0
-    if stage >= 3 { gap = 10.0 }
+    if stage >= 3 {
+      gap = 10.0
+    }
     let mut rootStyle = gridStyle()
     rootStyle.columnGap = Dimension.px(gap)
     rootStyle.width = Dimension.px(100.0 + gap)
@@ -212,7 +289,9 @@ effect fn inheritedTrackNameGapTransitions()
       run standalone.columns.lines.append(GridNamedLine { line: 0, name: name, repeat: 0 })
       run tree.setGrid(subgrid, move standalone)
     }
-    if stage == 5 { run tree.setGrid(subgrid, run inheritedColumns(20.0)) }
+    if stage == 5 {
+      run tree.setGrid(subgrid, run inheritedColumns(20.0))
+    }
     run layout(&tree, &mut output, &mut host)
     run expectBounds(&mut output, subgrid, 0.0, 0.0, 100.0 + gap, 20.0)
     let mut namedX: f32 = 0.0
@@ -234,7 +313,12 @@ effect fn inheritedTrackNameGapTransitions()
 }
 
 test effect fn subgridRetainedTracksNamesGapsAndStandalone()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run inheritedTrackNameGapTransitions() |> Effect.provideMut<Allocator>(&mut allocator)
 }
@@ -243,16 +327,21 @@ test effect fn subgridRetainedTracksNamesGapsAndStandalone()
 // 10px -> 40px max-content contribution grows the ancestor track, then a different
 // equal-width word and an identical edit keep the same geometry.
 effect fn descendantTextTransitions()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
   ? &mut Allocator {
   let mut style = gridStyle()
   style.justifyContent = Align.Start
   let mut tree = run Tree.make(move style)
   let root = tree.root()
   let mut template = GridTemplate.make()
-  run template.columns.tracks.append(GridTrack.breadth(
-    GridBreadth { kind: GridBreadthKind.MaxContent, length: 0.0, percent: 0.0 },
-  ))
+  run template.columns.tracks.append(
+    GridTrack.breadth(GridBreadth { kind: GridBreadthKind.MaxContent, length: 0.0, percent: 0.0 }),
+  )
   run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
   run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
   run tree.setGrid(root, move template)
@@ -267,10 +356,14 @@ effect fn descendantTextTransitions()
   let words = ["ab", "abcdefgh", "ijklmnop", "ijklmnop"]
   let mut stage: usize = 0
   while stage < words.length {
-    if stage != 0 { run tree.setText(text, run String.copy(words[stage])) }
+    if stage != 0 {
+      run tree.setText(text, run String.copy(words[stage]))
+    }
     run layout(&tree, &mut output, &mut host)
     let mut width: f32 = 40.0
-    if stage == 0 { width = 10.0 }
+    if stage == 0 {
+      width = 10.0
+    }
     run expectBounds(&mut output, subgrid, 0.0, 0.0, width + 20.0, 10.0)
     run expectBounds(&mut output, item, 0.0, 0.0, width, 10.0)
     run expectBounds(&mut output, text, 0.0, 0.0, width, 10.0)
@@ -281,7 +374,12 @@ effect fn descendantTextTransitions()
 }
 
 test effect fn subgridRetainedDescendantIntrinsicTextEdits()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run descendantTextTransitions() |> Effect.provideMut<Allocator>(&mut allocator)
 }
@@ -291,7 +389,12 @@ test effect fn subgridRetainedDescendantIntrinsicTextEdits()
 // Peer padding changes the shared baseline 14 -> 20 -> 14, without changing the
 // subgrid's 50x40 area. The descendant's top must follow 6 -> 12 -> 6.
 effect fn baselinePeerTransitions()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
   ? &mut Allocator {
   let mut tree = run Tree.make(gridStyle())
   let root = tree.root()
@@ -332,7 +435,12 @@ effect fn baselinePeerTransitions()
 }
 
 test effect fn subgridRetainedCrossBoundaryBaselinePeerEdit()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run baselinePeerTransitions() |> Effect.provideMut<Allocator>(&mut allocator)
 }
@@ -342,7 +450,12 @@ test effect fn subgridRetainedCrossBoundaryBaselinePeerEdit()
 // hiding/restoring that sibling and redistributing tracks must not reuse a stale
 // descriptor or confuse it with an unrelated generated box.
 effect fn remappedSubgridTransitions()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
   ? &mut Allocator {
   let mut tree = run Tree.make(Style.make())
   let root = tree.root()
@@ -382,9 +495,13 @@ effect fn remappedSubgridTransitions()
     }
     run layout(&tree, &mut output, &mut host)
     let mut y: f32 = 10.0
-    if stage == 2 { y = 0.0 }
+    if stage == 2 {
+      y = 0.0
+    }
     let mut width: f32 = 30.0
-    if stage >= 2 { width = 60.0 }
+    if stage >= 2 {
+      width = 60.0
+    }
     run expectBounds(&mut output, parent, 0.0, y, 100.0, 20.0)
     run expectBounds(&mut output, subgrid, 0.0, y, 100.0, 20.0)
     run expectBounds(&mut output, first, 0.0, y, width, 20.0)
@@ -395,7 +512,12 @@ effect fn remappedSubgridTransitions()
 }
 
 test effect fn subgridRetainedContextsSurviveInsertionAndBoxRemapping()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run remappedSubgridTransitions() |> Effect.provideMut<Allocator>(&mut allocator)
 }

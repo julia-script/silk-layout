@@ -8,7 +8,16 @@ import style { Style, WritingMode, Direction, Dimension, DimensionKind }
 import geometry { max, min }
 import context { ResolvedBox, UNBOUNDED, resolve }
 import axes { Axes }
-import grid_style { GridTemplate, GridAxis, GridNamedLine, GridArea, GridTrack, GridBreadth, GridBreadthKind, MAX_GRID_TRACKS }
+import grid_style {
+  GridTemplate,
+  GridAxis,
+  GridNamedLine,
+  GridArea,
+  GridTrack,
+  GridBreadth,
+  GridBreadthKind,
+  MAX_GRID_TRACKS
+}
 import grid_context { GridContext, InheritedAxis, GridContextStore, BaselineOffset }
 import grid_placement { GridItem, GridBounds }
 import grid_scratch { GridTemplateScratch }
@@ -25,8 +34,14 @@ pub struct InheritanceSource<'a> {
   pub baselineOffsets: &'a [BaselineOffset],
 }
 
-pub fn source<'a>(template: &'a GridTemplate, prepared: &'a [GridTemplateScratch], bounds: GridBounds,
-  phase: usize, firstColumns: bool, emptyOffsets: &'a [BaselineOffset]) -> InheritanceSource<'a> {
+pub fn source<'a>(
+  template: &'a GridTemplate,
+  prepared: &'a [GridTemplateScratch],
+  bounds: GridBounds,
+  phase: usize,
+  firstColumns: bool,
+  emptyOffsets: &'a [BaselineOffset],
+) -> InheritanceSource<'a> {
   let mut columns = template.columns.lines.asSlice()
   let mut rows = template.rows.lines.asSlice()
   let mut areas = template.areas.asSlice()
@@ -34,11 +49,20 @@ pub fn source<'a>(template: &'a GridTemplate, prepared: &'a [GridTemplateScratch
   if prepared.length != 0 {
     columns = expandedLines(&template.columns, &prepared[0].columns)
     rows = expandedLines(&template.rows, &prepared[0].rows)
-    if prepared[0].gridContext != 0 { areas = prepared[0].areas.asSlice() }
+    if prepared[0].gridContext != 0 {
+      areas = prepared[0].areas.asSlice()
+    }
     offsets = prepared[0].baselineOffsets.asSlice()
   }
-  return InheritanceSource { columns: columns, rows: rows, areas: areas, bounds: bounds,
-    phase: phase, firstColumns: firstColumns, baselineOffsets: offsets }
+  return InheritanceSource {
+    columns: columns,
+    rows: rows,
+    areas: areas,
+    bounds: bounds,
+    phase: phase,
+    firstColumns: firstColumns,
+    baselineOffsets: offsets,
+  }
 }
 
 pub fn eligible(nodes: &BoxTree, id: usize) -> bool with Intrinsic.inlineAlways() {
@@ -55,12 +79,16 @@ pub fn parallel(parent: &Style, child: &Style) -> bool with Intrinsic.inlineAlwa
 }
 
 pub fn reversed(style: &Style, columns: bool) -> bool {
-  if columns { return (style.usedDirection() == Direction.Rtl) != (style.writingMode == WritingMode.SidewaysLr) }
+  if columns {
+    return (style.usedDirection() == Direction.Rtl) != (style.writingMode == WritingMode.SidewaysLr)
+  }
   return style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
 }
 
 pub fn inherits(nodes: &BoxTree, id: usize, horizontal: bool) -> bool {
-  if !eligible(nodes, id) { return false }
+  if !eligible(nodes, id) {
+    return false
+  }
   let template = &nodes.grids[nodes.style(id).grid]
   if horizontal == (nodes.style(id).writingMode == WritingMode.HorizontalTb) {
     return template.columns.subgridded
@@ -71,27 +99,41 @@ pub fn inherits(nodes: &BoxTree, id: usize, horizontal: bool) -> bool {
 // Context tracks retain parent sizing policies, but their positions are local to
 // the spanned area and their order follows the child's own logical axis.
 effect fn copyAxis(
-  tracks: &[TrackState], names: &[GridNamedLine], origin: i32,
-  start: usize, end: usize, gap: f32, final: bool, reverse: bool,
+  tracks: &[TrackState],
+  names: &[GridNamedLine],
+  origin: i32,
+  start: usize,
+  end: usize,
+  gap: f32,
+  final: bool,
+  reverse: bool,
   result: &mut InheritedAxis,
-) ! OutOfMemoryError ? &mut Allocator {
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
   result.active = true
   result.definite = final
   result.gap = gap
   result.tracks.clear()
   result.lines.clear()
   let mut extent: f32 = 0.0
-  if final { extent = spanSize(tracks, start, end) }
+  if final {
+    extent = spanSize(tracks, start, end)
+  }
   let mut index = start
   while index < end {
     let mut track = tracks[index]
     if final {
       track.position = track.position - tracks[start].position
     } else {
-      if track.maximum == GridBreadthKind.Length { track.base = track.cap }
+      if track.maximum == GridBreadthKind.Length {
+        track.base = track.cap
+      }
       track.position = extent
       extent = track.endPosition()
-      if index + 1 < end { extent = extent + gap }
+      if index + 1 < end {
+        extent = extent + gap
+      }
     }
     run result.tracks.append(track)
     index = index + 1
@@ -119,7 +161,9 @@ effect fn copyAxis(
     let line = usize.toI32(names[index].line) - origin
     if line >= usize.toI32(start) && line <= usize.toI32(end) {
       let mut local = i32.toUsize(line) - start
-      if reverse { local = end - i32.toUsize(line) }
+      if reverse {
+        local = end - i32.toUsize(line)
+      }
       run result.lines.append(GridNamedLine { line: local, name: names[index].name, repeat: 0 })
     }
     index = index + 1
@@ -128,24 +172,36 @@ effect fn copyAxis(
 
 fn clippedStart(value: usize, origin: i32, start: usize) -> usize {
   let position = usize.toI32(value) - origin
-  if position <= usize.toI32(start) { return start }
+  if position <= usize.toI32(start) {
+    return start
+  }
   return i32.toUsize(position)
 }
 
 fn clippedEnd(value: usize, origin: i32, end: usize) -> usize {
   let position = usize.toI32(value) - origin
-  if position < 0 { return 0 }
-  if position >= usize.toI32(end) { return end }
+  if position < 0 {
+    return 0
+  }
+  if position >= usize.toI32(end) {
+    return end
+  }
   return i32.toUsize(position)
 }
 
 // Named areas are clipped geometrically, then their implicit names are rebuilt.
 // Copying the parent's merged name occurrences would lose newly clipped edges.
 effect fn copyAreas(
-  areas: &[GridArea], bounds: GridBounds, item: &GridItem,
-  sameAxes: bool, reverseColumns: bool, reverseRows: bool,
+  areas: &[GridArea],
+  bounds: GridBounds,
+  item: &GridItem,
+  sameAxes: bool,
+  reverseColumns: bool,
+  reverseRows: bool,
   result: &mut GridContext,
-) ! OutOfMemoryError ? &mut Allocator {
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let cs = i32.toUsize(item.column.start)
   let ce = i32.toUsize(item.column.end)
   let rs = i32.toUsize(item.row.start)
@@ -182,22 +238,43 @@ effect fn copyAreas(
         firstRow = rowCount - lastRow
         lastRow = rowCount - start
       }
-      if !result.columns.active { firstColumn = 0
-        lastColumn = MAX_GRID_TRACKS }
-      if !result.rows.active { firstRow = 0
-        lastRow = MAX_GRID_TRACKS }
-      run result.areas.append(GridArea { name: area.name,
-        columnStart: firstColumn, columnEnd: lastColumn, rowStart: firstRow, rowEnd: lastRow })
+      if !result.columns.active {
+        firstColumn = 0
+        lastColumn = MAX_GRID_TRACKS
+      }
+      if !result.rows.active {
+        firstRow = 0
+        lastRow = MAX_GRID_TRACKS
+      }
+      run result.areas.append(
+        GridArea {
+          name: area.name,
+          columnStart: firstColumn,
+          columnEnd: lastColumn,
+          rowStart: firstRow,
+          rowEnd: lastRow,
+        },
+      )
     }
     index = index + 1
   }
 }
 
 pub effect fn bind(
-  nodes: &BoxTree, store: &mut GridContextStore, item: &GridItem, parent: &Style,
-  inherited: &InheritanceSource, columns: &[TrackState], rows: &[TrackState],
-  columnGap: f32, rowGap: f32, columnsFinal: bool, rowsFinal: bool,
-) -> usize ! OutOfMemoryError ? &mut Allocator {
+  nodes: &BoxTree,
+  store: &mut GridContextStore,
+  item: &GridItem,
+  parent: &Style,
+  inherited: &InheritanceSource,
+  columns: &[TrackState],
+  rows: &[TrackState],
+  columnGap: f32,
+  rowGap: f32,
+  columnsFinal: bool,
+  rowsFinal: bool,
+) -> usize
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let style = nodes.style(item.id)
   let template = &nodes.grids[style.grid]
   let sameAxes = parallel(parent, style)
@@ -208,41 +285,85 @@ pub effect fn bind(
   result.firstColumns = inherited.firstColumns == sameAxes
   if template.columns.subgridded {
     if sameAxes {
-      run copyAxis(columns, inherited.columns, inherited.bounds.columnOrigin,
-        i32.toUsize(item.column.start), i32.toUsize(item.column.end), columnGap, columnsFinal,
-        reverseColumns, &mut result.columns)
+      run copyAxis(
+        columns,
+        inherited.columns,
+        inherited.bounds.columnOrigin,
+        i32.toUsize(item.column.start),
+        i32.toUsize(item.column.end),
+        columnGap,
+        columnsFinal,
+        reverseColumns,
+        &mut result.columns,
+      )
     } else {
-      run copyAxis(rows, inherited.rows, inherited.bounds.rowOrigin,
-        i32.toUsize(item.row.start), i32.toUsize(item.row.end), rowGap, rowsFinal,
-        reverseColumns, &mut result.columns)
+      run copyAxis(
+        rows,
+        inherited.rows,
+        inherited.bounds.rowOrigin,
+        i32.toUsize(item.row.start),
+        i32.toUsize(item.row.end),
+        rowGap,
+        rowsFinal,
+        reverseColumns,
+        &mut result.columns,
+      )
     }
   }
   if template.rows.subgridded {
     if sameAxes {
-      run copyAxis(rows, inherited.rows, inherited.bounds.rowOrigin,
-        i32.toUsize(item.row.start), i32.toUsize(item.row.end), rowGap, rowsFinal,
-        reverseRows, &mut result.rows)
+      run copyAxis(
+        rows,
+        inherited.rows,
+        inherited.bounds.rowOrigin,
+        i32.toUsize(item.row.start),
+        i32.toUsize(item.row.end),
+        rowGap,
+        rowsFinal,
+        reverseRows,
+        &mut result.rows,
+      )
     } else {
-      run copyAxis(columns, inherited.columns, inherited.bounds.columnOrigin,
-        i32.toUsize(item.column.start), i32.toUsize(item.column.end), columnGap, columnsFinal,
-        reverseRows, &mut result.rows)
+      run copyAxis(
+        columns,
+        inherited.columns,
+        inherited.bounds.columnOrigin,
+        i32.toUsize(item.column.start),
+        i32.toUsize(item.column.end),
+        columnGap,
+        columnsFinal,
+        reverseRows,
+        &mut result.rows,
+      )
     }
   }
-  run copyAreas(inherited.areas, inherited.bounds, item, sameAxes, reverseColumns, reverseRows, &mut result)
+  run copyAreas(
+    inherited.areas,
+    inherited.bounds,
+    item,
+    sameAxes,
+    reverseColumns,
+    reverseRows,
+    &mut result,
+  )
   let mut at: usize = 0
   while at < inherited.baselineOffsets.length {
     let offset = inherited.baselineOffsets[at]
     let mut ancestor = nodes.node(offset.id).parent
-    while ancestor != NO_NODE && ancestor != item.id { ancestor = nodes.node(ancestor).parent }
-    if ancestor == item.id { run result.baselineOffsets.append(offset) }
+    while ancestor != NO_NODE && ancestor != item.id {
+      ancestor = nodes.node(ancestor).parent
+    }
+    if ancestor == item.id {
+      run result.baselineOffsets.append(offset)
+    }
     at = at + 1
   }
   return run store.bind(item.id, move result)
 }
 
-pub effect fn prepareAxis(
-  authored: &GridAxis, inherited: &InheritedAxis, result: &mut ExpandedAxis,
-) ! OutOfMemoryError ? &mut Allocator {
+pub effect fn prepareAxis(authored: &GridAxis, inherited: &InheritedAxis, result: &mut ExpandedAxis)
+  ! OutOfMemoryError
+  ? &mut Allocator {
   result.tracks.clear()
   result.explicitTracks = inherited.tracks.length()
   result.autoFitStart = 0
@@ -261,16 +382,23 @@ pub effect fn prepareAxis(
 }
 
 pub fn usedGap(inherited: &InheritedAxis, value: Dimension, extent: f32) -> f32 {
-  if value.kind == DimensionKind.Normal { return inherited.gap }
+  if value.kind == DimensionKind.Normal {
+    return inherited.gap
+  }
   return max(0.0, resolve(value, extent, inherited.definite, value.value))
 }
 
 // The inherited outer lines stay at the parent's area edges. MBP consumes edge
 // tracks; half the gutter difference adjusts each internal edge (Grid §9).
 pub effect fn usedTracks(
-  inherited: &InheritedAxis, box: &ResolvedBox, style: &Style, columns: bool,
+  inherited: &InheritedAxis,
+  box: &ResolvedBox,
+  style: &Style,
+  columns: bool,
   result: &mut List<TrackState>,
-) -> f32 ! OutOfMemoryError ? &mut Allocator {
+) -> f32
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let axis = Axes.make(style.writingMode)
   let logical = axis.box(box.*)
   let mut start = logical.margin.top + logical.inset.top
@@ -295,27 +423,43 @@ pub effect fn usedTracks(
     let mut track = tracks[index]
     let mut low = track.position - start + delta
     let mut high = track.endPosition() - start - delta
-    if index == 0 { low = 0.0 }
-    if index + 1 == tracks.length { high = track.endPosition() - start - end }
+    if index == 0 {
+      low = 0.0
+    }
+    if index + 1 == tracks.length {
+      high = track.endPosition() - start - end
+    }
     let adjustment = (high - low) - track.base
     track.base = max(0.0, high - low)
+
     // Neither an interior start nor an outer end moves when the sizing
     // breadth floors at zero. A spanning item still uses the original end.
     track.endAdjustment = min(0.0, high - low)
     track.position = low
-    if track.cap < UNBOUNDED { track.cap = max(0.0, track.cap + adjustment) }
-    if track.growthLimit < UNBOUNDED { track.growthLimit = max(0.0, track.growthLimit + adjustment) }
+    if track.cap < UNBOUNDED {
+      track.cap = max(0.0, track.cap + adjustment)
+    }
+    if track.growthLimit < UNBOUNDED {
+      track.growthLimit = max(0.0, track.growthLimit + adjustment)
+    }
     run result.append(track)
     index = index + 1
   }
   return resolvedGap
 }
 
-pub fn baselineShift(offsets: &[BaselineOffset], id: usize, horizontal: bool, fallback: f32) -> f32 {
+pub fn baselineShift(
+  offsets: &[BaselineOffset],
+  id: usize,
+  horizontal: bool,
+  fallback: f32,
+) -> f32 {
   let mut at: usize = 0
   while at < offsets.length {
     let value = offsets[at]
-    if value.id == id && value.horizontal == horizontal { return value.shift }
+    if value.id == id && value.horizontal == horizontal {
+      return value.shift
+    }
     at = at + 1
   }
   return fallback

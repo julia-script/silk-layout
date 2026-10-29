@@ -132,7 +132,8 @@ fn inheritedSpan(
   span: GridSpan,
 ) -> GridSpan {
   if nodes.node(child).kind != BoxKind.Grid || nodes.node(child).measurement != Measurement.None
-    || start.kind == GridLineKind.Span || end.kind == GridLineKind.Span
+    || start.kind == GridLineKind.Span
+    || end.kind == GridLineKind.Span
     || (start.kind != GridLineKind.Auto && end.kind != GridLineKind.Auto) {
     return span
   }
@@ -197,6 +198,7 @@ fn finish(
       index = index + 1
     }
   }
+
   // Every span was clamped when resolved, and final bounds include all spans.
   // Row flow is already normalized; only column flow needs an axis swap.
   if transpose {
@@ -277,11 +279,21 @@ pub effect fn collectItems<'source>(
     if !outOfFlow(style) {
       let placement = &nodes.grids[style.grid].placement
       let row = inheritedSpan(
-        nodes, id, child, false, &placement.rowStart, &placement.rowEnd,
+        nodes,
+        id,
+        child,
+        false,
+        &placement.rowStart,
+        &placement.rowEnd,
         resolveSpan(&placement.rowStart, &placement.rowEnd, explicitRows, rowNames),
       )
       let column = inheritedSpan(
-        nodes, id, child, true, &placement.columnStart, &placement.columnEnd,
+        nodes,
+        id,
+        child,
+        true,
+        &placement.columnStart,
+        &placement.columnEnd,
         resolveSpan(&placement.columnStart, &placement.columnEnd, explicitColumns, columnNames),
       )
       let mut item = GridItem { id: child, row: row, column: column }
@@ -359,8 +371,17 @@ pub effect fn collectItems<'source>(
 
   // Fully definite grids allow overlap and need neither bitmap nor row history.
   if !automatic {
-    return finish(&mut values, majorOrigin, minorOrigin, majorEnd, minorEnd, transpose,
-      majorBounded, minorBounded, bounded)
+    return finish(
+      &mut values,
+      majorOrigin,
+      minorOrigin,
+      majorEnd,
+      minorEnd,
+      transpose,
+      majorBounded,
+      minorBounded,
+      bounded,
+    )
   }
 
   // Step 1 reserves ALL fully definite items before any automatic placement.
@@ -499,6 +520,15 @@ pub effect fn collectItems<'source>(
     }
     index = index + 1
   }
-  return finish(&mut values, majorOrigin, minorOrigin, majorEnd, minorEnd, transpose,
-    majorBounded, minorBounded, bounded)
+  return finish(
+    &mut values,
+    majorOrigin,
+    minorOrigin,
+    majorEnd,
+    minorEnd,
+    transpose,
+    majorBounded,
+    minorBounded,
+    bounded,
+  )
 }

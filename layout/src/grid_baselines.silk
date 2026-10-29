@@ -172,8 +172,14 @@ impl BaselineAxis {
 
 impl GridBaselines {
   pub fn make() -> GridBaselines {
-    return GridBaselines { columns: BaselineAxis.make(), rows: BaselineAxis.make(),
-      inset: ResolvedEdges.zero(), margin: ResolvedEdges.zero(), columnGap: 0.0, rowGap: 0.0 }
+    return GridBaselines {
+      columns: BaselineAxis.make(),
+      rows: BaselineAxis.make(),
+      inset: ResolvedEdges.zero(),
+      margin: ResolvedEdges.zero(),
+      columnGap: 0.0,
+      rowGap: 0.0,
+    }
   }
 
   pub fn any(self: &Self) -> bool {
@@ -352,7 +358,8 @@ effect fn prepareAxis<M: Measure>(
       span = item.column
     }
     if !Subgrid.inherits(nodes, item.id, horizontal)
-      && (align == Align.Baseline || align == Align.LastBaseline) && !autoMargins(style, horizontal)
+      && (align == Align.Baseline || align == Align.LastBaseline)
+      && !autoMargins(style, horizontal)
       && !cyclicSize(
         style,
         horizontal,
@@ -893,32 +900,56 @@ pub fn containerBaselines<M: Measure>(
 // §9: a participant crosses every intervening subgrid on this axis. Its
 // placement stays local; only the owning grid's baseline group is shared.
 pub effect fn registerDescendant<M: Measure>(
-  nodes: &BoxTree, measurer: &mut M, root: &Style, parent: &Style,
-  id: usize, start: usize, end: usize, extraBefore: f32, extraAfter: f32,
-  tracks: &[TrackState], definite: bool, columns: bool, contributionIndex: usize,
+  nodes: &BoxTree,
+  measurer: &mut M,
+  root: &Style,
+  parent: &Style,
+  id: usize,
+  start: usize,
+  end: usize,
+  extraBefore: f32,
+  extraAfter: f32,
+  tracks: &[TrackState],
+  definite: bool,
+  columns: bool,
+  contributionIndex: usize,
   scratch: &mut GridBaselines,
-) -> usize ! OutOfMemoryError ? &mut Allocator {
+) -> usize
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let horizontal = columns != (root.writingMode != WritingMode.HorizontalTb)
   let style = nodes.style(id)
   let localColumns = horizontal == (parent.writingMode == WritingMode.HorizontalTb)
   let align = selfAlignment(style, parent, localColumns)
   if Subgrid.inherits(nodes, id, horizontal) || autoMargins(style, horizontal)
     || (align != Align.Baseline && align != Align.LastBaseline)
-    || cyclicSize(style, horizontal, tracks, start, end, definite) { return NO_NODE }
+    || cyclicSize(style, horizontal, tracks, start, end, definite) {
+    return NO_NODE
+  }
   let state = axisStateMut(&mut scratch, columns)
   let mut index = contributionIndex
   if index == NO_NODE {
     index = state.directCount
-    while index < state.entries.length() && state.entries.get(index).id != id { index = index + 1 }
+    while index < state.entries.length() && state.entries.get(index).id != id {
+      index = index + 1
+    }
   }
-  while state.entries.length() <= index { run state.entries.append(Entry.empty()) }
-  if state.index.length() == 0 { run state.index.appendRepeated(NO_NODE, tracks.length * 2) }
+  while state.entries.length() <= index {
+    run state.entries.append(Entry.empty())
+  }
+  if state.index.length() == 0 {
+    run state.index.appendRepeated(NO_NODE, tracks.length * 2)
+  }
   let last = align == Align.LastBaseline
   let groupEnd = groupEnd(style, root, columns, last)
   let mut track = start
-  if last { track = end - 1 }
+  if last {
+    track = end - 1
+  }
   let mut group = track * 2
-  if groupEnd { group = group + 1 }
+  if groupEnd {
+    group = group + 1
+  }
   let mut mapped = state.index.get(group)
   if mapped == NO_NODE {
     mapped = state.groups.length()
@@ -929,11 +960,17 @@ pub effect fn registerDescendant<M: Measure>(
   let mirror = lineOverReverse(baselineMode(style, root.writingMode, horizontal))
     != lineOverReverse(contextMode)
   if mirror {
-    let font = Measure.font(&mut measurer, FontRequest { key: root.fontKey,
-      writingMode: root.writingMode, textOrientation: root.textOrientation,
-      direction: root.usedDirection() })
-    state.mirrorOffset = 2.0 * (font.baselines.central
-      - font.baselines.forContext(root.writingMode, root.textOrientation))
+    let font = Measure.font(
+      &mut measurer,
+      FontRequest {
+        key: root.fontKey,
+        writingMode: root.writingMode,
+        textOrientation: root.textOrientation,
+        direction: root.usedDirection(),
+      },
+    )
+    state.mirrorOffset = 2.0
+      * (font.baselines.central - font.baselines.forContext(root.writingMode, root.textOrientation))
     if reverseAxis(root, columns) != lineOverReverse(contextMode) {
       state.mirrorOffset = -state.mirrorOffset
     }
@@ -950,15 +987,31 @@ pub effect fn registerDescendant<M: Measure>(
   return index
 }
 
-pub fn captureDescendant(scratch: &mut GridBaselines, index: usize, columns: bool,
-  style: &Style, root: &Style, layout: &Layout, start: f32, area: f32) {
+pub fn captureDescendant(
+  scratch: &mut GridBaselines,
+  index: usize,
+  columns: bool,
+  style: &Style,
+  root: &Style,
+  layout: &Layout,
+  start: f32,
+  area: f32,
+) {
   capture(axisStateMut(&mut scratch, columns), index, columns, 3, style, root, layout, start, area)
 }
 
-pub effect fn descendantOffsets(nodes: &BoxTree, output: &LayoutPass, root: &Style,
-  tracks: &[TrackState], columns: bool, scratch: &GridBaselines,
-  inherited: &[BaselineOffset], result: &mut List<BaselineOffset>,
-) ! OutOfMemoryError ? &mut Allocator {
+pub effect fn descendantOffsets(
+  nodes: &BoxTree,
+  output: &LayoutPass,
+  root: &Style,
+  tracks: &[TrackState],
+  columns: bool,
+  scratch: &GridBaselines,
+  inherited: &[BaselineOffset],
+  result: &mut List<BaselineOffset>,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let state = axisState(scratch, columns)
   let horizontal = columns != (root.writingMode != WritingMode.HorizontalTb)
   let mut index: usize = 0
@@ -969,7 +1022,8 @@ pub effect fn descendantOffsets(nodes: &BoxTree, output: &LayoutPass, root: &Sty
       // ancestor-owned member at every nested subgrid boundary.
       let mut inheritedAt: usize = 0
       while inheritedAt < inherited.length
-        && (inherited[inheritedAt].id != entry.id || inherited[inheritedAt].horizontal != horizontal) {
+        && (inherited[inheritedAt].id != entry.id
+          || inherited[inheritedAt].horizontal != horizontal) {
         inheritedAt = inheritedAt + 1
       }
       if inheritedAt < inherited.length {
@@ -982,9 +1036,13 @@ pub effect fn descendantOffsets(nodes: &BoxTree, output: &LayoutPass, root: &Sty
       if Subgrid.reversed(parent, localColumns) != Subgrid.reversed(root, columns) {
         let layout = &output.boxes[entry.id]
         let mut margin = layout.usedMargin.vertical()
-        if horizontal { margin = layout.usedMargin.horizontal() }
+        if horizontal {
+          margin = layout.usedMargin.horizontal()
+        }
         value = spanSize(tracks, entry.start, entry.end) - entry.extraBefore - entry.extraAfter
-          - axisSize(layout.size, horizontal) - margin - value
+          - axisSize(layout.size, horizontal)
+          - margin
+          - value
       }
       run result.append(BaselineOffset { id: entry.id, horizontal: horizontal, shift: value })
     }

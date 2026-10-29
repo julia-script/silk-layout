@@ -411,7 +411,8 @@ impl GridAxis {
       let repeat = repeats[index]
       if repeat.start < end || repeat.start > self.lineGroups || repeat.length == 0
         || repeat.length > self.lineGroups - repeat.start
-        || repeat.count == 0 || repeat.count > MAX_GRID_TRACKS
+        || repeat.count == 0
+        || repeat.count > MAX_GRID_TRACKS
         || repeat.kind == GridRepeatKind.AutoFit {
         return false
       }
@@ -503,8 +504,10 @@ impl GridTemplate {
 
   pub fn isInitial(self: &Self) -> bool {
     return self.rows.tracks.length() == 0 && self.columns.tracks.length() == 0
-      && !self.rows.subgridded && !self.columns.subgridded
-      && self.rows.lineGroups == 0 && self.columns.lineGroups == 0
+      && !self.rows.subgridded
+      && !self.columns.subgridded
+      && self.rows.lineGroups == 0
+      && self.columns.lineGroups == 0
       && self.rows.lines.length() == 0
       && self.columns.lines.length() == 0
       && self.rows.repeats.length() == 0

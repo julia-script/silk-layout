@@ -18,7 +18,8 @@ import grid_subgrid as Subgrid
 
 pub fn needsPreparation(template: &GridTemplate) -> bool with Intrinsic.inlineAlways() {
   return template.rows.subgridded || template.columns.subgridded
-    || template.rows.repeats.length() != 0 || template.columns.repeats.length() != 0
+    || template.rows.repeats.length() != 0
+    || template.columns.repeats.length() != 0
     || template.rows.lines.length() != 0
     || template.columns.lines.length() != 0
     || template.areaRows != 0
@@ -217,8 +218,12 @@ pub effect fn prepareTemplate<'source>(
     Option<&GridContext>.Some { value } => {
       boundedRows = value.rows.active
       boundedColumns = value.columns.active
-      if boundedRows { run Subgrid.prepareAxis(&template.rows, &value.rows, &mut prepared.rows) }
-      if boundedColumns { run Subgrid.prepareAxis(&template.columns, &value.columns, &mut prepared.columns) }
+      if boundedRows {
+        run Subgrid.prepareAxis(&template.rows, &value.rows, &mut prepared.rows)
+      }
+      if boundedColumns {
+        run Subgrid.prepareAxis(&template.columns, &value.columns, &mut prepared.columns)
+      }
       let mut at: usize = 0
       while at < value.areas.length() {
         run prepared.areas.append(value.areas.get(at))
@@ -239,8 +244,12 @@ pub effect fn prepareTemplate<'source>(
   }
   let mut columnAreas = template.areas.asSlice()
   let mut rowAreas = template.areas.asSlice()
-  if boundedColumns { columnAreas = prepared.areas.asSlice() }
-  if boundedRows { rowAreas = prepared.areas.asSlice() }
+  if boundedColumns {
+    columnAreas = prepared.areas.asSlice()
+  }
+  if boundedRows {
+    rowAreas = prepared.areas.asSlice()
+  }
   run prepareLineNames(
     expandedLines(&template.columns, &prepared.columns),
     columnAreas,
@@ -257,15 +266,31 @@ pub effect fn prepareTemplate<'source>(
   )
   if boundedRows || boundedColumns {
     scratch.bounds = run collectItems(
-      nodes, id, prepared.rows.explicitTracks, prepared.columns.explicitTracks,
-      boundedRows, boundedColumns, &prepared.rowNames, &prepared.columnNames,
-      &mut scratch.items, &mut scratch.placement, true,
+      nodes,
+      id,
+      prepared.rows.explicitTracks,
+      prepared.columns.explicitTracks,
+      boundedRows,
+      boundedColumns,
+      &prepared.rowNames,
+      &prepared.columnNames,
+      &mut scratch.items,
+      &mut scratch.placement,
+      true,
     )
   } else {
     scratch.bounds = run collectItems(
-      nodes, id, prepared.rows.explicitTracks, prepared.columns.explicitTracks,
-      false, false, &prepared.rowNames, &prepared.columnNames,
-      &mut scratch.items, &mut scratch.placement, false,
+      nodes,
+      id,
+      prepared.rows.explicitTracks,
+      prepared.columns.explicitTracks,
+      false,
+      false,
+      &prepared.rowNames,
+      &prepared.columnNames,
+      &mut scratch.items,
+      &mut scratch.placement,
+      false,
     )
   }
   prepared.gridContext = input.gridContext

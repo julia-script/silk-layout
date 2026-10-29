@@ -13,6 +13,7 @@ pub struct ContributionLayer {
   pub high: f32,
   pub gap: f32,
 }
+
 impl Copy for ContributionLayer {}
 
 pub struct HypothesisSource {
@@ -21,6 +22,7 @@ pub struct HypothesisSource {
   pub end: usize,
   pub adjustment: f32,
 }
+
 impl Copy for HypothesisSource {}
 
 pub struct ContributionWork {
@@ -28,10 +30,14 @@ pub struct ContributionWork {
   pub hypotheses: List<TrackContribution>,
   pub pending: List<HypothesisSource>,
 }
+
 impl ContributionWork {
   pub fn make() -> ContributionWork {
-    return ContributionWork { layers: List<ContributionLayer>.make(),
-      hypotheses: List<TrackContribution>.make(), pending: List<HypothesisSource>.make() }
+    return ContributionWork {
+      layers: List<ContributionLayer>.make(),
+      hypotheses: List<TrackContribution>.make(),
+      pending: List<HypothesisSource>.make(),
+    }
   }
 }
 
@@ -40,10 +46,16 @@ pub fn extra(layers: &[ContributionLayer], start: usize, end: usize) -> f32 {
   let mut index: usize = 0
   while index < layers.length {
     let layer = layers[index]
-    if start == layer.start { result = result + layer.low }
-    else { result = result + layer.gap }
-    if end == layer.end { result = result + layer.high }
-    else { result = result + layer.gap }
+    if start == layer.start {
+      result = result + layer.low
+    } else {
+      result = result + layer.gap
+    }
+    if end == layer.end {
+      result = result + layer.high
+    } else {
+      result = result + layer.gap
+    }
     index = index + 1
   }
   return result
@@ -54,20 +66,30 @@ pub fn edge(layers: &[ContributionLayer], line: usize, before: bool) -> f32 {
   let mut index: usize = 0
   while index < layers.length {
     let layer = layers[index]
-    if before && line == layer.start { result = result + layer.low }
-    else if !before && line == layer.end { result = result + layer.high }
-    else { result = result + layer.gap }
+    if before && line == layer.start {
+      result = result + layer.low
+    } else if !before && line == layer.end {
+      result = result + layer.high
+    } else {
+      result = result + layer.gap
+    }
     index = index + 1
   }
   return result
 }
 
-pub effect fn store(result: &mut List<TrackContribution>, index: usize, value: TrackContribution) -> bool
-  ! OutOfMemoryError ? &mut Allocator {
+pub effect fn store(
+  result: &mut List<TrackContribution>,
+  index: usize,
+  value: TrackContribution,
+) -> bool
+  ! OutOfMemoryError
+  ? &mut Allocator {
   if index < result.length() {
     let previous = result.get(index)
     let changed = previous.start != value.start || previous.end != value.end
-      || previous.minimum != value.minimum || previous.minContent != value.minContent
+      || previous.minimum != value.minimum
+      || previous.minContent != value.minContent
     result.set(index, value)
     return changed
   }
@@ -78,7 +100,8 @@ pub effect fn store(result: &mut List<TrackContribution>, index: usize, value: T
 // Grid §9: one hypothetical item per relevant span class, using independent
 // maxima of the three intrinsic contributions, not a sum of peer items.
 pub effect fn hypothesis(work: &mut ContributionWork, marker: usize, value: TrackContribution)
-  ! OutOfMemoryError ? &mut Allocator {
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let mut index = marker
   while index < work.hypotheses.length() {
     let existing = &mut work.hypotheses.asMutSlice()[index]
@@ -95,21 +118,38 @@ pub effect fn hypothesis(work: &mut ContributionWork, marker: usize, value: Trac
 
 // Delay the maximum-per-span reduction until baseline shims have inflated the
 // real items (§12.5). The largest unshimmed item need not remain the largest.
-pub effect fn defer(work: &mut ContributionWork, source: usize, start: usize, end: usize,
-  adjustment: f32) ! OutOfMemoryError ? &mut Allocator {
-  run work.pending.append(HypothesisSource { source: source, start: start, end: end,
-    adjustment: adjustment })
+pub effect fn defer(
+  work: &mut ContributionWork,
+  source: usize,
+  start: usize,
+  end: usize,
+  adjustment: f32,
+)
+  ! OutOfMemoryError
+  ? &mut Allocator {
+  run work.pending.append(
+    HypothesisSource { source: source, start: start, end: end, adjustment: adjustment },
+  )
 }
 
 pub effect fn inflate(work: &mut ContributionWork, contributions: &[TrackContribution])
-  ! OutOfMemoryError ? &mut Allocator {
+  ! OutOfMemoryError
+  ? &mut Allocator {
   let mut index: usize = 0
   while index < work.pending.length() {
     let pending = work.pending.get(index)
     let source = contributions[pending.source]
-    run hypothesis(&mut work, 0, TrackContribution.make(pending.start, pending.end,
-      source.minimum + pending.adjustment, source.minContent + pending.adjustment,
-      source.maxContent + pending.adjustment))
+    run hypothesis(
+      &mut work,
+      0,
+      TrackContribution.make(
+        pending.start,
+        pending.end,
+        source.minimum + pending.adjustment,
+        source.minContent + pending.adjustment,
+        source.maxContent + pending.adjustment,
+      ),
+    )
     index = index + 1
   }
   work.pending.clear()

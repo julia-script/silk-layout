@@ -400,20 +400,28 @@ test effect fn gridGeometryJournalsExactInheritedRequestIdentity()
   let marker = store.checkpoint()
   run store.capture(0, 9, &tracks, 0, 1, &names, &tracks, 0, 1, &names)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(store.get(store.find(0)).gridContext == 9,
-    "equal rectangles retain the exact new inherited request identity")
+  run Testing.expect(
+    store.get(store.find(0)).gridContext == 9,
+    "equal rectangles retain the exact new inherited request identity",
+  )
   store.restore(marker)
-  run Testing.expect(store.get(store.find(0)).gridContext == 5,
-    "rollback restores accepted geometry and its identity together")
+  run Testing.expect(
+    store.get(store.find(0)).gridContext == 5,
+    "rollback restores accepted geometry and its identity together",
+  )
   let toOld: [usize; 2] = [NO_NODE, 0]
   let toNew: [usize; 1] = [1]
   run store.remap(&toOld, &toNew) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(store.get(store.find(1)).gridContext == 5,
-    "owner remapping preserves rather than guesses the accepted identity")
+  run Testing.expect(
+    store.get(store.find(1)).gridContext == 5,
+    "owner remapping preserves rather than guesses the accepted identity",
+  )
   run store.capture(1, 0, &tracks, 0, 1, &names, &tracks, 0, 1, &names)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(store.get(store.find(1)).gridContext == 0,
-    "a genuine ordinary-grid publication explicitly replaces inherited context")
+  run Testing.expect(
+    store.get(store.find(1)).gridContext == 0,
+    "a genuine ordinary-grid publication explicitly replaces inherited context",
+  )
 }
 
 test effect fn gridGeometryStaticInheritedProvenanceIsKeyOnly()
@@ -424,14 +432,20 @@ test effect fn gridGeometryStaticInheritedProvenanceIsKeyOnly()
   store.commit()
   let marker = store.checkpoint()
   run store.captureContext(1, 9) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(store.get(store.find(1)).gridContext == 9
-    && store.get(store.find(1)).columns.tracks.length() == 0
-    && store.get(store.find(1)).rows.tracks.length() == 0,
-    "static inherited grids publish exact keys without unused track copies")
+  run Testing.expect(
+    store.get(store.find(1)).gridContext == 9
+      && store.get(store.find(1)).columns.tracks.length() == 0
+      && store.get(store.find(1)).rows.tracks.length() == 0,
+    "static inherited grids publish exact keys without unused track copies",
+  )
   store.restore(marker)
-  run Testing.expect(store.get(store.find(1)).gridContext == 5,
-    "static inherited provenance rolls back with the same geometry journal")
+  run Testing.expect(
+    store.get(store.find(1)).gridContext == 5,
+    "static inherited provenance rolls back with the same geometry journal",
+  )
   run store.captureContext(1, 0) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(store.get(store.find(1)).gridContext == 0,
-    "removing inheritance explicitly replaces the existing static provenance")
+  run Testing.expect(
+    store.get(store.find(1)).gridContext == 0,
+    "removing inheritance explicitly replaces the existing static provenance",
+  )
 }

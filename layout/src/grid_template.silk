@@ -435,8 +435,7 @@ pub effect fn expandSubgridNames(
       if repeat.start + repeat.length > line.line {
         break
       }
-      destination = destination - repeat.length
-        + repeat.length * repetitions(&repeat, automatic)
+      destination = destination - repeat.length + repeat.length * repetitions(&repeat, automatic)
       part = part + 1
     }
     let mut count: usize = 1

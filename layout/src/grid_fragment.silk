@@ -190,8 +190,10 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
       area,
     )
     request.performLayout = false
-    request.baselines = input.baselines || (grid.subgridBaselines && Subgrid.eligible(nodes, item.id))
-      || Baselines.active(&baselines, index, true) || Baselines.active(&baselines, index, false)
+    request.baselines = input.baselines
+      || (grid.subgridBaselines && Subgrid.eligible(nodes, item.id))
+      || Baselines.active(&baselines, index, true)
+      || Baselines.active(&baselines, index, false)
     request.fragmentation = FragmentInput.continuous()
     if grid.subgridBaselines && Subgrid.eligible(nodes, item.id) {
       let mut key = request
@@ -227,30 +229,72 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
     index = index + 1
   }
   if grid.subgridBaselines {
-    run collectFinalSubgridBaselines(nodes, &mut output, &mut measurer, grid.items, style,
-      grid.columns, grid.rows, grid.columnGap, grid.rowGap,
-      grid.columnBaselineDefinite, grid.rowBaselineDefinite, &logical, &mut baselines)
-    run Baselines.descendantOffsets(nodes, &output, style, grid.columns, true, &baselines,
-      grid.inheritance.baselineOffsets, &mut scratch.baselineOffsets)
-    run Baselines.descendantOffsets(nodes, &output, style, grid.rows, false, &baselines,
-      grid.inheritance.baselineOffsets, &mut scratch.baselineOffsets)
+    run collectFinalSubgridBaselines(
+      nodes,
+      &mut output,
+      &mut measurer,
+      grid.items,
+      style,
+      grid.columns,
+      grid.rows,
+      grid.columnGap,
+      grid.rowGap,
+      grid.columnBaselineDefinite,
+      grid.rowBaselineDefinite,
+      &logical,
+      &mut baselines,
+    )
+    run Baselines.descendantOffsets(
+      nodes,
+      &output,
+      style,
+      grid.columns,
+      true,
+      &baselines,
+      grid.inheritance.baselineOffsets,
+      &mut scratch.baselineOffsets,
+    )
+    run Baselines.descendantOffsets(
+      nodes,
+      &output,
+      style,
+      grid.rows,
+      false,
+      &baselines,
+      grid.inheritance.baselineOffsets,
+      &mut scratch.baselineOffsets,
+    )
     let mut offset: usize = 0
     while offset < grid.inheritance.baselineOffsets.length {
       run scratch.baselineOffsets.append(grid.inheritance.baselineOffsets[offset])
       offset = offset + 1
     }
     let inherited = InheritanceSource {
-      columns: grid.inheritance.columns, rows: grid.inheritance.rows,
-      areas: grid.inheritance.areas, bounds: grid.inheritance.bounds,
-      phase: grid.inheritance.phase, firstColumns: grid.inheritance.firstColumns,
+      columns: grid.inheritance.columns,
+      rows: grid.inheritance.rows,
+      areas: grid.inheritance.areas,
+      bounds: grid.inheritance.bounds,
+      phase: grid.inheritance.phase,
+      firstColumns: grid.inheritance.firstColumns,
       baselineOffsets: scratch.baselineOffsets.asSlice(),
     }
     index = 0
     while index < grid.items.length {
       let item = &grid.items[index]
       if Subgrid.eligible(nodes, item.id) {
-        let key = run Subgrid.bind(nodes, &mut output.cache.gridContexts, item, style,
-          &inherited, grid.columns, grid.rows, grid.columnGap, grid.rowGap, true, true)
+        let key = run Subgrid.bind(
+          nodes,
+          &mut output.cache.gridContexts,
+          item,
+          style,
+          &inherited,
+          grid.columns,
+          grid.rows,
+          grid.columnGap,
+          grid.rowGap,
+          true,
+          true,
+        )
         let allocations = scratch.items.asMutSlice()
         allocations[index].gridContext = key
       }
@@ -282,10 +326,24 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
       inlineShift = Baselines.shift(&baselines, index, true, inlineShift)
       blockShift = Baselines.shift(&baselines, index, false, blockShift)
     }
-    if Subgrid.inherits(nodes, item.id, !grid.axis.vertical) { inlineShift = 0.0 }
-    if Subgrid.inherits(nodes, item.id, grid.axis.vertical) { blockShift = 0.0 }
-    inlineShift = Subgrid.baselineShift(grid.inheritance.baselineOffsets, item.id, !grid.axis.vertical, inlineShift)
-    blockShift = Subgrid.baselineShift(grid.inheritance.baselineOffsets, item.id, grid.axis.vertical, blockShift)
+    if Subgrid.inherits(nodes, item.id, !grid.axis.vertical) {
+      inlineShift = 0.0
+    }
+    if Subgrid.inherits(nodes, item.id, grid.axis.vertical) {
+      blockShift = 0.0
+    }
+    inlineShift = Subgrid.baselineShift(
+      grid.inheritance.baselineOffsets,
+      item.id,
+      !grid.axis.vertical,
+      inlineShift,
+    )
+    blockShift = Subgrid.baselineShift(
+      grid.inheritance.baselineOffsets,
+      item.id,
+      grid.axis.vertical,
+      blockShift,
+    )
     let mut inlineOffset = grid.columns[column].position + margin.left + inlineShift
     if style.usedDirection() == Direction.Rtl {
       inlineOffset = grid.inlineSize - grid.columns[column].position - margin.right

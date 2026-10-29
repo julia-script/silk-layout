@@ -198,16 +198,17 @@ impl GridGeometryStore {
   pub fn checkpoint(self: &Self) -> usize {
     return self.journal.length()
   }
+
   // Static subgrids still need exact request provenance when a positioned
   // descendant later creates ancestor shells. No track/name values are copied,
   // and ordinary static grids never call this path.
   pub effect fn captureContext(self: &mut Self, id: usize, gridContext: usize)
-    ! OutOfMemoryError ? &mut Allocator {
+    ! OutOfMemoryError
+    ? &mut Allocator {
     let tracks: [TrackState; 0] = []
     let names = LineNames.make()
     run self.capture(id, gridContext, &tracks, 0, 0, &names, &tracks, 0, 0, &names)
   }
-
 
   pub effect fn capture(
     self: &mut Self,

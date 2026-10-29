@@ -73,14 +73,23 @@ test effect fn subgridNameGroupsRepeatWithoutMerging()
     GridNamedLine { line: 3, name: 3, repeat: 0 },
   ]
   run axis.lines.appendSlice(&names) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(axis.valid(4) && subgridSpan(&axis) == 5, "empty repeated groups contribute to automatic span")
+  run Testing.expect(
+    axis.valid(4) && subgridSpan(&axis) == 5,
+    "empty repeated groups contribute to automatic span",
+  )
   let mut lines = List<GridNamedLine>.make()
   run expandSubgridNames(&axis, 5, &mut lines) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(lines.length() == 4 && hasLine(lines.asSlice(), 1, 0)
-    && hasLine(lines.asSlice(), 2, 2) && hasLine(lines.asSlice(), 2, 4)
-    && hasLine(lines.asSlice(), 3, 5), "repeated groups do not merge at endpoints")
+  run Testing.expect(
+    lines.length() == 4 && hasLine(lines.asSlice(), 1, 0) && hasLine(lines.asSlice(), 2, 2)
+      && hasLine(lines.asSlice(), 2, 4)
+      && hasLine(lines.asSlice(), 3, 5),
+    "repeated groups do not merge at endpoints",
+  )
   run expandSubgridNames(&axis, 2, &mut lines) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(lines.length() == 2 && hasLine(lines.asSlice(), 2, 2), "used names truncate to the inherited span")
+  run Testing.expect(
+    lines.length() == 2 && hasLine(lines.asSlice(), 2, 2),
+    "used names truncate to the inherited span",
+  )
 }
 
 // §7.2.3.2: auto-fill fills the specified span and may repeat zero times.
@@ -89,7 +98,9 @@ test effect fn subgridNameAutoFillAndAutomaticSpan()
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut axis = GridAxis.subgrid()
   axis.lineGroups = 4
-  run axis.repeats.append(GridRepeat { start: 1, length: 2, count: 1, kind: GridRepeatKind.AutoFill })
+  run axis.repeats.append(
+    GridRepeat { start: 1, length: 2, count: 1, kind: GridRepeatKind.AutoFill },
+  )
     |> Effect.provideMut<Allocator>(&mut allocator)
   let names: [GridNamedLine; 3] = [
     GridNamedLine { line: 1, name: 1, repeat: 1 },
@@ -97,16 +108,27 @@ test effect fn subgridNameAutoFillAndAutomaticSpan()
     GridNamedLine { line: 3, name: 3, repeat: 0 },
   ]
   run axis.lines.appendSlice(&names) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(axis.valid(4) && subgridSpan(&axis) == 1, "auto-fill contributes zero to automatic span")
+  run Testing.expect(
+    axis.valid(4) && subgridSpan(&axis) == 1,
+    "auto-fill contributes zero to automatic span",
+  )
   let mut lines = List<GridNamedLine>.make()
   run expandSubgridNames(&axis, 5, &mut lines) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(lines.length() == 5 && hasLine(lines.asSlice(), 1, 1)
-    && hasLine(lines.asSlice(), 2, 4) && hasLine(lines.asSlice(), 3, 5), "auto-fill repeats groups to cover the span")
+  run Testing.expect(
+    lines.length() == 5 && hasLine(lines.asSlice(), 1, 1) && hasLine(lines.asSlice(), 2, 4)
+      && hasLine(lines.asSlice(), 3, 5),
+    "auto-fill repeats groups to cover the span",
+  )
   run expandSubgridNames(&axis, 1, &mut lines) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(lines.length() == 1 && hasLine(lines.asSlice(), 3, 1), "fulfilled span removes auto-fill entirely")
+  run Testing.expect(
+    lines.length() == 1 && hasLine(lines.asSlice(), 3, 1),
+    "fulfilled span removes auto-fill entirely",
+  )
   run expandSubgridNames(&axis, 4, &mut lines) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(lines.length() == 4 && hasLine(lines.asSlice(), 2, 4)
-    && !hasLine(lines.asSlice(), 3, 4), "partial final pattern truncates names beyond the used span")
+  run Testing.expect(
+    lines.length() == 4 && hasLine(lines.asSlice(), 2, 4) && !hasLine(lines.asSlice(), 3, 4),
+    "partial final pattern truncates names beyond the used span",
+  )
 }
 
 // §7.2.3.1 grammar: no tracks, auto-fit, zero counts, nesting or two auto-fills.
@@ -114,12 +136,17 @@ test effect fn subgridRejectsMalformedNativeNameRepeats()
   ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut axis = GridAxis.subgrid()
-  run Testing.expect(axis.valid(1) && subgridSpan(&axis) == 1, "bare subgrid is valid and spans one track")
+  run Testing.expect(
+    axis.valid(1) && subgridSpan(&axis) == 1,
+    "bare subgrid is valid and spans one track",
+  )
   run axis.tracks.append(fixed(10.0)) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(!axis.valid(1), "subgrid forbids track sizes")
   axis.tracks.clear()
   axis.lineGroups = 3
-  run axis.repeats.append(GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFit })
+  run axis.repeats.append(
+    GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFit },
+  )
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(!axis.valid(1), "name repeats forbid auto-fit")
   let mut first = axis.repeats.get(0)
@@ -130,7 +157,9 @@ test effect fn subgridRejectsMalformedNativeNameRepeats()
   first.count = 1
   first.kind = GridRepeatKind.AutoFill
   axis.repeats.set(0, first)
-  run axis.repeats.append(GridRepeat { start: 2, length: 1, count: 1, kind: GridRepeatKind.AutoFill })
+  run axis.repeats.append(
+    GridRepeat { start: 2, length: 1, count: 1, kind: GridRepeatKind.AutoFill },
+  )
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(!axis.valid(1), "only one auto-fill is permitted")
   let mut second = axis.repeats.get(1)
@@ -142,9 +171,11 @@ test effect fn subgridRejectsMalformedNativeNameRepeats()
   axis.repeats.set(1, second)
   run axis.lines.append(GridNamedLine { line: 1, name: 1, repeat: 1 })
     |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(!axis.valid(2), "repeat names must be inside their group pattern, not at its end")
+  run Testing.expect(
+    !axis.valid(2),
+    "repeat names must be inside their group pattern, not at its end",
+  )
 }
-
 
 // CSS Grid 2 §7.2.3.1: adjacent repeat endpoints share one expanded boundary.
 test effect fn gridRepeatAdjacentNamesKeepTheirOwners()

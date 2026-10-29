@@ -44,7 +44,15 @@ import geometry {
   Point,
   OptionalSize
 }
-import grid_style { GridTemplate, GridAxis, GridTrack, GridBreadth, GridLine, GridLineKind, GridError }
+import grid_style {
+  GridTemplate,
+  GridAxis,
+  GridTrack,
+  GridBreadth,
+  GridLine,
+  GridLineKind,
+  GridError
+}
 import tree { Tree, LayoutTree, NodeId, InvalidNode }
 import engine { compute }
 
@@ -574,7 +582,8 @@ fn inheritedPositionedStyle() -> Style {
 }
 
 effect fn positionedSubgrid(tree: &mut Tree, root: NodeId) -> NodeId
-  ! OutOfMemoryError | InvalidNode | GridError ? &mut Allocator {
+  ! OutOfMemoryError | InvalidNode | GridError
+  ? &mut Allocator {
   let child = run tree.append(root, inheritedPositionedStyle())
   let mut template = GridTemplate.make()
   template.columns = GridAxis.subgrid()
@@ -590,7 +599,12 @@ effect fn positionedSubgrid(tree: &mut Tree, root: NodeId) -> NodeId
 // consumes the outside edges, not the shared interior line. Redistributing
 // 80/120 to 120/80 preserves the 200px outer area but moves that line.
 effect fn subgridPositionedEdits()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
   ? &mut Allocator {
   let mut rootStyle = gridStyle()
   rootStyle.width = Dimension.px(200.0)
@@ -610,6 +624,7 @@ effect fn subgridPositionedEdits()
   run expectRect(&mut output, subgrid, 0.0, 0.0, 200.0, 20.0)
   run expectRect(&mut output, absolute, 80.0, 0.0, 100.0, 20.0)
   run expectFresh(&tree, &mut output, absolute)
+
   // A new box under the preceding sibling changes generated ids, not the
   // subgrid's accepted logical identity. Follow it with a positioned-only edit.
   let added = run tree.append(earlier, Style.make())
@@ -655,7 +670,12 @@ effect fn subgridPositionedEdits()
 }
 
 test effect fn positionedSubgridRetainsExactContextAcrossEdits()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run subgridPositionedEdits() |> Effect.provideMut<Allocator>(&mut allocator)
 }
@@ -672,13 +692,21 @@ effect fn expectSubgridShellRects(output: &mut LayoutTree, source: NodeId, inset
   while true {
     let actual = match move rects.next() {
       Option<Rect>.Some { value } => value
-      Option<Rect>.None => { break }
+      Option<Rect>.None => {
+        break
+      }
     }
     run Testing.expect(count < expected.length, "no extra positioned subgrid continuation")
     let wanted = expected[count]
-    run Testing.expect(actual.x == wanted.x && actual.y == wanted.y
-      && actual.width == wanted.width && actual.height == wanted.height,
-      "future subgrid shells retain inherited tracks and ignore authored width constraints")
+
+    // Fractional consumed-flow progress can leave the final 30px fragment
+    // a few f32 ULPs short; its position and inherited inline size stay exact.
+    run Testing.expect(
+      actual.x == wanted.x && actual.y == wanted.y && actual.width == wanted.width
+        && actual.height > wanted.height - 0.0001
+        && actual.height < wanted.height + 0.0001,
+      "future subgrid shells retain inherited tracks and ignore authored width constraints",
+    )
     count = count + 1
   }
   run Testing.expect(count == 3, "the positioned descendant reaches both future shells")
@@ -690,7 +718,12 @@ effect fn expectSubgridShellRects(output: &mut LayoutTree, source: NodeId, inset
 // and 10% right padding leaves180/216/144px end edges on200/240/160px pages.
 // Section13 leaves break choice to the engine; height150 consumes60+60+30.
 effect fn subgridFutureShells(nested: bool)
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static>
   ? &mut Allocator {
   let mut rootStyle = gridStyle()
   rootStyle.width = Dimension.auto()
@@ -718,6 +751,7 @@ effect fn subgridFutureShells(nested: bool)
   childStyle.height = Dimension.px(150.0)
   let absolute = run tree.append(subgrid, move childStyle)
   run place(&mut tree, absolute, 2, 1)
+
   // The next absolute sibling revisits earlier accepted fragments after the
   // first has reached page3. A second relative subgrid then needs new shells
   // under the already-existing (and, when nested, inherited) parent shells.
@@ -766,13 +800,23 @@ effect fn subgridFutureShells(nested: bool)
 }
 
 test effect fn positionedSubgridFuturePageShellsUseInheritedAxes()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run subgridFutureShells(false) |> Effect.provideMut<Allocator>(&mut allocator)
 }
 
 test effect fn positionedSubgridFutureShellsReconstructStaticInheritedAncestors()
-  ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static> {
+  ! OutOfMemoryError
+    | TextError
+    | FragmentationError
+    | InvalidNode
+    | GridError
+    | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run subgridFutureShells(true) |> Effect.provideMut<Allocator>(&mut allocator)
 }

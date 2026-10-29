@@ -719,6 +719,7 @@ effect fn checkMeasuredCrossMinimum()
     pass.boxes[id].size.width == 120.0,
     "a changed cross floor cannot reuse the old measured width",
   )
+
   // The same cross constraint must reach the scalar intrinsic queries used
   // by fit-content sizing, not just the top-level width-only probe.
   input.intrinsicWidth = false
@@ -756,4 +757,66 @@ test effect fn gridContributionPropertiesDoNotReviveIgnoredRequestMinimum()
     ItemContribution { minimum: 0.0, minContent: 23.0, maxContent: 91.0, usedMinimum: 0.0 },
   )
     |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid §6.6: an automatic minimum is a floor, not a preferred size.
+// Both items span an auto-min track capped at 100px, giving a 23px content
+// minimum. The first keeps its natural 91px width. The second's 2:1 ratio
+// suggests 20px from its definite 10px height, so the 23px minimum wins.
+effect fn checkGridItemMinimumBounds()
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut style = Style.make()
+  style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  style.width = Dimension.px(100.0)
+  style.justifyItems = Align.Start
+  style.alignItems = Align.Start
+  let mut tree = run Tree.make(move style)
+  let root = tree.root()
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(
+    GridTrack.minmax(
+      GridBreadth { kind: GridBreadthKind.Auto, length: 0.0, percent: 0.0 },
+      GridBreadth.fixed(100.0),
+    ),
+  )
+  run tree.setGrid(root, move template)
+  let natural = run tree.append(root, Style.make())
+  run tree.setMeasurement(natural, 0)
+  let mut ratioStyle = Style.make()
+  ratioStyle.height = Dimension.px(10.0)
+  ratioStyle.aspectRatio = 2.0
+  let ratio = run tree.append(root, move ratioStyle)
+  run tree.setMeasurement(ratio, 0)
+  let mut output = LayoutTree.make()
+  let mut provider = ContributionMeasure { calls: 0 }
+  run compute(&tree, &mut output, &mut provider, OptionalSize.definite(100.0, 100.0))
+  let naturalBounds = run output.sourceBounds(natural)
+  let ratioBounds = run output.sourceBounds(ratio)
+  run Testing.expect(
+    naturalBounds.x == 0.0 && naturalBounds.y == 0.0 && naturalBounds.width == 91.0
+      && naturalBounds.height == 67.0,
+    "a nonbinding automatic minimum preserves the larger natural size",
+  )
+  run Testing.expect(
+    ratioBounds.x == 0.0 && ratioBounds.y == 67.0 && ratioBounds.width == 23.0
+      && ratioBounds.height == 10.0,
+    "a binding automatic minimum beats a smaller ratio-derived width",
+  )
+}
+
+test effect fn gridItemMinimumBoundsPreserveNaturalAndRatioSizing()
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run checkGridItemMinimumBounds() |> Effect.provideMut<Allocator>(&mut allocator)
 }

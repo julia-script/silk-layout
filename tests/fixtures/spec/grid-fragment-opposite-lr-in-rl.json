@@ -1,0 +1,23 @@
+{
+  "name": "grid-fragment-opposite-lr-in-rl",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "writing-modes", "forced-breaks", "order"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-writing-modes-4/#logical-to-physical", "https://drafts.csswg.org/css-break-3/#break-between"],
+  "derivation": "Pinned css-grid-2 section 13 (normative), not the nonnormative sample algorithm in 13.1: consume rows in the fragmentation context's block direction, preserving logical placement. The vertical-lr grid's logical rows 17/23/31 are visited 31/23/17 by vertical-rl frames. Explicit placement and order deliberately disagree with traversal. The 31px row's break-after ends page 1; the 17px row's break-before ends page 2. Neither boundary control belongs to a different logical row. Interrupted 5px gutters vanish. Right edges are 90,190,290, so item x positions are 59,167,273. Non-final grid fragments fill 80px; the final fragment is 17px.",
+  "input": {
+    "viewport": {"width": 300, "height": 180},
+    "fragmentation": {"kind": "page", "writingMode": "vertical-rl", "frames": [{"x": 10, "y": 20, "width": 80, "height": 41}, {"x": 110, "y": 70, "width": 80, "height": 41}, {"x": 210, "y": 120, "width": 80, "height": 41}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "writingMode": "vertical-lr", "gridTemplateColumns": [41], "gridTemplateRows": [17, 23, 31], "rowGap": 5}},
+      {"parent": 0, "style": {"writingMode": "vertical-rl", "gridRowStart": 2, "order": 7}},
+      {"parent": 0, "style": {"writingMode": "vertical-rl", "gridRowStart": 1, "order": -4, "breakBefore": "page"}},
+      {"parent": 0, "style": {"writingMode": "vertical-rl", "gridRowStart": 3, "breakAfter": "page"}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 10, "y": 20, "width": 80, "height": 41}, {"x": 110, "y": 70, "width": 80, "height": 41}, {"x": 273, "y": 120, "width": 17, "height": 41}]},
+    {"rects": [{"x": 167, "y": 70, "width": 23, "height": 41}]},
+    {"rects": [{"x": 273, "y": 120, "width": 17, "height": 41}]},
+    {"rects": [{"x": 59, "y": 20, "width": 31, "height": 41}]}
+  ]}
+}

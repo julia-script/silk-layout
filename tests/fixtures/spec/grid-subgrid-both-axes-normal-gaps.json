@@ -1,0 +1,106 @@
+{
+  "name": "grid-subgrid-both-axes-normal-gaps",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-tracks",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-gaps"
+  ],
+  "derivation": "The child spans two columns (31+7+47=85) and two rows (19+5+29=53). Omitted gaps have the normal value and inherit 7 and5 on the respective subgridded axes. Its four items use those same track sizes and local line origins.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 85,
+          "gridTemplateColumns": [
+            31,
+            47
+          ],
+          "gridTemplateRows": [
+            19,
+            29
+          ],
+          "columnGap": 7,
+          "rowGap": 5
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": "subgrid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1,
+          "gridRowEnd": 3
+        }
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 85,
+        "height": 53
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 85,
+        "height": 53
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 31,
+        "height": 19
+      },
+      {
+        "x": 38,
+        "y": 0,
+        "width": 47,
+        "height": 19
+      },
+      {
+        "x": 0,
+        "y": 24,
+        "width": 31,
+        "height": 29
+      },
+      {
+        "x": 38,
+        "y": 24,
+        "width": 47,
+        "height": 29
+      }
+    ]
+  }
+}

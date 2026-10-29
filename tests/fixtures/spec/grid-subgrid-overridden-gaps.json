@@ -1,0 +1,122 @@
+{
+  "name": "grid-subgrid-overridden-gaps",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-tracks",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-gaps"
+  ],
+  "derivation": "The parent is31+12+47=90px. A zero child gutter adds half12=6 to each adjacent track:37 and53. A4px child gutter adds half(12-4)=4:35 and51, with the second item at35+4=39. Both subgrids retain the parent outer edges.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 90,
+          "gridTemplateColumns": [
+            31,
+            47
+          ],
+          "gridTemplateRows": [
+            19,
+            23
+          ],
+          "columnGap": 12,
+          "rowGap": 5
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "columnGap": 0,
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "columnGap": 4,
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 2
+        }
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 2,
+        "style": {}
+      },
+      {
+        "parent": 2,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 90,
+        "height": 47
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 90,
+        "height": 19
+      },
+      {
+        "x": 0,
+        "y": 24,
+        "width": 90,
+        "height": 23
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 37,
+        "height": 19
+      },
+      {
+        "x": 37,
+        "y": 0,
+        "width": 53,
+        "height": 19
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 35,
+        "height": 23
+      },
+      {
+        "x": 39,
+        "y": 0,
+        "width": 51,
+        "height": 23
+      }
+    ]
+  }
+}

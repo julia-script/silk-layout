@@ -1,0 +1,101 @@
+{
+  "name": "grid-subgrid-descendant-edge-contributions",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-size-contribution",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-margins"
+  ],
+  "derivation": "The first descendant contributes37 plus start margin5,border2,padding3: parent track47. The second contributes53 plus end padding7,border4,margin2: parent track66. With the11px inherited gutter the max-content parent is124px. The subgrid border box excludes its7px margins, giving117px; descendants start at local x5 and53.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "auto",
+            "auto"
+          ],
+          "gridTemplateRows": [
+            19
+          ],
+          "columnGap": 11
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            19
+          ],
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "margin": {
+            "left": 5,
+            "right": 2
+          },
+          "border": {
+            "left": 2,
+            "right": 4
+          },
+          "padding": {
+            "left": 3,
+            "right": 7
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 37
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 53
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 124,
+        "height": 19
+      },
+      {
+        "x": 5,
+        "y": 0,
+        "width": 117,
+        "height": 19
+      },
+      {
+        "x": 5,
+        "y": 0,
+        "width": 37,
+        "height": 19
+      },
+      {
+        "x": 53,
+        "y": 0,
+        "width": 53,
+        "height": 19
+      }
+    ]
+  }
+}

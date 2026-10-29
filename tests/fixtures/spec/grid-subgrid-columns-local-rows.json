@@ -1,0 +1,106 @@
+{
+  "name": "grid-subgrid-columns-local-rows",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-tracks",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-gaps"
+  ],
+  "derivation": "Inherited columns are29 and43 with an11px gutter. Standalone rows remain17 and23 with the locally specified3px gutter; the parent row is43px.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 200
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 83,
+          "gridTemplateColumns": [
+            29,
+            43
+          ],
+          "gridTemplateRows": [
+            43
+          ],
+          "columnGap": 11
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            17,
+            23
+          ],
+          "rowGap": 3,
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3
+        }
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 83,
+        "height": 43
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 83,
+        "height": 43
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 29,
+        "height": 17
+      },
+      {
+        "x": 40,
+        "y": 0,
+        "width": 43,
+        "height": 17
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 29,
+        "height": 23
+      },
+      {
+        "x": 40,
+        "y": 20,
+        "width": 43,
+        "height": 23
+      }
+    ]
+  }
+}

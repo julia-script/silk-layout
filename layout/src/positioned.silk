@@ -1286,6 +1286,7 @@ fn placedInline(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, inpu
   let mut cbStyle = &viewportStyle
   if cb != NO_NODE { cbStyle = nodes.style(cb) }
   let box = resolveBox(style, &input)
+  let directGrid = cb != NO_NODE && nodes.node(id).parent == cb && GridPositioned.isContainer(nodes, cb)
   let mut point = desired
   let mut firstOrigin = Point { x: 0.0, y: 0.0 }
   if cb != NO_NODE {
@@ -1302,7 +1303,13 @@ fn placedInline(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, inpu
     let mut safety = style.justifySelfSafety
     if cbStyle.writingMode != WritingMode.HorizontalTb { align = style.alignSelf
       safety = style.alignSelfSafety }
-    point.x = containing.x + insetPosition(left, right, resolves(style.inset.left, true), resolves(style.inset.right, true), size.width, containing.width, 0.0, containing.width, box.margin.left, box.margin.right, style.margin.left.kind == DimensionKind.Auto, style.margin.right.kind == DimensionKind.Auto, startReverse(cbStyle, true), cbStyle.writingMode == WritingMode.HorizontalTb, desired.x - firstOrigin.x - box.margin.left, align, safety, startReverse(style, true), true)
+    let mut staticPosition = desired.x - firstOrigin.x - box.margin.left
+    if directGrid && !resolves(style.inset.left, true) && !resolves(style.inset.right, true) {
+      let alignment = GridPositioned.staticAlignment(style, cbStyle, cbStyle.writingMode == WritingMode.HorizontalTb)
+      let reverse = startReverse(cbStyle, true)
+      staticPosition = absoluteAlignment(0.0, containing.width, size.width + box.margin.horizontal(), 0.0, containing.width, reverse, reverse, alignment.value, alignment.safety, startReverse(style, true), true)
+    }
+    point.x = containing.x + insetPosition(left, right, resolves(style.inset.left, true), resolves(style.inset.right, true), size.width, containing.width, 0.0, containing.width, box.margin.left, box.margin.right, style.margin.left.kind == DimensionKind.Auto, style.margin.right.kind == DimensionKind.Auto, startReverse(cbStyle, true), cbStyle.writingMode == WritingMode.HorizontalTb, staticPosition, align, safety, startReverse(style, true), true)
   } else {
     let top = resolve(style.inset.top, containing.height, true, 0.0)
     let bottom = resolve(style.inset.bottom, containing.height, true, 0.0)
@@ -1310,7 +1317,13 @@ fn placedInline(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, inpu
     let mut safety = style.justifySelfSafety
     if cbStyle.writingMode == WritingMode.HorizontalTb { align = style.alignSelf
       safety = style.alignSelfSafety }
-    point.y = containing.y + insetPosition(top, bottom, resolves(style.inset.top, true), resolves(style.inset.bottom, true), size.height, containing.height, 0.0, containing.height, box.margin.top, box.margin.bottom, style.margin.top.kind == DimensionKind.Auto, style.margin.bottom.kind == DimensionKind.Auto, startReverse(cbStyle, false), cbStyle.writingMode != WritingMode.HorizontalTb, desired.y - firstOrigin.y - box.margin.top, align, safety, startReverse(style, false), false)
+    let mut staticPosition = desired.y - firstOrigin.y - box.margin.top
+    if directGrid && !resolves(style.inset.top, true) && !resolves(style.inset.bottom, true) {
+      let alignment = GridPositioned.staticAlignment(style, cbStyle, cbStyle.writingMode != WritingMode.HorizontalTb)
+      let reverse = startReverse(cbStyle, false)
+      staticPosition = absoluteAlignment(0.0, containing.height, size.height + box.margin.vertical(), 0.0, containing.height, reverse, reverse, alignment.value, alignment.safety, startReverse(style, false), false)
+    }
+    point.y = containing.y + insetPosition(top, bottom, resolves(style.inset.top, true), resolves(style.inset.bottom, true), size.height, containing.height, 0.0, containing.height, box.margin.top, box.margin.bottom, style.margin.top.kind == DimensionKind.Auto, style.margin.bottom.kind == DimensionKind.Auto, startReverse(cbStyle, false), cbStyle.writingMode != WritingMode.HorizontalTb, staticPosition, align, safety, startReverse(style, false), false)
   }
   return point
 }

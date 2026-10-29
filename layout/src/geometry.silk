@@ -219,12 +219,8 @@ impl MarginStrut {
 pub struct Layout {
   pub location: Point, pub size: Size, pub contentSize: Size,
   pub scrollbarGutter: ResolvedEdges,
-  pub horizontalScrollbar: bool, pub verticalScrollbar: bool,
   scrollbarMetrics: ScrollbarMetrics,
-  scrollbarsApplicable: bool,
-  pub widthDefinite: bool, pub heightDefinite: bool,
   pub firstBaselines: BaselineSet, pub lastBaselines: BaselineSet,
-  pub hasFirstBaseline: bool, pub hasLastBaseline: bool,
   pub measurementOffset: Point,
   // Unscrolled physical border-box-relative bounds, including relative
   // placement but independent of used scroll offsets and sticky translation.
@@ -234,13 +230,18 @@ pub struct Layout {
   flowOverflow: Rect,
   paddingBox: Rect,
   contentBox: Rect,
-  generated: bool,
-  pub preferredRatio: f64, pub ratioBorderBox: bool,
+  pub preferredRatio: f64,
   // Physical in-flow used margins, before adjoining block margins collapse.
   // Out-of-flow boxes retain their resolved (pre-auto-distribution) margins.
   pub usedMargin: ResolvedEdges,
   pub marginTopPositive: f64, pub marginTopNegative: f64,
   pub marginBottomPositive: f64, pub marginBottomNegative: f64,
+  // Flags last so they pack without padding between the f64 fields.
+  pub horizontalScrollbar: bool, pub verticalScrollbar: bool,
+  scrollbarsApplicable: bool,
+  pub widthDefinite: bool, pub heightDefinite: bool,
+  pub hasFirstBaseline: bool, pub hasLastBaseline: bool,
+  generated: bool, pub ratioBorderBox: bool,
   pub collapsesThrough: bool, pub hasClearance: bool,
 }
 impl Copy for Layout {}

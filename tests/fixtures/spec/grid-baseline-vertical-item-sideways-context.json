@@ -1,0 +1,61 @@
+{
+  "name": "grid-baseline-vertical-item-sideways-context",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "baseline",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#baseline-terms",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline",
+    "https://drafts.csswg.org/css-align-3/#baseline-values"
+  ],
+  "derivation": "The sideways-rl grid and vertical-rl item have the same right-to-left block flow. A single first-baseline member uses its safe self-start fallback, the right edge of its 40px row. Its 20px width therefore starts at x=40 inside the 60px-wide container. Different typographic orientation does not reverse its block flow.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "writingMode": "sideways-rl",
+          "width": 60,
+          "height": 40,
+          "gridTemplateColumns": [
+            40
+          ],
+          "gridTemplateRows": [
+            40
+          ],
+          "alignItems": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "width": 20,
+          "height": 20
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 60,
+        "height": 40
+      },
+      {
+        "x": 40,
+        "y": 0,
+        "width": 20,
+        "height": 20
+      }
+    ]
+  }
+}

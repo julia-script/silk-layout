@@ -1,0 +1,135 @@
+{
+  "name": "grid-baseline-spanning-preference-context",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "baseline",
+    "spanning",
+    "direction"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-align-3/#baseline-terms",
+    "https://drafts.csswg.org/css-align-3/#align-by-baseline"
+  ],
+  "derivation": "Computed first/last preference selects the spanning item's startmost/endmost column, independently of its physical fallback side. Each grid has two 20px columns. The RTL first-baseline span shares column 1 with its 2px peer: their synthesized left-edge baselines coincide at min(40-4,20-2)=18. The RTL last-baseline span shares column 2 with its peer: safe self-end is left, so their shared baseline is max(0,20)=20. Swapping the context endpoint based on physical right/left incorrectly splits either pair.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "width": 40
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "width": 40,
+          "height": 20,
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ],
+          "justifyItems": "baseline"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 4,
+          "height": 1,
+          "direction": "rtl",
+          "gridRowStart": 1,
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 2,
+          "height": 1,
+          "direction": "rtl",
+          "gridRowStart": 2,
+          "gridColumnStart": 1
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "width": 40,
+          "height": 20,
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            10,
+            10
+          ],
+          "justifyItems": "last baseline"
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "width": 4,
+          "height": 1,
+          "direction": "rtl",
+          "gridRowStart": 1,
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3
+        }
+      },
+      {
+        "parent": 4,
+        "style": {
+          "width": 2,
+          "height": 1,
+          "direction": "rtl",
+          "gridRowStart": 2,
+          "gridColumnStart": 2
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 40,
+        "height": 40
+      },
+      {
+        "y": 0
+      },
+      {
+        "x": 18,
+        "y": 0
+      },
+      {
+        "x": 18,
+        "y": 10
+      },
+      {
+        "y": 20
+      },
+      {
+        "x": 20,
+        "y": 0
+      },
+      {
+        "x": 20,
+        "y": 10
+      }
+    ]
+  }
+}

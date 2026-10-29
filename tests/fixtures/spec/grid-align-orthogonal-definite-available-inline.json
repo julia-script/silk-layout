@@ -1,0 +1,73 @@
+{
+  "name": "grid-align-orthogonal-definite-available-inline",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment",
+    "writing-mode"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-writing-modes-4/#orthogonal-layout",
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes",
+    "https://drafts.csswg.org/css-grid-2/#grid-align"
+  ],
+  "derivation": "Writing Modes 7.3.3 applies the fallback fit-content formula to non-block-container formatting contexts only when available inline space is infinite. This vertical grid has definite 100px available inline space from the viewport, so its auto height fills 100px rather than shrink-wrapping its two 20px columns. Center distribution leaves 30px before them, placing items at y=30 and y=50. The 40px row places each 10px-wide item at block-start x=30.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "writingMode": "vertical-rl",
+          "width": 40,
+          "gridTemplateColumns": [
+            20,
+            20
+          ],
+          "gridTemplateRows": [
+            40
+          ],
+          "justifyContent": "center",
+          "justifyItems": "start",
+          "alignItems": "start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "writingMode": "vertical-rl",
+          "width": 10,
+          "height": 10
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "width": 40,
+        "height": 100
+      },
+      {
+        "x": 30,
+        "y": 30
+      },
+      {
+        "x": 30,
+        "y": 50
+      }
+    ]
+  }
+}

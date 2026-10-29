@@ -212,6 +212,7 @@ pub fn contributionBaselineInput(
   // Respect that property instead of forcing the capped contribution as known.
   if resolves(size, definite(input.parent, horizontal)) {
     request = input.*
+    request.minimum = input.effectiveMinimum()
     request.performLayout = false
     request.fragmentation.active = false
     if horizontal {
@@ -297,6 +298,7 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
 
   // Author constraints must survive an incoming intrinsic or stretched request.
   let mut propertyInput = input.*
+  propertyInput.minimum = input.effectiveMinimum()
   propertyInput.intrinsicWidth = false
   propertyInput.intrinsicHeight = false
   propertyInput.known = OptionalSize.none()

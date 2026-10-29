@@ -533,6 +533,7 @@ pub effect fn layoutGrid<'pass, 'source, M: Measure + TextMeasure>(
   let axis = Axes.make(style.writingMode)
   let logical = axis.box(box.*)
   let mut limitsInput = input.*
+  limitsInput.minimum = input.effectiveMinimum()
   limitsInput.intrinsicWidth = false
   limitsInput.intrinsicHeight = false
   let limits = axis.box(resolveBox(style, &limitsInput))

@@ -8,9 +8,10 @@
   ],
   "spec": [
     "https://drafts.csswg.org/css-grid-2/#subgrid-edge-placeholders",
-    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims"
+    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims",
+    "https://drafts.csswg.org/css-grid-2/#distribute-extra-space"
   ],
-  "derivation": "The row-2 descendant has a20px box and baseline5; its peer has baseline15. The row-2 baseline shim is10, so its contribution is30. The hypothetical item spanning empty row1 and occupied row2 must use this inflated30 plus top padding10, hence40. Equal distribution adds5 to each auto track: rows5,35,0. The descendant starts at row2 origin5 plus shim10; peer starts at5. The subgrid is40 high including padding10.",
+  "derivation": "The row-2 descendant has a20px box and baseline5; its peer has baseline15. The row-2 baseline shim is10, so its contribution is30. The hypothetical item spanning empty row1 and occupied row2 must use this inflated30 plus top padding10, hence40. The single-span step sets row2's base and growth limit to30. Distribution up to limits freezes row2 there, placing all remaining10 in row1: rows10,30,0. The descendant starts at row2 origin10 plus shim10; the peer starts at10. Both baselines are25, and the subgrid is40 high including padding10.",
   "input": {
     "viewport": {
       "width": 200,
@@ -99,13 +100,13 @@
       },
       {
         "x": 0,
-        "y": 15,
+        "y": 20,
         "width": 10,
         "height": 20
       },
       {
         "x": 20,
-        "y": 5,
+        "y": 10,
         "width": 10,
         "height": 20
       }

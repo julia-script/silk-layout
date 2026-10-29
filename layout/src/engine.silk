@@ -72,6 +72,12 @@ fn configureScrollbars<M: Measure>(style: &Style, output: &mut LayoutPass, measu
   box.* = result
 }
 fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, bfc: &BfcState) -> Layout {
+  let mut layout = Layout.zero()
+  measureLeafInto(nodes, &mut measurer, id, &input, &box, &bfc, &mut layout)
+  return layout
+}
+// measureLeaf, written into a zeroed `layout`.
+fn measureLeafInto<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: &Input, box: &ResolvedBox, bfc: &BfcState, layout: &mut Layout) with Intrinsic.inlineAlways() {
   let mut known = box.size
   if known.widthDefinite { known.width = max(0.0, known.width - box.inset.horizontal()) }
   if known.heightDefinite { known.height = max(0.0, known.height - box.inset.vertical()) }
@@ -81,7 +87,6 @@ fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: 
   if height.kind == AvailableKind.Definite { height.value = max(0.0, height.value - box.inset.vertical() - box.margin.vertical()) }
   let request = MeasureRequest.make(known, width, height, nodes.style(id).writingMode, nodes.style(id).textOrientation, nodes.style(id).usedDirection(), bfc, input.bfcContentOrigin)
   let result = Measure.measure(&mut measurer, nodes.node(id).measureKey, request)
-  let mut layout = Layout.zero()
   layout.size = Size { width: result.size.width + box.inset.horizontal(), height: result.size.height + box.inset.vertical() }
   if box.size.widthDefinite { layout.size.width = box.size.width }
   if box.size.heightDefinite { layout.size.height = box.size.height }
@@ -123,7 +128,6 @@ fn measureLeaf<M: Measure>(nodes: &BoxTree, measurer: &mut M, id: usize, input: 
       layout.collapsesThrough = selfCollapsingSize(nodes.style(id), input.parent, inlineDefinite)
     }
   }
-  return layout
 }
 
 // A size probe of a flex container whose border box is already fixed needs
@@ -461,8 +465,9 @@ const KEY_WIDTH_FREE_TREE: u16 = 2048
 // (KEY_CONTENT_FREE_TREE) has equal min- and max-content widths.
 const KEY_CONTENT_FREE: u16 = 4096
 const KEY_CONTENT_FREE_TREE: u16 = 8192
-// The parts of emptyBoxApplies that depend only on the box and its
-// children; see plainEmptyShape.
+// The parts of emptyBoxApplies and plainMeasuredBox that depend only on
+// the box and its children: a childless block or flex container, without
+// content or with measured content, and plainLeafStyle. See plainLeafShape.
 const KEY_EMPTY_PLAIN: u16 = 16384
 // Every margin, padding and border edge has zero value and percent, so
 // resolveBoxEdges can skip them.
@@ -474,7 +479,7 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   if node.kind == BoxKind.InlineFormatting || style.replaced { return KEY_FIXED }
   let noInFlow = noInFlowChildren(nodes, id)
   let mut shape: u16 = 0
-  if noInFlow && plainEmptyShape(style, node) { shape = KEY_EMPTY_PLAIN }
+  if noInFlow && plainLeafShape(style, node) { shape = KEY_EMPTY_PLAIN }
   if zeroEdges(&style.margin) && zeroEdges(&style.padding) && zeroEdges(&style.border) { shape = shape | KEY_ZERO_EDGES }
   // Empty grids can still have different min/max-content track sizes (§5.2).
   if node.measurement == Measurement.None && node.kind != BoxKind.Text && node.kind != BoxKind.Grid && noInFlow { shape = shape | KEY_EMPTY }
@@ -708,9 +713,10 @@ fn emptyBoxPlain(nodes: &BoxTree, id: usize, input: &Input) -> bool with Intrins
   return plainSizing(style, node, &input, false, &display)
 }
 
-// emptyBoxPlain's conditions on the box alone: plainSizing's style checks.
-fn plainEmptyShape(style: &Style, node: &BoxNode) -> bool {
-  return (node.kind == BoxKind.Block || node.kind == BoxKind.Flex) && node.measurement == Measurement.None && plainLeafStyle(style)
+// emptyBoxPlain's and plainMeasuredBox's conditions on the box alone:
+// plainSizing's style checks.
+fn plainLeafShape(style: &Style, node: &BoxNode) -> bool {
+  return (node.kind == BoxKind.Block || node.kind == BoxKind.Flex) && node.measurement != Measurement.Natural && plainLeafStyle(style)
 }
 fn plainLeafStyle(style: &Style) -> bool with Intrinsic.inlineAlways() {
   return !isGrid(style) && !style.replaced && style.aspectRatio <= 0.0 && style.writingMode == WritingMode.HorizontalTb && style.float == Float.None
@@ -722,7 +728,7 @@ fn plainLeafStyle(style: &Style) -> bool with Intrinsic.inlineAlways() {
 // noInFlowChildren && emptyBoxPlain for a box with key shape `shape`: the
 // request's part of the checks.
 fn shapeEmptyBox(nodes: &BoxTree, shape: u16, id: usize, input: &Input) -> bool with Intrinsic.inlineAlways() {
-  if shape & KEY_EMPTY_PLAIN == 0 || input.parentWritingMode != WritingMode.HorizontalTb { return false }
+  if shape & KEY_EMPTY_PLAIN == 0 || nodes.node(id).measurement != Measurement.None || input.parentWritingMode != WritingMode.HorizontalTb { return false }
   if input.fragmentation.active || input.fragmentation.boundaryProbe != BoundaryProbe.None || boxInputChanges(nodes, id, &input) { return false }
   return effectiveDisplay(nodes.style(id), &input).outsideIs(DisplayOutside.Block)
 }
@@ -848,13 +854,13 @@ effect fn layoutEmptyBox<'pass, 'source>(nodes: &BoxTree<'source>, output: &mut 
 // Whether layoutBox reduces to one measure call between plainLeafWidth and
 // plainLeafTail: a childless block or flex container with measured content,
 // under emptyBoxPlain's other conditions.
-fn plainMeasuredBox(nodes: &BoxTree, id: usize, input: &Input) -> bool with Intrinsic.inlineAlways() {
-  let node = nodes.node(id)
-  if node.measurement != Measurement.Content || (node.kind != BoxKind.Block && node.kind != BoxKind.Flex) { return false }
-  if input.parentWritingMode != WritingMode.HorizontalTb || input.fragmentation.active || input.fragmentation.boundaryProbe != BoundaryProbe.None { return false }
-  let style = nodes.style(id)
-  if !plainLeafStyle(style) || !noInFlowChildren(nodes, id) || boxInputChanges(nodes, id, &input) { return false }
-  return effectiveDisplay(style, &input).outsideIs(DisplayOutside.Block)
+fn plainMeasuredBox(nodes: &BoxTree, output: &LayoutPass, id: usize, input: &Input) -> bool with Intrinsic.inlineAlways() {
+  if nodes.node(id).measurement != Measurement.Content { return false }
+  if id < output.keyShapes.length() {
+    if output.keyShapes.get(id) & KEY_EMPTY_PLAIN == 0 { return false }
+  } else if !plainLeafShape(nodes.style(id), nodes.node(id)) || !noInFlowChildren(nodes, id) { return false }
+  if input.parentWritingMode != WritingMode.HorizontalTb || input.fragmentation.active || input.fragmentation.boundaryProbe != BoundaryProbe.None || boxInputChanges(nodes, id, &input) { return false }
+  return effectiveDisplay(nodes.style(id), &input).outsideIs(DisplayOutside.Block)
 }
 
 // layoutBox for a box plainMeasuredBox holds for, outside fragmentation,
@@ -884,7 +890,7 @@ effect fn layoutMeasuredBox<'pass, 'source, M: Measure>(nodes: &BoxTree<'source>
   if isFlex(style) && !input.performLayout && !input.baselines && !input.intrinsicWidth && !input.intrinsicHeight && box.size.widthDefinite && box.size.heightDefinite {
     result.size = Size { width: box.size.width, height: box.size.height }
   } else {
-    result = measureLeaf(nodes, &mut measurer, id, &input, &box, &bfc)
+    measureLeafInto(nodes, &mut measurer, id, &input, &box, &bfc, &mut result)
   }
   let width = clamp(result.size.width, box.min.width, box.max.width)
   let height = clamp(result.size.height, box.min.height, box.max.height)
@@ -893,7 +899,8 @@ effect fn layoutMeasuredBox<'pass, 'source, M: Measure>(nodes: &BoxTree<'source>
       box.size.widthDefinite = true }
     if height != result.size.height { box.size.height = height
       box.size.heightDefinite = true }
-    result = measureLeaf(nodes, &mut measurer, id, &input, &box, &bfc)
+    result = Layout.zero()
+    measureLeafInto(nodes, &mut measurer, id, &input, &box, &bfc, &mut result)
   }
   plainLeafTail(style, &input, &box, &mut result)
   if input.performLayout { overflowGeometry(nodes, &output, id, &box, &mut result) }
@@ -1220,7 +1227,7 @@ effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'s
   if incoming.performLayout && output.frame == NO_NODE && keptEmptyBox(nodes, &output, id, &incoming) {
     return run layoutEmptyBox(nodes, &mut output, id, &incoming, &bfc)
   }
-  if output.frame == NO_NODE && plainMeasuredBox(nodes, id, &incoming) {
+  if output.frame == NO_NODE && plainMeasuredBox(nodes, &output, id, &incoming) {
     let mut box = shapedBox(&output, nodes.style(id), id, &incoming)
     if plainLeafWidth(nodes.style(id), &incoming, &mut box, false) { return run layoutMeasuredBox(nodes, &mut output, &mut measurer, id, &incoming, &bfc, &mut box) }
   }

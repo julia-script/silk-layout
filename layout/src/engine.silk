@@ -1052,11 +1052,13 @@ pub effect fn resolveFragmentBox<'pass, 'source, M: Measure + TextMeasure>(nodes
 }
 
 effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  // Most requests already carry what adjustBoxInput would set: lay those
-  // out from the caller's input instead of a copy.
-  if incoming.performLayout && output.frame == NO_NODE && nodes.node(id).firstChild == NO_NODE && emptyBoxApplies(nodes, id, &incoming) {
+  // A box without in-flow children lays out as empty; positionTree then
+  // places its absolutely positioned children, static positions included.
+  if incoming.performLayout && output.frame == NO_NODE && noInFlowChildren(nodes, id) && emptyBoxApplies(nodes, id, &incoming) {
     return run layoutEmptyBox(nodes, &mut output, id, &incoming, &bfc)
   }
+  // Most requests already carry what adjustBoxInput would set: lay those
+  // out from the caller's input instead of a copy.
   if !incoming.fragmentation.active && !boxInputChanges(nodes, id, &incoming) {
     return run layoutAdjustedBox(nodes, &mut output, &mut measurer, id, &incoming, &incoming, &mut bfc, false)
   }

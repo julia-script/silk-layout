@@ -34,16 +34,20 @@ effect fn descriptor(change: usize) -> GridContext ! OutOfMemoryError ? &mut All
   if change == 11 { track.collapsed = true }
   run context.columns.tracks.append(track)
   run context.columns.tracks.append(TrackState.fixed(40.0))
-  run context.columns.lines.append(GridNamedLine { line: 1, name: 4, repeat: 0 })
-  run context.areas.append(GridArea { name: 8, columnStart: 0, columnEnd: 2, rowStart: 0, rowEnd: 1 })
+  let mut line = GridNamedLine { line: 1, name: 4, repeat: 0 }
+  let mut area = GridArea { name: 8, columnStart: 0, columnEnd: 2, rowStart: 0, rowEnd: 1 }
   if change == 12 { context.columns.gap = 8.0 }
   if change == 13 { context.columns.extent = 88.0 }
-  if change == 14 { context.columns.lines.asMutSlice()[0].line = 2 }
-  if change == 15 { context.columns.lines.asMutSlice()[0].name = 5 }
-  if change == 16 { context.columns.lines.asMutSlice()[0].repeat = 1 }
-  if change == 17 { context.areas.asMutSlice()[0].columnEnd = 1 }
-  if change == 18 { context.areas.asMutSlice()[0].rowEnd = 2 }
-  if change == 19 { context.areas.asMutSlice()[0].name = 9 }
+  if change == 14 { line.line = 2 }
+  if change == 15 { line.name = 5 }
+  if change == 16 { line.repeat = 1 }
+  if change == 17 { area.columnEnd = 1 }
+  if change == 18 { area.rowEnd = 2 }
+  if change == 19 { area.name = 9 }
+  if change == 30 { area.rowStart = 1 }
+  if change == 31 { area.columnStart = 1 }
+  run context.columns.lines.append(line)
+  run context.areas.append(area)
   if change == 20 { context.rows.active = true }
   if change == 21 { context.columns.active = false }
   if change == 22 { context.columns.tracks.truncate(1) }
@@ -54,12 +58,10 @@ effect fn descriptor(change: usize) -> GridContext ! OutOfMemoryError ? &mut All
   if change == 27 { context.rows.extent = 1.0 }
   if change == 28 { run context.rows.tracks.append(TrackState.fixed(10.0)) }
   if change == 29 { run context.rows.lines.append(GridNamedLine { line: 0, name: 2, repeat: 0 }) }
-  if change == 30 { context.areas.asMutSlice()[0].rowStart = 1 }
-  if change == 31 { context.areas.asMutSlice()[0].columnStart = 1 }
   // Grid 2 §12.1: first-axis recursion and later adjustment are distinct requests.
   if change == 32 { context.phase = 1 }
   if change == 33 { context.firstColumns = false }
-  return context
+  return move context
 }
 
 effect fn bind(store: &mut GridContextStore, id: usize, change: usize) -> usize

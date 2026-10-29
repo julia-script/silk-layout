@@ -184,10 +184,13 @@ effect fn placementCase(
         boxes.firstBySource.get(root.index),
         rootTemplate.rows.tracks.length(),
         rootTemplate.columns.tracks.length(),
+        false,
+        false,
         &emptyNames,
         &emptyNames,
         &mut items,
         &mut work,
+        false,
       )
         |> Effect.provideMut<Allocator>(&mut allocator)
       run Testing.expect(items.length() == inFlow, "only in-flow children are collected")

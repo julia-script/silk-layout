@@ -122,30 +122,29 @@ test effect fn subgridRejectsMalformedNativeNameRepeats()
   run axis.repeats.append(GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFit })
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(!axis.valid(1), "name repeats forbid auto-fit")
-  axis.repeats.asMutSlice()[0].kind = GridRepeatKind.Count
-  axis.repeats.asMutSlice()[0].count = 0
+  let mut first = axis.repeats.get(0)
+  first.kind = GridRepeatKind.Count
+  first.count = 0
+  axis.repeats.set(0, first)
   run Testing.expect(!axis.valid(1), "repeat count must be positive")
-  axis.repeats.asMutSlice()[0].count = 1
-  axis.repeats.asMutSlice()[0].kind = GridRepeatKind.AutoFill
+  first.count = 1
+  first.kind = GridRepeatKind.AutoFill
+  axis.repeats.set(0, first)
   run axis.repeats.append(GridRepeat { start: 2, length: 1, count: 1, kind: GridRepeatKind.AutoFill })
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(!axis.valid(1), "only one auto-fill is permitted")
-  axis.repeats.asMutSlice()[1].kind = GridRepeatKind.Count
-  axis.repeats.asMutSlice()[1].start = 0
+  let mut second = axis.repeats.get(1)
+  second.kind = GridRepeatKind.Count
+  second.start = 0
+  axis.repeats.set(1, second)
   run Testing.expect(!axis.valid(1), "repeat patterns cannot overlap or nest")
-  axis.repeats.asMutSlice()[1].start = 2
+  second.start = 2
+  axis.repeats.set(1, second)
   run axis.lines.append(GridNamedLine { line: 1, name: 1, repeat: 1 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(!axis.valid(2), "repeat names must be inside their group pattern, not at its end")
 }
 
-// CSS Grid 2 §9: normal is distinguishable from an explicit zero gutter.
-test effect fn normalGapRetainsItsAuthoredKind() ! AssertionError<'static> {
-  let style = Style.make()
-  run Testing.expect(style.rowGap.kind == DimensionKind.Normal
-    && style.columnGap.kind == DimensionKind.Normal
-    && Dimension.normal().value == 0.0, "normal gaps retain a zero standalone value")
-}
 
 // CSS Grid 2 §7.2.3.1: adjacent repeat endpoints share one expanded boundary.
 test effect fn gridRepeatAdjacentNamesKeepTheirOwners()

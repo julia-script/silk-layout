@@ -3,12 +3,14 @@ import silk.collections.list { List }
 import silk.core.ownership { Copy }
 import silk.num.i32
 import silk.num.usize
-import box_tree { BoxTree }
+import box_tree { BoxTree, BoxKind }
 import context { outOfFlow }
-import grid_style { GridAutoFlow, MAX_GRID_TRACKS }
+import grid_style { GridAutoFlow, GridAxis, GridLine, GridLineKind, MAX_GRID_TRACKS }
+import grid_template { subgridSpan }
+import style { WritingMode }
 import grid_lines { GridSpan, LineNames, resolveSpan }
 import grid_occupancy { Occupancy }
-import tree { NO_NODE }
+import tree { NO_NODE, Measurement }
 
 pub struct GridItem {
   pub id: usize,
@@ -118,6 +120,42 @@ fn sort(items: &mut [GridItem], nodes: &BoxTree) {
   }
 }
 
+// Grid §9: an automatic span counts local line-name groups, even empty ones.
+// The inherited axis is physical; an orthogonal child's rows span parent columns.
+fn inheritedSpan(
+  nodes: &BoxTree,
+  parent: usize,
+  child: usize,
+  columns: bool,
+  start: &GridLine,
+  end: &GridLine,
+  span: GridSpan,
+) -> GridSpan {
+  if nodes.node(child).kind != BoxKind.Grid || nodes.node(child).measurement != Measurement.None
+    || start.kind == GridLineKind.Span || end.kind == GridLineKind.Span
+    || (start.kind != GridLineKind.Auto && end.kind != GridLineKind.Auto) {
+    return span
+  }
+  let parentHorizontal = nodes.style(parent).writingMode == WritingMode.HorizontalTb
+  let childHorizontal = nodes.style(child).writingMode == WritingMode.HorizontalTb
+  let template = &nodes.grids[nodes.style(child).grid]
+  let mut axis = &template.rows
+  if columns == (parentHorizontal == childHorizontal) {
+    axis = &template.columns
+  }
+  if !axis.subgridded {
+    return span
+  }
+  let length = usize.toI32(subgridSpan(axis))
+  let mut result = span
+  if start.kind == GridLineKind.Auto && end.kind != GridLineKind.Auto {
+    result.start = result.end - length
+  } else {
+    result.end = result.start + length
+  }
+  return result
+}
+
 fn smaller(a: i32, b: i32) -> i32 {
   if a < b {
     return a
@@ -143,7 +181,22 @@ fn finish(
   majorEnd: i32,
   minorEnd: i32,
   transpose: bool,
+  majorBounded: bool,
+  minorBounded: bool,
+  static bounded: bool,
 ) -> GridBounds {
+  if bounded {
+    let mut index: usize = 0
+    while index < items.length {
+      if majorBounded {
+        items[index].row = normalize(items[index].row, 0, majorEnd)
+      }
+      if minorBounded {
+        items[index].column = normalize(items[index].column, 0, minorEnd)
+      }
+      index = index + 1
+    }
+  }
   // Every span was clamped when resolved, and final bounds include all spans.
   // Row flow is already normalized; only column flow needs an axis swap.
   if transpose {
@@ -176,10 +229,13 @@ pub effect fn collectItems<'source>(
   id: usize,
   explicitRows: usize,
   explicitColumns: usize,
+  boundedRows: bool,
+  boundedColumns: bool,
   rowNames: &LineNames,
   columnNames: &LineNames,
   items: &mut List<GridItem>,
   work: &mut PlacementScratch,
+  static bounded: bool,
 ) -> GridBounds
   ! OutOfMemoryError
   ? &mut Allocator {
@@ -190,9 +246,13 @@ pub effect fn collectItems<'source>(
   let dense = template.dense
   let mut explicitMajor = boundedTracks(explicitRows)
   let mut explicitMinor = boundedTracks(explicitColumns)
+  let mut majorBounded = boundedRows
+  let mut minorBounded = boundedColumns
   if transpose {
     explicitMajor = boundedTracks(explicitColumns)
     explicitMinor = boundedTracks(explicitRows)
+    majorBounded = boundedColumns
+    minorBounded = boundedRows
   }
   let mut majorOrigin: i32 = 0
   let mut minorOrigin: i32 = 0
@@ -216,17 +276,34 @@ pub effect fn collectItems<'source>(
     let style = nodes.style(child)
     if !outOfFlow(style) {
       let placement = &nodes.grids[style.grid].placement
-      let row = resolveSpan(&placement.rowStart, &placement.rowEnd, explicitRows, rowNames)
-      let column = resolveSpan(
-        &placement.columnStart,
-        &placement.columnEnd,
-        explicitColumns,
-        columnNames,
+      let row = inheritedSpan(
+        nodes, id, child, false, &placement.rowStart, &placement.rowEnd,
+        resolveSpan(&placement.rowStart, &placement.rowEnd, explicitRows, rowNames),
+      )
+      let column = inheritedSpan(
+        nodes, id, child, true, &placement.columnStart, &placement.columnEnd,
+        resolveSpan(&placement.columnStart, &placement.columnEnd, explicitColumns, columnNames),
       )
       let mut item = GridItem { id: child, row: row, column: column }
       if transpose {
         item.row = column
         item.column = row
+      }
+      if bounded {
+        if majorBounded {
+          if item.row.definite {
+            item.row = normalize(item.row, 0, explicitMajor)
+          } else {
+            item.row.end = smaller(item.row.end, explicitMajor)
+          }
+        }
+        if minorBounded {
+          if item.column.definite {
+            item.column = normalize(item.column, 0, explicitMinor)
+          } else {
+            item.column.end = smaller(item.column.end, explicitMinor)
+          }
+        }
       }
       if item.row.definite {
         if item.row.start < majorOrigin {
@@ -282,7 +359,8 @@ pub effect fn collectItems<'source>(
 
   // Fully definite grids allow overlap and need neither bitmap nor row history.
   if !automatic {
-    return finish(&mut values, majorOrigin, minorOrigin, majorEnd, minorEnd, transpose)
+    return finish(&mut values, majorOrigin, minorOrigin, majorEnd, minorEnd, transpose,
+      majorBounded, minorBounded, bounded)
   }
 
   // Step 1 reserves ALL fully definite items before any automatic placement.
@@ -327,7 +405,7 @@ pub effect fn collectItems<'source>(
         0,
         limit,
       )
-      if item.column.end > minorEnd {
+      if item.column.end > minorEnd && (!bounded || !minorBounded) {
         minorEnd = item.column.end
       }
       run reserve(item, &mut work)
@@ -344,7 +422,7 @@ pub effect fn collectItems<'source>(
     let item = values[index]
     if !item.row.definite && !item.column.definite {
       let length = item.column.end - item.column.start
-      if length > minorEnd {
+      if length > minorEnd && (!bounded || !minorBounded) {
         minorEnd = length
       }
     }
@@ -413,7 +491,7 @@ pub effect fn collectItems<'source>(
         0,
         limit,
       )
-      if item.row.end > majorEnd {
+      if item.row.end > majorEnd && (!bounded || !majorBounded) {
         majorEnd = item.row.end
       }
       run reserve(item, &mut work)
@@ -421,5 +499,6 @@ pub effect fn collectItems<'source>(
     }
     index = index + 1
   }
-  return finish(&mut values, majorOrigin, minorOrigin, majorEnd, minorEnd, transpose)
+  return finish(&mut values, majorOrigin, minorOrigin, majorEnd, minorEnd, transpose,
+    majorBounded, minorBounded, bounded)
 }

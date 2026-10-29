@@ -7,6 +7,8 @@ import grid_lines { LineNames }
 import grid_template { ExpandedAxis }
 import grid_baselines { GridBaselines }
 import grid_fragment_scratch { GridFragmentScratch }
+import grid_style { GridArea }
+import grid_subgrid_contributions { ContributionWork }
 
 pub struct GridAxisScratch {
   pub tracks: List<TrackState>,
@@ -36,6 +38,8 @@ pub struct GridTemplateScratch {
   pub collapsedRows: List<usize>,
   pub columnRepeat: usize,
   pub rowRepeat: usize,
+  pub gridContext: usize,
+  pub areas: List<GridArea>,
 }
 
 impl GridTemplateScratch {
@@ -49,6 +53,8 @@ impl GridTemplateScratch {
       collapsedRows: List<usize>.make(),
       columnRepeat: 0,
       rowRepeat: 0,
+      gridContext: 0,
+      areas: List<GridArea>.make(),
     }
   }
 }
@@ -105,6 +111,7 @@ pub struct GridMemos {
   // A recursion-depth pool, separate from ordinary per-box sizing leases.
   // Continuous layout neither allocates nor moves fragment-item vectors.
   pub fragmentScratch: List<GridFragmentScratch>,
+  pub subgridWork: List<ContributionWork>,
 }
 
 impl GridMemos {
@@ -114,6 +121,7 @@ impl GridMemos {
       slots: List<GridMemoSlot>.make(),
       used: 0,
       fragmentScratch: List<GridFragmentScratch>.make(),
+      subgridWork: List<ContributionWork>.make(),
     }
   }
 

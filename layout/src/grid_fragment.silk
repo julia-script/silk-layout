@@ -28,11 +28,13 @@ import grid_alignment { alignItem }
 import grid_baselines as Baselines
 import grid_baselines { GridBaselines }
 import grid_fragment_scratch { FragmentItem, GridFragmentScratch, logicalRow, startRow, endRow }
+import grid_subgrid { InheritanceSource }
 
-pub struct FragmentGrid<'a> {
+pub struct FragmentGrid<'a, 'b> {
   pub items: &'a [GridItem],
   pub columns: &'a [TrackState],
   pub rows: &'a [TrackState],
+  pub inheritance: &'a InheritanceSource<'b>,
   pub axis: Axes,
   pub inlineSize: f32,
   pub inlineExtent: f32,
@@ -128,6 +130,7 @@ fn allocatedInput(
   request.availableHeight = AvailableSpace.definite(request.parent.height)
   request.known = allocation.known
   request.minimum = allocation.minimum
+  request.gridContext = allocation.gridContext
   request.performLayout = true
   return request
 }
@@ -174,6 +177,7 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
       item,
       base,
       style,
+      grid.inheritance,
       &grid.axis,
       grid.columns,
       grid.rows,
@@ -189,6 +193,7 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
     let allocation = &mut scratch.items.asMutSlice()[index]
     allocation.known = request.known
     allocation.minimum = request.minimum
+    allocation.gridContext = request.gridContext
     allocation.size = grid.axis.size(output.boxes[item.id].size)
     allocation.margin = output.boxes[item.id].usedMargin
     if sharing {

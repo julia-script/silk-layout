@@ -124,7 +124,7 @@ impl GridContextStore {
     context.columns.clear()
     context.rows.clear()
     context.areas.clear()
-    return context
+    return move context
   }
   effect fn ensureFree(self: &mut Self) ! OutOfMemoryError ? &mut Allocator {
     if self.free == NO_NODE {
@@ -158,7 +158,8 @@ impl GridContextStore {
       // Equal incoming buffers become the spare for the next parent probe.
       run self.ensureFree()
       let index = self.free
-      self.slots.asMutSlice()[index].context = move context
+      let slots = self.slots.asMutSlice()
+      slots[index].context = move context
       return self.slots.asSlice()[previous].key
     }
     // Exhaustion must fail rather than wrap into a still-cached identity.
@@ -212,7 +213,8 @@ impl GridContextStore {
       let index = self.journal.get(at)
       let previous = self.slots.asSlice()[index].previous
       if previous != NO_NODE { self.release(previous) }
-      self.slots.asMutSlice()[index].previous = NO_NODE
+      let slots = self.slots.asMutSlice()
+      slots[index].previous = NO_NODE
       at = at + 1
     }
     self.journal.clear()
@@ -245,7 +247,10 @@ impl GridContextStore {
       if old != NO_NODE && self.find(old) != NO_NODE { needed = id + 1 }
       id = id + 1
     }
-    if needed > self.heads.length() { run self.heads.reserve(needed - self.heads.length()) }
+    if needed > self.heads.length() {
+      let additional = needed - self.heads.length()
+      run self.heads.reserve(additional)
+    }
     self.commit()
     self.heads.clear()
     run self.heads.appendRepeated(NO_NODE, needed)
@@ -256,7 +261,8 @@ impl GridContextStore {
         let mut next = NO_NODE
         if old < toNew.length { next = toNew[old] }
         if next == NO_NODE { self.release(at) }
-        else { self.slots.asMutSlice()[at].id = next
+        else { let slots = self.slots.asMutSlice()
+          slots[at].id = next
           self.heads.set(next, at) }
       }
       at = at + 1

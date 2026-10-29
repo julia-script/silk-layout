@@ -2,6 +2,7 @@ import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.collections.list { List }
 import silk.num.i32
 import silk.num.usize
+import silk.core.option { Option }
 import axes { Axes }
 import box_tree { BoxTree }
 import context { Input, ResolvedBox, resolves, effectiveDisplay, blockJustification, outOfFlow }
@@ -12,9 +13,12 @@ import grid_lines { prepareLineNames }
 import grid_template { RepeatSizing, repeatCount, expandAxis, expandedLines }
 import grid_placement { GridItem, collectItems }
 import grid_scratch { GridScratch, GridTemplateScratch }
+import grid_context { GridContext, GridContextStore }
+import grid_subgrid as Subgrid
 
 pub fn needsPreparation(template: &GridTemplate) -> bool with Intrinsic.inlineAlways() {
-  return template.rows.repeats.length() != 0 || template.columns.repeats.length() != 0
+  return template.rows.subgridded || template.columns.subgridded
+    || template.rows.repeats.length() != 0 || template.columns.repeats.length() != 0
     || template.rows.lines.length() != 0
     || template.columns.lines.length() != 0
     || template.areaRows != 0
@@ -155,6 +159,7 @@ pub effect fn prepareTemplate<'source>(
   id: usize,
   fresh: bool,
   input: &Input,
+  contexts: &GridContextStore,
   logical: &ResolvedBox,
   limits: &ResolvedBox,
   axis: &Axes,
@@ -198,35 +203,66 @@ pub effect fn prepareTemplate<'source>(
     run scratch.template.append(GridTemplateScratch.make())
   }
   let prepared = &mut scratch.template.asMutSlice()[0]
-  if !fresh && columnRepeat == prepared.columnRepeat && rowRepeat == prepared.rowRepeat {
+  if !fresh && columnRepeat == prepared.columnRepeat && rowRepeat == prepared.rowRepeat
+    && prepared.gridContext == input.gridContext {
     return
   }
   run expandAxis(&template.columns, columnRepeat, template.areaColumns, &mut prepared.columns)
   run expandAxis(&template.rows, rowRepeat, template.areaRows, &mut prepared.rows)
+  prepared.areas.clear()
+  let mut boundedRows = false
+  let mut boundedColumns = false
+  match move contexts.get(id, input.gridContext) {
+    Option<&GridContext>.Some { value } => {
+      boundedRows = value.rows.active
+      boundedColumns = value.columns.active
+      if boundedRows { run Subgrid.prepareAxis(&template.rows, &value.rows, &mut prepared.rows) }
+      if boundedColumns { run Subgrid.prepareAxis(&template.columns, &value.columns, &mut prepared.columns) }
+      let mut at: usize = 0
+      while at < value.areas.length() {
+        run prepared.areas.append(value.areas.get(at))
+        at = at + 1
+      }
+    }
+    Option<&GridContext>.None => {}
+  }
+  let mut at: usize = 0
+  while at < template.areas.length() {
+    run prepared.areas.append(template.areas.get(at))
+    at = at + 1
+  }
+  let mut columnAreas = template.areas.asSlice()
+  let mut rowAreas = template.areas.asSlice()
+  if boundedColumns { columnAreas = prepared.areas.asSlice() }
+  if boundedRows { rowAreas = prepared.areas.asSlice() }
   run prepareLineNames(
     expandedLines(&template.columns, &prepared.columns),
-    template.areas.asSlice(),
+    columnAreas,
     nodes.gridNames,
     true,
     &mut prepared.columnNames,
   )
   run prepareLineNames(
     expandedLines(&template.rows, &prepared.rows),
-    template.areas.asSlice(),
+    rowAreas,
     nodes.gridNames,
     false,
     &mut prepared.rowNames,
   )
-  scratch.bounds = run collectItems(
-    nodes,
-    id,
-    prepared.rows.explicitTracks,
-    prepared.columns.explicitTracks,
-    &prepared.rowNames,
-    &prepared.columnNames,
-    &mut scratch.items,
-    &mut scratch.placement,
-  )
+  if boundedRows || boundedColumns {
+    scratch.bounds = run collectItems(
+      nodes, id, prepared.rows.explicitTracks, prepared.columns.explicitTracks,
+      boundedRows, boundedColumns, &prepared.rowNames, &prepared.columnNames,
+      &mut scratch.items, &mut scratch.placement, true,
+    )
+  } else {
+    scratch.bounds = run collectItems(
+      nodes, id, prepared.rows.explicitTracks, prepared.columns.explicitTracks,
+      false, false, &prepared.rowNames, &prepared.columnNames,
+      &mut scratch.items, &mut scratch.placement, false,
+    )
+  }
+  prepared.gridContext = input.gridContext
   run collectCollapsed(
     scratch.items.asSlice(),
     true,

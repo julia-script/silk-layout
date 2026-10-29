@@ -37,6 +37,7 @@ pub struct FragmentItem {
   pub margin: ResolvedEdges,
   pub known: OptionalSize,
   pub minimum: Size,
+  pub gridContext: usize,
   pub nextStart: usize,
   pub nextEnd: usize,
 }
@@ -49,6 +50,7 @@ impl FragmentItem {
       margin: ResolvedEdges.zero(),
       known: OptionalSize.none(),
       minimum: Size { width: 0.0, height: 0.0 },
+      gridContext: 0,
       nextStart: NO_NODE,
       nextEnd: NO_NODE,
     }

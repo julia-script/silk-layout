@@ -1,0 +1,71 @@
+import silk.mem.allocator { Allocator, OutOfMemoryError }
+import silk.collections.list { List }
+import silk.core.ownership { Copy }
+import geometry { max }
+import grid_tracks { TrackContribution }
+
+// Coordinates are in the owning grid's axis. Each nested subgrid contributes
+// its edge MBP and its internal half-gutter difference independently.
+pub struct ContributionLayer {
+  pub start: usize,
+  pub end: usize,
+  pub low: f32,
+  pub high: f32,
+  pub gap: f32,
+}
+impl Copy for ContributionLayer {}
+
+pub struct ContributionWork {
+  pub layers: List<ContributionLayer>,
+  pub hypotheses: List<TrackContribution>,
+}
+impl ContributionWork {
+  pub fn make() -> ContributionWork {
+    return ContributionWork { layers: List<ContributionLayer>.make(), hypotheses: List<TrackContribution>.make() }
+  }
+}
+
+pub fn extra(layers: &[ContributionLayer], start: usize, end: usize) -> f32 {
+  let mut result: f32 = 0.0
+  let mut index: usize = 0
+  while index < layers.length {
+    let layer = layers[index]
+    if start == layer.start { result = result + layer.low }
+    else { result = result + layer.gap }
+    if end == layer.end { result = result + layer.high }
+    else { result = result + layer.gap }
+    index = index + 1
+  }
+  return result
+}
+
+pub effect fn store(result: &mut List<TrackContribution>, index: usize, value: TrackContribution) -> bool
+  ! OutOfMemoryError ? &mut Allocator {
+  if index < result.length() {
+    let previous = result.get(index)
+    let changed = previous.start != value.start || previous.end != value.end
+      || previous.minimum != value.minimum || previous.minContent != value.minContent
+    result.set(index, value)
+    return changed
+  }
+  run result.append(value)
+  return true
+}
+
+// Grid §9: one hypothetical item per relevant span class, using independent
+// maxima of the three intrinsic contributions, not a sum of peer items.
+pub effect fn hypothesis(work: &mut ContributionWork, marker: usize, value: TrackContribution)
+  ! OutOfMemoryError ? &mut Allocator {
+  let mut index = marker
+  while index < work.hypotheses.length() {
+    let existing = &mut work.hypotheses.asMutSlice()[index]
+    if existing.start == value.start && existing.end == value.end {
+      existing.minimum = max(existing.minimum, value.minimum)
+      existing.minContent = max(existing.minContent, value.minContent)
+      existing.maxContent = max(existing.maxContent, value.maxContent)
+      return
+    }
+    index = index + 1
+  }
+  run work.hypotheses.append(value)
+}

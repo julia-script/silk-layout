@@ -1,0 +1,82 @@
+{
+  "name": "grid-subgrid-fixed-item-edge-placeholder",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-edge-placeholders",
+    "https://drafts.csswg.org/css-grid-2/#algo-spanning-items"
+  ],
+  "derivation": "The real45px item occupies the fixed40px second column. Its contribution does not size that real track, but it must still supply the hypothetical item spanning the empty auto first column plus fixed second column. Adding subgrid start padding10 produces55px, so the auto first column becomes15. Skipping measurement just because the real span is fixed would incorrectly leave the auto column at zero.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 100,
+          "gridTemplateColumns": [
+            "auto",
+            40
+          ],
+          "gridTemplateRows": [
+            20
+          ],
+          "justifyContent": "start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": "subgrid",
+          "padding": {
+            "left": 10
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": 2,
+          "width": 45,
+          "height": 10,
+          "justifySelf": "start",
+          "alignSelf": "start"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 55,
+        "height": 20
+      },
+      {
+        "x": 15,
+        "y": 0,
+        "width": 45,
+        "height": 10
+      }
+    ]
+  }
+}

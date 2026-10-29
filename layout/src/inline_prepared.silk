@@ -14,7 +14,7 @@ pub struct TextLeaf { pub font: usize, pub start: usize, pub end: usize, pub key
 impl Copy for TextLeaf {}
 pub struct TextFont { pub style: usize, pub key: usize, pub font: FontBox }
 pub struct TextCandidate {
-  pub items: List<Item>, pub texts: List<TextLeaf>, pub advance: f64, pub hanging: f64, pub hangingItems: usize, pub real: bool, pub visual: Line,
+  pub items: List<Item>, pub texts: List<TextLeaf>, pub advance: f32, pub hanging: f32, pub hangingItems: usize, pub real: bool, pub visual: Line,
 }
 impl TextCandidate {
   pub fn make() -> TextCandidate {
@@ -84,11 +84,11 @@ pub struct TextMemo {
   pub items: List<Item>, pub scopes: List<Scope>,
   // Estimated advance before each unit (see fast line fitting). Estimates
   // only steer the search, so they stay while the tokens do.
-  pub prefix: List<f64>,
-  pub minContent: f64, pub maxContent: f64, pub hasMin: bool, pub hasMax: bool,
+  pub prefix: List<f32>,
+  pub minContent: f32, pub maxContent: f32, pub hasMin: bool, pub hasMax: bool,
   // For each width fitted without floats: the index of the break point
   // ending each line, `counts[i]` of them for `widths[i]`, in order.
-  pub widths: List<f64>, pub counts: List<usize>, pub ends: List<usize>,
+  pub widths: List<f32>, pub counts: List<usize>, pub ends: List<usize>,
   // Fonts that candidates' text leaves index, and ranges shaped without a
   // visual plan, chained by the unit they start in.
   pub fonts: List<TextFont>, pub segments: List<Segment>, pub heads: List<usize>,
@@ -97,9 +97,9 @@ pub struct TextMemo {
 impl TextMemo {
   pub fn make() -> TextMemo {
     return TextMemo {
-      items: List<Item>.make(), scopes: List<Scope>.make(), prefix: List<f64>.make(),
+      items: List<Item>.make(), scopes: List<Scope>.make(), prefix: List<f32>.make(),
       minContent: 0.0, maxContent: 0.0, hasMin: false, hasMax: false,
-      widths: List<f64>.make(), counts: List<usize>.make(), ends: List<usize>.make(),
+      widths: List<f32>.make(), counts: List<usize>.make(), ends: List<usize>.make(),
       fonts: List<TextFont>.make(), segments: List<Segment>.make(), heads: List<usize>.make(), valid: false,
     }
   }
@@ -168,7 +168,7 @@ impl TextMemo {
     run self.segments.append(move entry)
   }
   // The first line end recorded for `width`, or NO_NODE.
-  pub fn linesFor(self: &Self, width: f64) -> usize {
+  pub fn linesFor(self: &Self, width: f32) -> usize {
     let mut first: usize = 0
     let mut index: usize = 0
     while index < self.widths.length() {
@@ -178,7 +178,7 @@ impl TextMemo {
     }
     return NO_NODE
   }
-  pub effect fn record(self: &mut Self, width: f64, ends: &[usize]) ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn record(self: &mut Self, width: f32, ends: &[usize]) ! OutOfMemoryError ? &mut Allocator {
     // A drag-resize offers a new width each compute; keep the latest few.
     if self.widths.length() >= 16 {
       self.widths.clear()

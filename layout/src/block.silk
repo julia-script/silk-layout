@@ -19,20 +19,20 @@ import fragment_box as FragmentBox
 
 // CSS 2.2 §§8.3.1, 9.5 and 10.3.3. Keep positive and negative extrema
 // separately: reducing an adjoining set to a scalar loses associativity.
-struct Margins { positive: f64, negative: f64 }
+struct Margins { positive: f32, negative: f32 }
 impl Copy for Margins {}
 impl Margins {
   fn zero() -> Margins { return Margins { positive: 0.0, negative: 0.0 } }
-  fn single(value: f64) -> Margins { return Margins { positive: max(0.0, value), negative: min(0.0, value) } }
+  fn single(value: f32) -> Margins { return Margins { positive: max(0.0, value), negative: min(0.0, value) } }
   fn join(self: &Self, other: Margins) -> Margins {
     return Margins { positive: max(self.positive, other.positive), negative: min(self.negative, other.negative) }
   }
-  fn value(self: &Self) -> f64 { return self.positive + self.negative }
+  fn value(self: &Self) -> f32 { return self.positive + self.negative }
 }
-struct Child { id: usize, margin: ResolvedEdges, inset: ResolvedEdges, input: Input, width: f64, parallel: bool }
+struct Child { id: usize, margin: ResolvedEdges, inset: ResolvedEdges, input: Input, width: f32, parallel: bool }
 impl Copy for Child {}
 struct Candidate {
-  pass: PassCheckpoint, bfc: Checkpoint, next: usize, cursor: f64,
+  pass: PassCheckpoint, bfc: Checkpoint, next: usize, cursor: f32,
   top: Margins, bottom: Margins, leading: bool, allThrough: bool,
   clearanceChain: bool, result: Layout,
 }
@@ -76,7 +76,7 @@ fn topMargins(layout: &Layout) -> Margins {
 fn bottomMargins(layout: &Layout) -> Margins {
   return Margins { positive: layout.marginBottomPositive, negative: layout.marginBottomNegative }
 }
-pub fn inlineOffset(style: &Style, input: &Input, axes: &Axes, direction: Direction, margin: ResolvedEdges, width: f64, available: f64) -> f64 {
+pub fn inlineOffset(style: &Style, input: &Input, axes: &Axes, direction: Direction, margin: ResolvedEdges, width: f32, available: f32) -> f32 {
   let alignment = blockJustification(style, &input)
   if alignment == Align.Normal || axes.lowAuto(style) || axes.highAuto(style) {
     return blockInlineOffset(margin.left, margin.right, axes.lowAuto(style), axes.highAuto(style), direction == Direction.Rtl, width, available)
@@ -203,7 +203,7 @@ pub fn leafBlockInto(style: &Style, input: &Input, physicalBox: &ResolvedBox, bf
   if box.size.widthDefinite { width = box.size.width }
   let bottomAdjoins = collapseBottom && !(collapseTop && box.min.height > box.inset.vertical())
   if bottomAdjoins { bottom = bottom.join(Margins.zero()) }
-  let mut cursor = 0.0
+  let mut cursor: f32 = 0.0
   if formattingRoot { cursor = max(cursor, bfc.bottom(input.bfcContentOrigin)) }
   let mut height = max(0.0, cursor) + box.inset.vertical()
   height = clamp(height, box.min.height, box.max.height)
@@ -241,8 +241,8 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
   let mut availableInline = input.availableWidth
   if axes.vertical { availableInline = input.availableHeight }
   let mut children = List<Child>.make()
-  let mut intrinsicWidth = 0.0
-  let mut floatRun = 0.0
+  let mut intrinsicWidth: f32 = 0.0
+  let mut floatRun: f32 = 0.0
   let mut nextChild = boxChild(nodes, nodes.node(id).firstChild)
   let mut pendingTail = NO_NODE
   if fragmented {
@@ -303,7 +303,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       parent.widthDefinite = true
     }
   }
-  let mut cursor = 0.0
+  let mut cursor: f32 = 0.0
   let mut pending = Margins.zero()
   let externalAxes = Axes.make(input.parentWritingMode)
   let externalMargin = externalAxes.edges(physicalBox.margin)
@@ -435,7 +435,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     }
     let mut x = inlineOffset(childStyle, &item.input, &axes, style.usedDirection(), item.margin, item.width, contentWidth)
     let mut y = cursor
-    let mut inlineStart = 0.0
+    let mut inlineStart: f32 = 0.0
     let mut inlineSpace = contentWidth
     if item.parallel { y = 0.0 }
     if fragmented {
@@ -548,7 +548,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
       let fragmentCheckpoint = output.checkpoint()
       // Only preceding exclusions can clear this box, never floats emitted by
       // its own descendants during the speculative layout below.
-      let clearMinimum = bfc.clearFloor(childStyle.clear, -1.0e100) - origin.y
+      let clearMinimum = bfc.clearFloor(childStyle.clear, -1.0e30) - origin.y
       let mut childTop = Margins.single(item.margin.top)
       let mut joined = pending.join(childTop)
       if !item.parallel && !(leading && collapseTop) { y = cursor + joined.value() }
@@ -920,7 +920,7 @@ effect fn layoutBlockPass<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxT
     if box.size.heightDefinite { height = box.size.height }
   }
   let contentHeight = max(0.0, height - box.inset.vertical())
-  let mut alignmentOffset = 0.0
+  let mut alignmentOffset: f32 = 0.0
   if !fragmented { alignmentOffset = blockContentOffset(style, contentHeight - max(0.0, cursor)) }
   result.size = axes.size(Size { width: width, height: height })
   if result.hasFirstBaseline { result.firstBaselines = result.firstBaselines.translated(alignmentOffset) }

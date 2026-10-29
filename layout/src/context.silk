@@ -3,7 +3,7 @@ import geometry { OptionalSize, AvailableSpace, AvailableKind, Size, Point, Reso
 import style { Dimension, DimensionKind, Edges, Style, BoxSizing, Position, Display, DisplayInside, DisplayOutside, Overflow, ScrollbarWidth, ScrollbarGutter, Float, WritingMode, TextOrientation, Direction, Align, OverflowAlignment }
 import fragmentation { FragmentInput }
 
-pub const UNBOUNDED: f64 = 1.0e100
+pub const UNBOUNDED: f32 = 1.0e30
 pub struct Input {
   pub parent: OptionalSize,
   pub initialContainingBlock: OptionalSize,
@@ -82,16 +82,16 @@ pub fn scrollbarGutter(style: &Style, metrics: ScrollbarMetrics, horizontal: boo
 pub fn resolves(value: Dimension, definite: bool) -> bool {
   return value.kind == DimensionKind.Length || ((value.kind == DimensionKind.Percent || value.kind == DimensionKind.Calc) && definite)
 }
-pub fn resolve(value: Dimension, basis: f64, definite: bool, fallback: f64) -> f64 {
+pub fn resolve(value: Dimension, basis: f32, definite: bool, fallback: f32) -> f32 {
   if value.kind == DimensionKind.Length { return value.value }
   if definite && (value.kind == DimensionKind.Percent || value.kind == DimensionKind.Calc) { return value.value + value.percent * basis }
   return fallback
 }
-pub fn edges(value: Edges, basis: f64, definite: bool) -> ResolvedEdges {
+pub fn edges(value: Edges, basis: f32, definite: bool) -> ResolvedEdges {
   // Cyclic percentage edges resolve against zero; calc() keeps its length.
   // Dimension's constructors leave value and percent zero where a kind has
   // none, so every kind resolves as value + percent * basis, without branches.
-  let mut used = 0.0
+  let mut used: f32 = 0.0
   if definite { used = basis }
   return ResolvedEdges {
     top: value.top.value + value.top.percent * used, right: value.right.value + value.right.percent * used,
@@ -99,8 +99,8 @@ pub fn edges(value: Edges, basis: f64, definite: bool) -> ResolvedEdges {
   }
 }
 // resolve(value, basis, definite, value.value) without branches; see edges.
-fn minimumLength(value: Dimension, basis: f64, definite: bool) -> f64 {
-  let mut used = 0.0
+fn minimumLength(value: Dimension, basis: f32, definite: bool) -> f32 {
+  let mut used: f32 = 0.0
   if definite { used = basis }
   return value.value + value.percent * used
 }
@@ -237,7 +237,7 @@ pub fn establishesContext(style: &Style, input: &Input) -> bool {
 
 // CSS 2.1 §10.3.3: auto margins absorb positive free space; the containing
 // block's end-side margin absorbs over-constraint after min/max sizing.
-pub fn blockInlineOffset(marginLow: f64, marginHigh: f64, autoLow: bool, autoHigh: bool, rtl: bool, width: f64, available: f64) -> f64 {
+pub fn blockInlineOffset(marginLow: f32, marginHigh: f32, autoLow: bool, autoHigh: bool, rtl: bool, width: f32, available: f32) -> f32 {
   let remainder = available - width - marginLow - marginHigh
   if remainder >= 0.0 {
     if autoLow && autoHigh { return remainder / 2.0 }
@@ -267,7 +267,7 @@ pub fn selfStartReversed(style: &Style, horizontal: bool) -> bool {
   if style.writingMode == WritingMode.HorizontalTb { return false }
   return (style.usedDirection() == Direction.Rtl) != (style.writingMode == WritingMode.SidewaysLr)
 }
-pub fn alignmentOffset(value: Align, safety: OverflowAlignment, reverse: bool, selfReverse: bool, lineReverse: bool, free: f64) -> f64 {
+pub fn alignmentOffset(value: Align, safety: OverflowAlignment, reverse: bool, selfReverse: bool, lineReverse: bool, free: f32) -> f32 {
   let mut high = reverse
   if value == Align.End || value == Align.FlexEnd { high = !reverse }
   if value == Align.SelfStart || value == Align.Baseline { high = selfReverse }
@@ -286,7 +286,7 @@ pub fn alignmentOffset(value: Align, safety: OverflowAlignment, reverse: bool, s
 
 // Align 3 §5.1.1 aligns block content as one subject. Distribution keywords
 // use their fallback rather than distributing or stretching that content.
-pub fn blockContentOffset(style: &Style, freeSpace: f64) -> f64 {
+pub fn blockContentOffset(style: &Style, freeSpace: f32) -> f32 {
   let align = style.alignContent
   let centered = align == Align.Center || align == Align.SpaceAround || align == Align.SpaceEvenly
   let atEnd = align == Align.End || align == Align.FlexEnd || align == Align.LastBaseline

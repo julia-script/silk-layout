@@ -36,15 +36,15 @@ impl Measure for BoxMeasure {
   }
   fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
     drop provider
-    let mut width = 120.0
+    let mut width: f32 = 120.0
     if request.width.kind == AvailableKind.MinContent { width = 30.0 }
     if request.width.kind == AvailableKind.Definite { width = max(30.0, request.width.value) }
-    let mut height = 20.0
+    let mut height: f32 = 20.0
     if key == 1 { height = 40.0 }
     let contentBlockSize = height
     if request.known.widthDefinite { width = request.known.width }
     if request.known.heightDefinite { height = request.known.height }
-    let mut baseline = 15.0
+    let mut baseline: f32 = 15.0
     if key == 1 { baseline = 25.0 }
     return Measured { size: Size { width: width, height: height }, scrollableOverflow: Rect { x: 0.0, y: 0.0, width: max(30.0, width), height: contentBlockSize }, contentBlockSize: contentBlockSize, firstBaselines: BaselineSet.uniform(baseline), lastBaselines: BaselineSet.uniform(baseline), hasBaseline: true, hasLineBoxes: true }
   }
@@ -67,7 +67,7 @@ impl TextMeasure for BoxMeasure {
   }
 }
 enum Case { PartialGrow, PartialShrink, MaxFreeze, MinFreeze, BalancedViolations, NegativeInnerBase, AsymmetricInnerBase, RatioCrossMaximum, RatioCrossMinimum, ScrollMinimum, ScaledShrink, AutoMargin, ReverseRtl, VerticalAxis, WrapGap, Collapse, ColumnRatio, ColumnMinimum, PercentageBasis, ReplacedMinimum, NonReplacedMinimum, SafeOverflow, IntrinsicContribution, Baseline, Stretch, StableOrder }
-effect fn near(actual: f64, expected: f64) ! AssertionError<'static> {
+effect fn near(actual: f32, expected: f32) ! AssertionError<'static> {
   run Testing.expect(abs(actual - expected) < 0.00001, "flex geometry matches the normative algorithm")
 }
 effect fn scenario(case: Case) ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | AssertionError<'static> ? &mut Allocator {
@@ -480,8 +480,8 @@ effect fn preferredColumnContribution(case: ColumnContribution) ! OutOfMemoryErr
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
-  let mut expectedHeight = 50.0
-  let mut expectedItem = 10.0
+  let mut expectedHeight: f32 = 50.0
+  let mut expectedItem: f32 = 10.0
   if case == ColumnContribution.LargerBasis { expectedItem = 50.0 }
   if case == ColumnContribution.OverflowingContent {
     expectedHeight = 80.0
@@ -544,7 +544,7 @@ effect fn crossPercentage(percentItem: bool, definiteParent: bool) ! OutOfMemory
   drop pass
   output.fragments.resolveLocations()
   output.adopt(move constructed)
-  let mut expected = 80.0
+  let mut expected: f32 = 80.0
   if percentItem {
     expected = 0.0
     if definiteParent { expected = 40.0 }
@@ -799,8 +799,8 @@ effect fn fragmentedBaselineExports(reverse: bool) ! OutOfMemoryError | TextErro
   let firstLayout = fragments[firstFragment]
   let lastLayout = fragments[next]
   run Testing.expect(firstLayout.hasFirstBaseline && firstLayout.hasLastBaseline && lastLayout.hasFirstBaseline && lastLayout.hasLastBaseline, "each accepted flex fragment exports its own item baselines")
-  let mut firstExpected = 15.0
-  let mut lastExpected = 25.0
+  let mut firstExpected: f32 = 15.0
+  let mut lastExpected: f32 = 25.0
   if reverse { firstExpected = 25.0
     lastExpected = 15.0 }
   run near(firstLayout.firstBaselines.alphabetic, firstExpected)

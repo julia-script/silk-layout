@@ -20,10 +20,10 @@ import text { TextMeasure, TextError }
 import fragmentation { FragmentationError }
 
 struct Metrics {
-  before: f64,
-  after: f64,
-  lower: f64,
-  upper: f64,
+  before: f32,
+  after: f32,
+  lower: f32,
+  upper: f32,
   present: bool
 }
 
@@ -58,7 +58,7 @@ impl BaselineGroup {
     }
   }
 
-  pub fn include(self: &mut Self, kind: usize, before: f64, after: f64, start: f64, extent: f64) {
+  pub fn include(self: &mut Self, kind: usize, before: f32, after: f32, start: f32, extent: f32) {
     let metric = &mut self.metrics[kind]
     metric.before = max(metric.before, before)
     metric.after = max(metric.after, after)
@@ -67,7 +67,7 @@ impl BaselineGroup {
     metric.present = true
   }
 
-  pub fn shim(self: &Self, kind: usize, before: f64, after: f64) -> f64 {
+  pub fn shim(self: &Self, kind: usize, before: f32, after: f32) -> f32 {
     if !self.metrics[kind].present {
       return 0.0
     }
@@ -77,7 +77,7 @@ impl BaselineGroup {
     return max(0.0, self.metrics[kind].before - before)
   }
 
-  pub fn target(self: &Self) -> f64 {
+  pub fn target(self: &Self) -> f32 {
     let metric = &self.metrics[3]
     if self.end {
       return max(metric.lower, metric.upper)
@@ -87,9 +87,9 @@ impl BaselineGroup {
 }
 
 struct Sample {
-  before: f64,
-  after: f64,
-  start: f64,
+  before: f32,
+  after: f32,
+  start: f32,
   present: bool
 }
 
@@ -105,8 +105,8 @@ struct Entry {
   group: usize,
   last: bool,
   mirror: bool,
-  previousMinimum: f64,
-  previousMinContent: f64,
+  previousMinimum: f32,
+  previousMinContent: f32,
   comparePrevious: bool,
   samples: [Sample; 4]
 }
@@ -131,7 +131,7 @@ pub struct BaselineAxis {
   entries: List<Entry>,
   groups: List<BaselineGroup>,
   index: List<usize>,
-  mirrorOffset: f64
+  mirrorOffset: f32
 }
 
 pub struct GridBaselines {
@@ -174,7 +174,7 @@ fn axisStateMut(scratch: &mut GridBaselines, columns: bool) -> &mut BaselineAxis
   return &mut scratch.rows
 }
 
-fn axisSize(size: Size, horizontal: bool) -> f64 {
+fn axisSize(size: Size, horizontal: bool) -> f32 {
   if horizontal {
     return size.width
   }
@@ -483,8 +483,8 @@ fn capture(
   style: &Style,
   parent: &Style,
   layout: &Layout,
-  start: f64,
-  area: f64,
+  start: f32,
+  area: f32,
 ) {
   let horizontal = columns != (parent.writingMode != WritingMode.HorizontalTb)
   let entry = &mut state.entries.asMutSlice()[index]
@@ -625,7 +625,7 @@ pub fn captureFinal(
   }
 }
 
-pub fn shift(scratch: &GridBaselines, index: usize, columns: bool, fallback: f64) -> f64 {
+pub fn shift(scratch: &GridBaselines, index: usize, columns: bool, fallback: f32) -> f32 {
   if !active(scratch, index, columns) {
     return fallback
   }

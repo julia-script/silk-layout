@@ -2,14 +2,20 @@ import silk.core.ownership { Copy }
 import style { WritingMode, TextOrientation, Direction, ScrollbarWidth, ScrollbarGutter, MarginBreak }
 import bfc { BfcState }
 
-pub struct Size { pub width: f64, pub height: f64 }
+// Extents below 1/64px count as empty when deciding whether a box adds
+// overflow. f32 differences leave residues near 1e-6 where exact arithmetic
+// gives 0, and no threshold can tell those from real slivers; 1/64px is the
+// browsers' LayoutUnit, below which Chrome's boxes are already zero.
+pub const EMPTY_EXTENT: f32 = 0.015625
+
+pub struct Size { pub width: f32, pub height: f32 }
 impl Copy for Size {}
 impl Size {
   pub fn zero() -> Size with Intrinsic.inlineAlways() { return Size { width: 0.0, height: 0.0 } }
 }
-pub struct Point { pub x: f64, pub y: f64 }
+pub struct Point { pub x: f32, pub y: f32 }
 impl Copy for Point {}
-pub struct Rect { pub x: f64, pub y: f64, pub width: f64, pub height: f64 }
+pub struct Rect { pub x: f32, pub y: f32, pub width: f32, pub height: f32 }
 impl Copy for Rect {}
 impl Rect {
   pub fn zero() -> Rect with Intrinsic.inlineAlways() { return Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 } }
@@ -22,18 +28,18 @@ impl Rect {
     return Rect { x: x, y: y, width: max(self.x + self.width, other.x + other.width) - x, height: max(self.y + self.height, other.y + other.height) - y }
   }
 }
-pub struct ResolvedEdges { pub top: f64, pub right: f64, pub bottom: f64, pub left: f64 }
+pub struct ResolvedEdges { pub top: f32, pub right: f32, pub bottom: f32, pub left: f32 }
 impl Copy for ResolvedEdges {}
 impl ResolvedEdges {
   pub fn zero() -> ResolvedEdges with Intrinsic.inlineAlways() { return ResolvedEdges { top: 0.0, right: 0.0, bottom: 0.0, left: 0.0 } }
-  pub fn horizontal(self: &Self) -> f64 { return self.left + self.right }
-  pub fn vertical(self: &Self) -> f64 { return self.top + self.bottom }
+  pub fn horizontal(self: &Self) -> f32 { return self.left + self.right }
+  pub fn vertical(self: &Self) -> f32 { return self.top + self.bottom }
 }
-pub struct OptionalSize { pub width: f64, pub height: f64, pub widthDefinite: bool, pub heightDefinite: bool }
+pub struct OptionalSize { pub width: f32, pub height: f32, pub widthDefinite: bool, pub heightDefinite: bool }
 impl Copy for OptionalSize {}
 impl OptionalSize {
   pub fn none() -> OptionalSize { return OptionalSize { width: 0.0, height: 0.0, widthDefinite: false, heightDefinite: false } }
-  pub fn definite(width: f64, height: f64) -> OptionalSize { return OptionalSize { width: width, height: height, widthDefinite: true, heightDefinite: true } }
+  pub fn definite(width: f32, height: f32) -> OptionalSize { return OptionalSize { width: width, height: height, widthDefinite: true, heightDefinite: true } }
 }
 pub struct ScrollbarRequest {
   pub width: ScrollbarWidth, pub gutter: ScrollbarGutter,
@@ -43,7 +49,7 @@ pub struct ScrollbarRequest {
 }
 impl Copy for ScrollbarRequest {}
 pub struct ScrollbarMetrics {
-  pub horizontal: f64, pub vertical: f64,
+  pub horizontal: f32, pub vertical: f32,
   pub overlay: bool, pub horizontalOnTop: bool, pub verticalOnLeft: bool,
 }
 impl Copy for ScrollbarMetrics {}
@@ -57,38 +63,38 @@ impl Copy for FontRequest {}
 // A baseline table in one declared coordinate space. Font tables use the
 // content-over edge; measured/layout tables use the owning block-start edge.
 pub struct BaselineSet {
-  pub alphabetic: f64, pub ideographic: f64, pub central: f64, pub mathematical: f64,
-  pub xMiddle: f64, pub textOver: f64, pub textUnder: f64,
+  pub alphabetic: f32, pub ideographic: f32, pub central: f32, pub mathematical: f32,
+  pub xMiddle: f32, pub textOver: f32, pub textUnder: f32,
 }
 impl Copy for BaselineSet {}
 impl BaselineSet {
   pub fn zero() -> BaselineSet with Intrinsic.inlineAlways() { return BaselineSet.uniform(0.0) }
-  pub fn uniform(value: f64) -> BaselineSet with Intrinsic.inlineAlways() {
+  pub fn uniform(value: f32) -> BaselineSet with Intrinsic.inlineAlways() {
     return BaselineSet { alphabetic: value, ideographic: value, central: value, mathematical: value, xMiddle: value, textOver: value, textUnder: value }
   }
-  pub fn synthesized(over: f64, under: f64) -> BaselineSet {
+  pub fn synthesized(over: f32, under: f32) -> BaselineSet {
     let middle = (over + under) / 2.0
     return BaselineSet { alphabetic: under, ideographic: under, central: middle, mathematical: middle, xMiddle: middle, textOver: over, textUnder: under }
   }
-  pub fn forContext(self: &Self, mode: WritingMode, orientation: TextOrientation) -> f64 {
+  pub fn forContext(self: &Self, mode: WritingMode, orientation: TextOrientation) -> f32 {
     if (mode == WritingMode.VerticalRl || mode == WritingMode.VerticalLr) && orientation != TextOrientation.Sideways { return self.central }
     return self.alphabetic
   }
-  pub fn translated(self: &Self, offset: f64) -> BaselineSet {
+  pub fn translated(self: &Self, offset: f32) -> BaselineSet {
     return BaselineSet { alphabetic: self.alphabetic + offset, ideographic: self.ideographic + offset, central: self.central + offset, mathematical: self.mathematical + offset, xMiddle: self.xMiddle + offset, textOver: self.textOver + offset, textUnder: self.textUnder + offset }
   }
-  pub fn reversed(self: &Self, extent: f64) -> BaselineSet {
+  pub fn reversed(self: &Self, extent: f32) -> BaselineSet {
     return BaselineSet { alphabetic: extent - self.alphabetic, ideographic: extent - self.ideographic, central: extent - self.central, mathematical: extent - self.mathematical, xMiddle: extent - self.xMiddle, textOver: extent - self.textOver, textUnder: extent - self.textUnder }
   }
-  pub fn clamped(self: &Self, minimum: f64, maximum: f64) -> BaselineSet {
+  pub fn clamped(self: &Self, minimum: f32, maximum: f32) -> BaselineSet {
     return BaselineSet { alphabetic: clamp(self.alphabetic, minimum, maximum), ideographic: clamp(self.ideographic, minimum, maximum), central: clamp(self.central, minimum, maximum), mathematical: clamp(self.mathematical, minimum, maximum), xMiddle: clamp(self.xMiddle, minimum, maximum), textOver: clamp(self.textOver, minimum, maximum), textUnder: clamp(self.textUnder, minimum, maximum) }
   }
 }
 pub struct FontMetrics {
-  pub fontSize: f64, pub ascent: f64, pub descent: f64, pub lineGap: f64,
-  pub xHeight: f64, pub capHeight: f64,
-  pub spaceAdvance: f64, pub zeroAdvance: f64,
-  pub subscriptOffset: f64, pub superscriptOffset: f64,
+  pub fontSize: f32, pub ascent: f32, pub descent: f32, pub lineGap: f32,
+  pub xHeight: f32, pub capHeight: f32,
+  pub spaceAdvance: f32, pub zeroAdvance: f32,
+  pub subscriptOffset: f32, pub superscriptOffset: f32,
   pub baselines: BaselineSet,
 }
 impl Copy for FontMetrics {}
@@ -103,16 +109,16 @@ impl FontMetrics {
   }
 }
 pub enum AvailableKind { Definite, MinContent, MaxContent }
-pub struct AvailableSpace { pub kind: AvailableKind, pub value: f64 }
+pub struct AvailableSpace { pub kind: AvailableKind, pub value: f32 }
 impl Copy for AvailableSpace {}
 impl AvailableSpace {
-  pub fn definite(value: f64) -> AvailableSpace { return AvailableSpace { kind: AvailableKind.Definite, value: value } }
+  pub fn definite(value: f32) -> AvailableSpace { return AvailableSpace { kind: AvailableKind.Definite, value: value } }
   pub fn minContent() -> AvailableSpace { return AvailableSpace { kind: AvailableKind.MinContent, value: 0.0 } }
   pub fn maxContent() -> AvailableSpace { return AvailableSpace { kind: AvailableKind.MaxContent, value: 0.0 } }
 }
 pub struct LineSpace {
-  pub lineLeft: f64, pub lineRight: f64,
-  pub nextBlockOffset: f64, pub constrained: bool,
+  pub lineLeft: f32, pub lineRight: f32,
+  pub nextBlockOffset: f32, pub constrained: bool,
 }
 impl Copy for LineSpace {}
 pub struct MeasureRequest<'a> {
@@ -129,18 +135,18 @@ impl MeasureRequest {
   }
   // Coordinates are logical line-left/block-start offsets in this content box.
   // If a line cannot fit a constrained band, retry at nextBlockOffset.
-  pub fn lineSpace(self: &Self, inlineSize: f64, blockOffset: f64, lineBlockSize: f64) -> LineSpace {
+  pub fn lineSpace(self: &Self, inlineSize: f32, blockOffset: f32, lineBlockSize: f32) -> LineSpace {
     let band = self.exclusions.band(self.origin, inlineSize, blockOffset, lineBlockSize)
     let constrained = band.left > 0.0 || band.right < inlineSize
     let mut next = blockOffset
     if constrained { next = band.nextBottom }
     return LineSpace { lineLeft: band.left, lineRight: band.right, nextBlockOffset: next, constrained: constrained }
   }
-  pub fn exclusionBlockEnd(self: &Self) -> f64 { return self.exclusions.bottom(self.origin) }
+  pub fn exclusionBlockEnd(self: &Self) -> f32 { return self.exclusions.bottom(self.origin) }
 }
 pub struct Measured {
   pub size: Size,
-  pub contentBlockSize: f64,
+  pub contentBlockSize: f32,
   pub firstBaselines: BaselineSet, pub lastBaselines: BaselineSet, pub hasBaseline: bool,
   pub hasLineBoxes: bool,
   // Physical content-box-relative extent, before block content alignment.
@@ -151,7 +157,7 @@ pub struct Measured {
 impl Copy for Measured {}
 pub struct NaturalDimensions {
   pub size: OptionalSize,
-  pub aspectRatio: f64,
+  pub aspectRatio: f32,
 }
 impl Copy for NaturalDimensions {}
 impl NaturalDimensions {
@@ -174,16 +180,16 @@ pub interface Measure {
 // Policy buckets keep collapse associative even when a boundary discards only
 // some contributors. Filtering a scalar max/min cannot recover those margins.
 pub struct MarginStrut {
-  autoPositive: f64, autoNegative: f64,
-  keepPositive: f64, keepNegative: f64,
-  discardPositive: f64, discardNegative: f64,
+  autoPositive: f32, autoNegative: f32,
+  keepPositive: f32, keepNegative: f32,
+  discardPositive: f32, discardNegative: f32,
 }
 impl Copy for MarginStrut {}
 impl MarginStrut {
   pub fn zero() -> MarginStrut {
     return MarginStrut { autoPositive: 0.0, autoNegative: 0.0, keepPositive: 0.0, keepNegative: 0.0, discardPositive: 0.0, discardNegative: 0.0 }
   }
-  pub fn single(value: f64, policy: MarginBreak) -> MarginStrut {
+  pub fn single(value: f32, policy: MarginBreak) -> MarginStrut {
     let mut result = MarginStrut.zero()
     if policy == MarginBreak.Keep { result.keepPositive = max(0.0, value)
       result.keepNegative = min(0.0, value) }
@@ -200,16 +206,16 @@ impl MarginStrut {
       discardPositive: max(self.discardPositive, other.discardPositive), discardNegative: min(self.discardNegative, other.discardNegative),
     }
   }
-  pub fn positive(self: &Self) -> f64 { return max(self.autoPositive, max(self.keepPositive, self.discardPositive)) }
-  pub fn negative(self: &Self) -> f64 { return min(self.autoNegative, min(self.keepNegative, self.discardNegative)) }
+  pub fn positive(self: &Self) -> f32 { return max(self.autoPositive, max(self.keepPositive, self.discardPositive)) }
+  pub fn negative(self: &Self) -> f32 { return min(self.autoNegative, min(self.keepNegative, self.discardNegative)) }
   pub fn boundary(self: &Self, preserveAuto: bool) -> MarginStrut {
-    let mut autoPositive = 0.0
-    let mut autoNegative = 0.0
+    let mut autoPositive: f32 = 0.0
+    let mut autoNegative: f32 = 0.0
     if preserveAuto { autoPositive = self.autoPositive
       autoNegative = self.autoNegative }
     return MarginStrut { autoPositive: autoPositive, autoNegative: autoNegative, keepPositive: self.keepPositive, keepNegative: self.keepNegative, discardPositive: 0.0, discardNegative: 0.0 }
   }
-  pub fn beforeBreak(self: &Self, forced: bool, remaining: f64) -> MarginStrut {
+  pub fn beforeBreak(self: &Self, forced: bool, remaining: f32) -> MarginStrut {
     let mut result = self.boundary(!forced)
     result.autoPositive = min(result.autoPositive, max(0.0, remaining))
     return result
@@ -230,13 +236,13 @@ pub struct Layout {
   flowOverflow: Rect,
   paddingBox: Rect,
   contentBox: Rect,
-  pub preferredRatio: f64,
+  pub preferredRatio: f32,
   // Physical in-flow used margins, before adjoining block margins collapse.
   // Out-of-flow boxes retain their resolved (pre-auto-distribution) margins.
   pub usedMargin: ResolvedEdges,
-  pub marginTopPositive: f64, pub marginTopNegative: f64,
-  pub marginBottomPositive: f64, pub marginBottomNegative: f64,
-  // Flags last so they pack without padding between the f64 fields.
+  pub marginTopPositive: f32, pub marginTopNegative: f32,
+  pub marginBottomPositive: f32, pub marginBottomNegative: f32,
+  // Flags last so they pack without padding between the f32 fields.
   pub horizontalScrollbar: bool, pub verticalScrollbar: bool,
   scrollbarsApplicable: bool,
   pub widthDefinite: bool, pub heightDefinite: bool,
@@ -287,16 +293,16 @@ impl Layout {
   pub fn acceptsScrollbars(self: &Self) -> bool { return self.scrollbarsApplicable }
   pub fn getScrollbarMetrics(self: &Self) -> ScrollbarMetrics { return self.scrollbarMetrics }
 }
-pub fn max(a: f64, b: f64) -> f64 {
+pub fn max(a: f32, b: f32) -> f32 {
   if a > b { return a }
   return b
 }
-pub fn min(a: f64, b: f64) -> f64 {
+pub fn min(a: f32, b: f32) -> f32 {
   if a < b { return a }
   return b
 }
-pub fn clamp(value: f64, minimum: f64, maximum: f64) -> f64 { return max(minimum, min(value, maximum)) }
-pub fn abs(value: f64) -> f64 {
+pub fn clamp(value: f32, minimum: f32, maximum: f32) -> f32 { return max(minimum, min(value, maximum)) }
+pub fn abs(value: f32) -> f32 {
   if value < 0.0 { return -value }
   return value
 }

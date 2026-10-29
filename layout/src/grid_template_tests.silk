@@ -21,11 +21,11 @@ import grid_template {
   repeatCount
 }
 
-fn fixed(value: f64) -> GridTrack {
+fn fixed(value: f32) -> GridTrack {
   return GridTrack.breadth(GridBreadth.fixed(value))
 }
 
-fn sizing(size: f64) -> RepeatSizing {
+fn sizing(size: f32) -> RepeatSizing {
   return RepeatSizing {
     size: size,
     minimum: 0.0,
@@ -223,7 +223,7 @@ test effect fn gridAutomaticRepeatFloorsTracksAndCapsBeforeConversion()
   ]
   let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
   let request = sizing(10.0)
-  let huge = sizing(1.0e90)
+  let huge = sizing(1.0e30)
   run Testing.expect(
     repeatCount(&axis, &request) == 9,
     "all counting track sizes, including zero siblings, receive the 1px floor",
@@ -271,19 +271,19 @@ test effect fn gridAutoFitRangeKeepsAreaExtentSeparate()
 test effect fn gridAutomaticRepeatHandlesOverflowingStepWithoutConvertingInfinity()
   ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let tracks: [GridTrack; 1] = [fixed(1.0e308)]
+  let tracks: [GridTrack; 1] = [fixed(2.0e38)]
   let repeats: [GridRepeat; 1] = [
     GridRepeat { start: 0, length: 1, count: 1, kind: GridRepeatKind.AutoFill },
   ]
   let axis = run axisWith(&tracks, &repeats) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut request = sizing(1.5e308)
-  request.gap = Dimension.px(1.0e308)
+  let mut request = sizing(3.0e38)
+  request.gap = Dimension.px(2.0e38)
   run Testing.expect(
     repeatCount(&axis, &request) == 1,
     "an overflowing second-pattern cost cannot fit a finite preferred size",
   )
   request.definite = false
-  request.minimum = 1.5e308
+  request.minimum = 3.0e38
   run Testing.expect(
     repeatCount(&axis, &request) == 2,
     "an overflowing second-pattern cost still satisfies a finite minimum",

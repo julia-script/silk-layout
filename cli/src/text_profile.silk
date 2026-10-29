@@ -660,7 +660,7 @@ fn expandingWord(request: TextShapeRequest, token: TextToken, cursor: TextCursor
 // existing source/bidi run, never one fragment or record per character.
 struct JustificationRun {
   output: usize, cursor: TextCursor, scope: usize, level: u8,
-  glyphs: usize, weight: f64, leftWeight: f64, rightWeight: f64,
+  glyphs: usize, weight: f32, leftWeight: f32, rightWeight: f32,
   barrier: bool, object: bool,
 }
 impl Copy for JustificationRun {}
@@ -723,7 +723,7 @@ effect fn justifyCharacters(request: TextShapeRequest, runs: &mut List<Justifica
     index = index + 1
   }
 
-  let mut total = 0.0
+  let mut total: f32 = 0.0
   let mut start: usize = 0
   while start < runs.length() {
     let paragraphEnd = request.analysis.paragraphAt(runs.get(start).cursor).end
@@ -819,7 +819,7 @@ pub effect fn shape(request: TextShapeRequest, fonts: &[FontMetrics], output: &m
   // L1 uses original classes. Remember the start of the trailing resettable
   // suffix without materializing a per-character line buffer.
   let mut trailing = request.start
-  let mut opportunities = 0.0
+  let mut opportunities: f32 = 0.0
   let mut characterJustification = false
   let mut justificationRuns = List<JustificationRun>.make()
   let mut unit = request.start.unit
@@ -860,7 +860,7 @@ pub effect fn shape(request: TextShapeRequest, fonts: &[FontMetrics], output: &m
         && expandingWord(request, token, at, trailing) && includedEnd(request, unit) != 0 {
         let mut start: usize = 0
         if unit == request.start.unit { start = request.start.offset }
-        opportunities = opportunities + usize.toF64(includedEnd(request, unit) - start)
+        opportunities = opportunities + usize.toF32(includedEnd(request, unit) - start)
       }
       unit = unit + 1
     }
@@ -942,21 +942,21 @@ pub effect fn shape(request: TextShapeRequest, fonts: &[FontMetrics], output: &m
             preceding = resolved
             at = at + decoded.length
           }
-          let mut advance = usize.toF64(glyphs) * (size / 2.0)
+          let mut advance = usize.toF32(glyphs) * (size / 2.0)
           let hanging = hangingSpace(request, atCursor)
           let word = expandingWord(request, token, atCursor, trailing)
           if characterJustification {
             let barrier = hanging || token.kind == TextTokenKind.Tab || token.kind == TextTokenKind.SegmentBreak
-            let mut weight = 0.0
-            if word { weight = usize.toF64(glyphs) }
+            let mut weight: f32 = 0.0
+            if word { weight = usize.toF32(glyphs) }
             if !barrier && glyphs > 1 && token.textJustify == TextJustify.InterCharacter {
-              weight = weight + usize.toF64(glyphs - 1)
+              weight = weight + usize.toF32(glyphs - 1)
             }
             run justificationRuns.append(JustificationRun { output: output.length(), cursor: atCursor, scope: 0,
               level: level, glyphs: glyphs, weight: weight, leftWeight: 0.0, rightWeight: 0.0,
               barrier: barrier, object: false })
           } else if word && request.justificationSpace > 0.0 && opportunities > 0.0 {
-            advance = advance + (usize.toF64(glyphs) / opportunities) * request.justificationSpace
+            advance = advance + (usize.toF32(glyphs) / opportunities) * request.justificationSpace
           }
           if advance - advance != 0.0 { fail P.invalidText(token.source, "fixture glyph advance is not finite") }
           run output.append(TextRun.Text {

@@ -10,17 +10,17 @@ import grid_style { GridBreadth, GridBreadthKind, GridTrack, GridTrackKind }
 // CSS Grid 2 §12.3–12.8. All scratch lives on the tracks or in the caller's
 // reusable index list; sizing neither measures items nor allocates per item.
 pub struct TrackState {
-  pub base: f64,
-  pub position: f64,
-  pub growthLimit: f64,
-  pub factor: f64,
-  pub cap: f64,
+  pub base: f32,
+  pub position: f32,
+  pub growthLimit: f32,
+  pub factor: f32,
+  pub cap: f32,
   pub minimum: GridBreadthKind,
   pub maximum: GridBreadthKind,
   pub fitContent: bool,
   pub collapsed: bool,
-  planned: f64,
-  incurred: f64,
+  planned: f32,
+  incurred: f32,
   frozen: bool,
   infinitelyGrowable: bool,
 }
@@ -28,7 +28,7 @@ pub struct TrackState {
 impl Copy for TrackState {}
 
 impl TrackState {
-  pub fn fixed(size: f64) -> TrackState {
+  pub fn fixed(size: f32) -> TrackState {
     return TrackState {
       base: max(0.0, size),
       position: 0.0,
@@ -46,7 +46,7 @@ impl TrackState {
     }
   }
 
-  pub fn flexible(minimum: f64, factor: f64) -> TrackState {
+  pub fn flexible(minimum: f32, factor: f32) -> TrackState {
     let mut result = TrackState.fixed(minimum)
     result.minimum = GridBreadthKind.Auto
     result.maximum = GridBreadthKind.Flex
@@ -60,9 +60,9 @@ impl TrackState {
 pub struct TrackContribution {
   pub start: usize,
   pub end: usize,
-  pub minimum: f64,
-  pub minContent: f64,
-  pub maxContent: f64,
+  pub minimum: f32,
+  pub minContent: f32,
+  pub maxContent: f32,
 }
 
 impl Copy for TrackContribution {}
@@ -71,9 +71,9 @@ impl TrackContribution {
   pub fn make(
     start: usize,
     end: usize,
-    minimum: f64,
-    minContent: f64,
-    maxContent: f64,
+    minimum: f32,
+    minContent: f32,
+    maxContent: f32,
   ) -> TrackContribution {
     return TrackContribution {
       start: start,
@@ -95,7 +95,7 @@ fn normalized(value: GridBreadth, definite: bool) -> GridBreadthKind {
   return value.kind
 }
 
-fn initialize(track: &GridTrack, basis: f64, definite: bool) -> TrackState {
+fn initialize(track: &GridTrack, basis: f32, definite: bool) -> TrackState {
   let mut result = TrackState.fixed(0.0)
   result.minimum = normalized(track.min, definite)
   result.maximum = normalized(track.max, definite)
@@ -127,7 +127,7 @@ pub effect fn initializeTracks(
   automatic: &[GridTrack],
   origin: i32,
   count: usize,
-  basis: f64,
+  basis: f32,
   definite: bool,
   result: &mut List<TrackState>,
 )
@@ -183,21 +183,21 @@ pub fn collapseTracks(tracks: &mut [TrackState], collapsed: &[usize]) {
   }
 }
 
-fn gutters(count: usize, gap: f64) -> f64 {
+fn gutters(count: usize, gap: f32) -> f32 {
   if count == 0 {
     return 0.0
   }
-  return usize.toF64(count - 1) * gap
+  return usize.toF32(count - 1) * gap
 }
 
 // §11.1: interior collapsed gutters coincide; leading/trailing ones disappear.
 // Refund these from whole-axis budgets without changing noncollapsed arithmetic
 // order or adding another scan over tracks.
-fn collapsedGutters(collapsed: usize, count: usize, gap: f64) -> f64 {
+fn collapsedGutters(collapsed: usize, count: usize, gap: f32) -> f32 {
   if collapsed == count {
     return gutters(collapsed, gap)
   }
-  return usize.toF64(collapsed) * gap
+  return usize.toF32(collapsed) * gap
 }
 
 fn intrinsicKind(kind: GridBreadthKind) -> bool {
@@ -245,14 +245,14 @@ fn affected(track: &TrackState, step: IntrinsicStep, flex: bool) -> bool {
   return maxContentKind(track.maximum)
 }
 
-fn affectedSize(track: &TrackState, limit: bool) -> f64 {
+fn affectedSize(track: &TrackState, limit: bool) -> f32 {
   if limit && track.growthLimit < UNBOUNDED {
     return track.growthLimit
   }
   return track.base
 }
 
-fn distributionLimit(track: &TrackState, limit: bool) -> f64 {
+fn distributionLimit(track: &TrackState, limit: bool) -> f32 {
   if limit && (track.growthLimit >= UNBOUNDED || track.infinitelyGrowable) {
     if track.fitContent {
       return track.cap
@@ -268,9 +268,9 @@ fn distributionLimit(track: &TrackState, limit: bool) -> f64 {
 fn limitedContribution(
   tracks: &[TrackState],
   item: &TrackContribution,
-  value: f64,
-  gap: f64,
-) -> f64 {
+  value: f32,
+  gap: f32,
+) -> f32 {
   let mut cap = gutters(item.end - item.start, gap)
   let mut index = item.start
   while index < item.end {
@@ -331,8 +331,8 @@ fn distribute(
   step: IntrinsicStep,
   flex: bool,
   stage: usize,
-  space: f64,
-) -> f64 {
+  space: f32,
+) -> f32 {
   let limit = growsLimit(step)
   let mut remaining = space
   while remaining > 0.0 {
@@ -347,7 +347,7 @@ fn distribute(
       }
     }
     let mut count: usize = 0
-    let mut factors = 0.0
+    let mut factors: f32 = 0.0
     index = item.start
     while index < item.end {
       let track = &mut tracks[index]
@@ -372,8 +372,8 @@ fn distribute(
     if count == 0 {
       return remaining
     }
-    let equal = remaining / usize.toF64(count)
-    let mut consumed = 0.0
+    let equal = remaining / usize.toF32(count)
+    let mut consumed: f32 = 0.0
     let mut froze = false
     index = item.start
     while index < item.end {
@@ -426,7 +426,7 @@ fn accommodate(
   next: usize,
   step: IntrinsicStep,
   constraint: AvailableKind,
-  gap: f64,
+  gap: f32,
   flex: bool,
 ) {
   let limit = growsLimit(step)
@@ -508,7 +508,7 @@ fn spanGroup(
   head: usize,
   next: usize,
   constraint: AvailableKind,
-  gap: f64,
+  gap: f32,
   flex: bool,
 ) {
   if head == usize.MAX {
@@ -600,7 +600,7 @@ pub effect fn resolveIntrinsic(
   tracks: &mut [TrackState],
   contributions: &[TrackContribution],
   constraint: AvailableKind,
-  gap: f64,
+  gap: f32,
   work: &mut List<usize>,
 )
   ! OutOfMemoryError
@@ -661,8 +661,8 @@ pub effect fn resolveIntrinsic(
 pub fn maximizeTracks(
   tracks: &mut [TrackState],
   available: AvailableSpace,
-  gap: f64,
-  maximum: f64,
+  gap: f32,
+  maximum: f32,
 ) {
   if available.kind == AvailableKind.MinContent {
     return
@@ -704,8 +704,8 @@ pub fn maximizeTracks(
     if count == 0 {
       return
     }
-    let share = remaining / usize.toF64(count)
-    let mut consumed = 0.0
+    let share = remaining / usize.toF32(count)
+    let mut consumed: f32 = 0.0
     let mut froze = false
     index = 0
     while index < tracks.length {
@@ -734,9 +734,9 @@ fn findFraction(
   tracks: &mut [TrackState],
   start: usize,
   end: usize,
-  available: f64,
-  gap: f64,
-) -> f64 {
+  available: f32,
+  gap: f32,
+) -> f32 {
   let mut space = available - gutters(end - start, gap)
   let mut collapsed: usize = 0
   let mut index = start
@@ -753,7 +753,7 @@ fn findFraction(
   }
   while true {
     let mut remaining = space
-    let mut factors = 0.0
+    let mut factors: f32 = 0.0
     index = start
     while index < end {
       let track = &tracks[index]
@@ -784,7 +784,7 @@ fn findFraction(
   }
 }
 
-fn applyFraction(tracks: &mut [TrackState], fraction: f64) {
+fn applyFraction(tracks: &mut [TrackState], fraction: f32) {
   let mut index: usize = 0
   while index < tracks.length {
     let track = &mut tracks[index]
@@ -795,7 +795,7 @@ fn applyFraction(tracks: &mut [TrackState], fraction: f64) {
   }
 }
 
-pub fn resolveFlexible(tracks: &mut [TrackState], available: f64, gap: f64) {
+pub fn resolveFlexible(tracks: &mut [TrackState], available: f32, gap: f32) {
   let count = tracks.length
   let fraction = findFraction(&mut tracks, 0, count, available, gap)
   applyFraction(&mut tracks, fraction)
@@ -805,9 +805,9 @@ pub fn expandFlexible(
   tracks: &mut [TrackState],
   contributions: &[TrackContribution],
   available: AvailableSpace,
-  gap: f64,
-  minimum: f64,
-  maximum: f64,
+  gap: f32,
+  minimum: f32,
+  maximum: f32,
 ) {
   if available.kind == AvailableKind.MinContent {
     return
@@ -817,7 +817,7 @@ pub fn expandFlexible(
     resolveFlexible(&mut tracks, max(minimum, min(available.value, bound)), gap)
     return
   }
-  let mut fraction = 0.0
+  let mut fraction: f32 = 0.0
   let mut any = false
   let mut index: usize = 0
   while index < tracks.length {
@@ -867,7 +867,7 @@ pub fn expandFlexible(
 }
 
 // CSS Grid 2 §12.8. The caller decides whether content alignment permits stretch.
-pub fn stretchAuto(tracks: &mut [TrackState], available: f64, gap: f64) {
+pub fn stretchAuto(tracks: &mut [TrackState], available: f32, gap: f32) {
   let mut remaining = available - gutters(tracks.length, gap)
   let mut collapsed: usize = 0
   let mut count: usize = 0
@@ -888,7 +888,7 @@ pub fn stretchAuto(tracks: &mut [TrackState], available: f64, gap: f64) {
   if remaining <= 0.0 || count == 0 {
     return
   }
-  let share = remaining / usize.toF64(count)
+  let share = remaining / usize.toF32(count)
   index = 0
   while index < tracks.length {
     let track = &mut tracks[index]
@@ -899,8 +899,8 @@ pub fn stretchAuto(tracks: &mut [TrackState], available: f64, gap: f64) {
   }
 }
 
-pub fn positionTracks(tracks: &mut [TrackState], gap: f64) -> f64 {
-  let mut extent = 0.0
+pub fn positionTracks(tracks: &mut [TrackState], gap: f32) -> f32 {
+  let mut extent: f32 = 0.0
   let mut placed = false
   let mut index: usize = 0
   while index < tracks.length {
@@ -921,7 +921,7 @@ pub fn positionTracks(tracks: &mut [TrackState], gap: f64) -> f64 {
 }
 
 // Positions must be current; the caller supplies a nonempty, in-range span.
-pub fn spanSize(tracks: &[TrackState], start: usize, end: usize) -> f64 {
+pub fn spanSize(tracks: &[TrackState], start: usize, end: usize) -> f32 {
   let last = &tracks[end - 1]
   return last.position - tracks[start].position + last.base
 }

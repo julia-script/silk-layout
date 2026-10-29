@@ -22,7 +22,7 @@ impl Debug for FragmentationError {
 pub enum BoundaryProbe { None, Before, After }
 pub struct FragmentInput {
   pub active: bool,
-  pub offset: f64, pub limit: f64,
+  pub offset: f32, pub limit: f32,
   pub canBreakBefore: bool, pub avoidInside: bool, pub forcedStart: bool,
   pub contextStart: bool,
   pub marginStart: bool, pub marginEnd: bool,
@@ -90,7 +90,7 @@ pub struct Fragmentainers<'a> {
 pub struct Fragmentainer {
   pub index: usize,
   pub rect: Rect,
-  pub blockExtent: f64,
+  pub blockExtent: f32,
   pub side: PageSide,
 }
 impl Copy for Fragmentainer {}
@@ -150,8 +150,8 @@ impl Fragmentainers {
       match &self.repeatStep {
         Option<Point>.None => { return Option<FragmentAncestor>.None }
         Option<Point>.Some { value } => {
-          result.rect.x = result.rect.x + value.x * usize.toF64(repeat)
-          result.rect.y = result.rect.y + value.y * usize.toF64(repeat)
+          result.rect.x = result.rect.x + value.x * usize.toF32(repeat)
+          result.rect.y = result.rect.y + value.y * usize.toF32(repeat)
         }
       }
     }

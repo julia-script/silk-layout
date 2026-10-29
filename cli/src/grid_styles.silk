@@ -21,7 +21,7 @@ import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.collections.list { List }
 import silk.json.value { Value }
 import silk.num.i32
-import silk.num.f64
+import silk.num.f32
 import protocol as P
 import protocol { ProtocolError }
 
@@ -214,7 +214,7 @@ effect fn autoTracks(value: &Value) -> List<GridTrack>
 effect fn placementNumber(value: &Value) -> i32
   ! ProtocolError {
   let number = run P.finite(value)
-  if number == 0.0 || f64.trunc(number) != number {
+  if number == 0.0 || f32.trunc(number) != number {
     fail P.invalid("grid line must be a nonzero integer")
   }
   if number > 10000.0 {

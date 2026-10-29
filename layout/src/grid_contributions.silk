@@ -33,30 +33,30 @@ import fragmentation { FragmentationError }
 // Grid 2 §§6.6, 12.5. Contributions are margin-box sizes; usedMinimum is
 // border-box sized so final item layout can apply it without counting edges twice.
 pub struct ItemContribution {
-  pub minimum: f64,
-  pub minContent: f64,
-  pub maxContent: f64,
-  pub usedMinimum: f64,
+  pub minimum: f32,
+  pub minContent: f32,
+  pub maxContent: f32,
+  pub usedMinimum: f32,
 }
 
 impl Copy for ItemContribution {}
 
 struct Probe {
   size: Size,
-  preferredRatio: f64,
+  preferredRatio: f32,
   ratioBorderBox: bool
 }
 
 impl Copy for Probe {}
 
-fn axisSize(size: Size, horizontal: bool) -> f64 {
+fn axisSize(size: Size, horizontal: bool) -> f32 {
   if horizontal {
     return size.width
   }
   return size.height
 }
 
-fn optionalSize(size: OptionalSize, horizontal: bool) -> f64 {
+fn optionalSize(size: OptionalSize, horizontal: bool) -> f32 {
   if horizontal {
     return size.width
   }
@@ -70,7 +70,7 @@ fn definite(size: OptionalSize, horizontal: bool) -> bool {
   return size.heightDefinite
 }
 
-fn edges(value: ResolvedEdges, horizontal: bool) -> f64 {
+fn edges(value: ResolvedEdges, horizontal: bool) -> f32 {
   if horizontal {
     return value.horizontal()
   }
@@ -110,7 +110,7 @@ fn needsMax(value: Dimension) -> bool {
   return value.kind == DimensionKind.MaxContent || value.kind == DimensionKind.FitContent
 }
 
-fn intrinsicValue(value: Dimension, fallback: f64, smallest: f64, largest: f64, fit: f64) -> f64 {
+fn intrinsicValue(value: Dimension, fallback: f32, smallest: f32, largest: f32, fit: f32) -> f32 {
   if value.kind == DimensionKind.MinContent {
     return smallest
   }
@@ -124,13 +124,13 @@ fn intrinsicValue(value: Dimension, fallback: f64, smallest: f64, largest: f64, 
 }
 
 fn transfer(
-  cross: f64,
-  ratio: f64,
+  cross: f32,
+  ratio: f32,
   horizontal: bool,
-  inset: f64,
-  crossInset: f64,
+  inset: f32,
+  crossInset: f32,
   borderBox: bool,
-) -> f64 {
+) -> f32 {
   if cross >= UNBOUNDED {
     return UNBOUNDED
   }
@@ -279,8 +279,8 @@ pub effect fn measureContribution<'pass, 'source, M: Measure + TextMeasure>(
   input: &Input,
   horizontal: bool,
   autoMinimumAllowed: bool,
-  fixedMaximum: f64,
-  crossFixedMaximum: f64,
+  fixedMaximum: f32,
+  crossFixedMaximum: f32,
   needMinContent: bool,
   needMaxContent: bool,
 ) -> ItemContribution

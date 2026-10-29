@@ -17,7 +17,7 @@ fn line(number: i32, name: usize) -> GridLine {
 }
 
 // Local track buffers must not be borrowed by the retained version.
-effect fn captureBox(store: &mut GridGeometryStore, id: usize, x: f64, width: f64)
+effect fn captureBox(store: &mut GridGeometryStore, id: usize, x: f32, width: f32)
   ! OutOfMemoryError
   ? &mut Allocator {
   let mut column = TrackState.fixed(width)

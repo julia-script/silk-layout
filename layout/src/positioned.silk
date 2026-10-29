@@ -3,7 +3,7 @@ import silk.core.effect { Effect }
 import silk.num.u64
 import silk.num.u32
 import silk.num.usize
-import geometry { Layout, Point, Size, Rect, ResolvedEdges, OptionalSize, AvailableSpace, Measure, max, min, clamp, abs }
+import geometry { Layout, Point, Size, Rect, ResolvedEdges, OptionalSize, AvailableSpace, Measure, max, min, clamp, abs, EMPTY_EXTENT }
 import style { Style, Position, DimensionKind, Direction, WritingMode, Align, FlexDirection, FlexWrap, OverflowAlignment, Overflow, Float, BoxDecorationBreak }
 import tree { NO_NODE }
 import box_tree { BoxTree, BoxKind }
@@ -400,7 +400,7 @@ fn startReverse(style: &Style, horizontal: bool) -> bool {
   }
   return style.writingMode == WritingMode.VerticalRl || style.writingMode == WritingMode.SidewaysRl
 }
-fn alignmentOffset(value: Align, free: f64, reverse: bool, logicalReverse: bool, selfReverse: bool, horizontal: bool, safe: bool) -> f64 {
+fn alignmentOffset(value: Align, free: f32, reverse: bool, logicalReverse: bool, selfReverse: bool, horizontal: bool, safe: bool) -> f32 {
   let mut align = value
   // Flexbox §8.2 / Box Alignment §5.1: a sole item's distribution
   // falls back to safe flex-start or safe center.
@@ -435,7 +435,7 @@ fn relativeOffset(style: &Style, containingStyle: &Style, containing: OptionalSi
   else if bottom { result.y = -resolve(style.inset.bottom, containing.height, containing.heightDefinite, 0.0) }
   return result
 }
-fn stickyAxis(style: &Style, containingStyle: &Style, horizontal: bool, position: f64, size: f64, containingLow: f64, containingSize: f64, marginLow: f64, marginHigh: f64, scrollLow: f64, scrollSize: f64, scrollDefinite: bool) -> f64 {
+fn stickyAxis(style: &Style, containingStyle: &Style, horizontal: bool, position: f32, size: f32, containingLow: f32, containingSize: f32, marginLow: f32, marginHigh: f32, scrollLow: f32, scrollSize: f32, scrollDefinite: bool) -> f32 {
   let mut lowDimension = style.inset.top
   let mut highDimension = style.inset.bottom
   if horizontal { lowDimension = style.inset.left
@@ -457,7 +457,7 @@ fn stickyAxis(style: &Style, containingStyle: &Style, horizontal: bool, position
   let positionHigh = min(marginHigh, abs(containingLow + containingSize - position - size - marginHigh))
   let minimum = containingLow + positionLow - position
   let maximum = containingLow + containingSize - size - positionHigh - position
-  let mut offset = 0.0
+  let mut offset: f32 = 0.0
   if hasLow { offset = max(offset, scrollLow + low - position) }
   if hasHigh { offset = min(offset, scrollLow + scrollSize - high - size - position) }
   // A one-sided inset never pushes in the opposite direction, even if the
@@ -542,7 +542,7 @@ fn nextGenerated(nodes: &BoxTree, root: usize, id: usize) -> usize {
   }
   return NO_NODE
 }
-fn absoluteAlignment(low: f64, high: f64, outer: f64, limitLow: f64, limitHigh: f64, reverse: bool, logicalReverse: bool, align: Align, safety: OverflowAlignment, selfReverse: bool, horizontal: bool) -> f64 {
+fn absoluteAlignment(low: f32, high: f32, outer: f32, limitLow: f32, limitHigh: f32, reverse: bool, logicalReverse: bool, align: Align, safety: OverflowAlignment, selfReverse: bool, horizontal: bool) -> f32 {
   let free = high - low - outer
   let mut position = low + alignmentOffset(align, free, reverse, logicalReverse, selfReverse, horizontal, false)
   // Align §4.4.1.2: default/safe abspos alignment may overflow the
@@ -560,7 +560,7 @@ fn absoluteAlignment(low: f64, high: f64, outer: f64, limitLow: f64, limitHigh: 
   return position
 }
 
-fn insetPosition(low: f64, high: f64, hasLow: bool, hasHigh: bool, size: f64, containing: f64, limitLow: f64, limitHigh: f64, marginLow: f64, marginHigh: f64, autoLow: bool, autoHigh: bool, reverse: bool, inlineAxis: bool, staticPosition: f64, align: Align, safety: OverflowAlignment, selfReverse: bool, horizontal: bool) -> f64 {
+fn insetPosition(low: f32, high: f32, hasLow: bool, hasHigh: bool, size: f32, containing: f32, limitLow: f32, limitHigh: f32, marginLow: f32, marginHigh: f32, autoLow: bool, autoHigh: bool, reverse: bool, inlineAxis: bool, staticPosition: f32, align: Align, safety: OverflowAlignment, selfReverse: bool, horizontal: bool) -> f32 {
   if hasLow && hasHigh {
     let free = containing - low - high - size - marginLow - marginHigh
     if autoLow && autoHigh {
@@ -1183,7 +1183,7 @@ effect fn frameContainingRect(nodes: &BoxTree, output: &LayoutPass, cb: usize, p
   return output.fragments.values.get(parent).paddingRect.translated(fragmentPosition(output, parent, false))
 }
 
-effect fn absoluteFrameInput(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, parent: usize, frame: usize, offset: f64, relaxation: BreakRelaxation, original: &Input) -> Input ! FragmentationError {
+effect fn absoluteFrameInput(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, parent: usize, frame: usize, offset: f32, relaxation: BreakRelaxation, original: &Input) -> Input ! FragmentationError {
   let geometry = run output.requiredFrame(frame)
   let containing = run frameContainingRect(nodes, output, cb, parent, frame)
   let style = nodes.style(id)
@@ -1262,7 +1262,7 @@ fn placedInline(nodes: &BoxTree, output: &LayoutPass, id: usize, cb: usize, inpu
   return point
 }
 
-struct AbsoluteStart { frame: usize, offset: f64 }
+struct AbsoluteStart { frame: usize, offset: f32 }
 
 fn containingSegment(nodes: &BoxTree, output: &LayoutPass, cb: usize, frame: usize) -> Option<Rect> {
   let mut result = Rect.zero()
@@ -1309,7 +1309,7 @@ fn joinedContainingRect(nodes: &BoxTree, output: &LayoutPass, cb: usize, viewpor
   // Break3 §5.3: break-fill increases the used content extent. Join accepted
   // normal fragments, not a hypothetical re-layout, retaining those gaps but
   // excluding overflow-only shells and duplicate cloned padding.
-  let mut extent = 0.0
+  let mut extent: f32 = 0.0
   let mut frame: usize = 0
   while frame < output.frameRoots.length() {
     match containingSegment(nodes, output, cb, frame) {
@@ -1400,7 +1400,7 @@ effect fn semanticStaticPosition(nodes: &BoxTree, output: &LayoutPass, cb: usize
   let firstFragment = output.fragments.values.get(first)
   let firstRect = firstFragment.paddingRect.translated(flowPosition(output, first))
   let origin = blockStart(output, Point { x: firstRect.x, y: firstRect.y }, Size { width: firstRect.width, height: firstRect.height })
-  let mut distance = 0.0
+  let mut distance: f32 = 0.0
   let mut frame = firstFragment.fragmentainer
   while frame <= target {
     match containingSegment(nodes, output, cb, frame) {
@@ -1481,7 +1481,7 @@ effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
   let savedFrame = output.frame
   let savedParent = output.fragmentParent
   let mut frame = output.frame
-  let mut startOffset = 0.0
+  let mut startOffset: f32 = 0.0
   if unfragmented && !attached {
     frame = output.fragments.values.get(output.fragments.first(cb)).fragmentainer
   }
@@ -1504,7 +1504,7 @@ effect fn fragmentedAbsolute<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     let mut point = Point { x: location.x - shift.x, y: location.y - shift.y }
     let mut input = original.*
     if !unfragmented {
-      let mut offset = 0.0
+      let mut offset: f32 = 0.0
       if first { offset = startOffset }
       input = run absoluteFrameInput(nodes, &output, id, cb, parent, frame, offset, relaxation, &original)
       if output.frames.writingMode == WritingMode.HorizontalTb { point.y = geometry.rect.y + offset }
@@ -1646,7 +1646,7 @@ pub fn addOverflow(base: Rect, rect: Rect, limits: ResolvedEdges) -> Rect {
   let bottom = min(rect.y + rect.height, limits.bottom)
   // Empty intersections must not expand the other axis. Border boxes with
   // zero area are absent; zero-area boxes' nonempty descendant overflow isn't.
-  if right <= left || bottom <= top { return base }
+  if right - left < EMPTY_EXTENT || bottom - top < EMPTY_EXTENT { return base }
   return base.unionWith(Rect { x: left, y: top, width: right - left, height: bottom - top })
 }
 fn propagatedOverflow(style: &Style, rect: Rect, padding: Rect) -> Rect {

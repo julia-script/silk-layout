@@ -33,10 +33,10 @@ impl Measure for FixedMeasure {
   fn measure(provider: &mut Self, key: usize, request: MeasureRequest) -> Measured {
     drop provider
     drop key
-    let mut width = 80.0
+    let mut width: f32 = 80.0
     if request.width.kind == AvailableKind.MinContent { width = 20.0 }
     if request.known.widthDefinite { width = request.known.width }
-    let mut height = 12.0
+    let mut height: f32 = 12.0
     if request.known.heightDefinite { height = request.known.height }
     return Measured { size: Size { width: width, height: height }, scrollableOverflow: Rect { x: 0.0, y: 0.0, width: max(20.0, width), height: 12.0 }, contentBlockSize: 12.0, firstBaselines: BaselineSet.uniform(9.0), lastBaselines: BaselineSet.uniform(9.0), hasBaseline: true, hasLineBoxes: true }
   }
@@ -58,13 +58,13 @@ impl TextMeasure for FixedMeasure {
     fail TextError { source: source, message: "box-only fixture does not support text" }
   }
 }
-fn sized(width: f64, height: f64) -> Style {
+fn sized(width: f32, height: f32) -> Style {
   let mut style = Style.make()
   style.width = Dimension.px(width)
   style.height = Dimension.px(height)
   return move style
 }
-effect fn arrange(tree: &Tree, width: f64) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn arrange(tree: &Tree, width: f32) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut layouts = LayoutTree.make()
   let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
@@ -367,7 +367,7 @@ test effect fn blockFlowRootMinimumWidthMovesBelowFloatAndRefills() -> () ! OutO
   run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(b.index)).size.width == 200.0, "auto width expands again below float")
 }
 
-effect fn arrangeVertical(tree: &Tree, inlineSize: f64) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn arrangeVertical(tree: &Tree, inlineSize: f32) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let mut layouts = LayoutTree.make()
   let constructed = run Boxes.build(tree.nodes.asSlice(), tree.styles.asSlice(), tree.grids.asSlice(), tree.gridNames.asSlice(), WritingMode.HorizontalTb, Direction.Ltr)
   let rootBox = constructed.firstBySource.get(tree.root().index)
@@ -567,7 +567,7 @@ test effect fn blockOrthogonalFlowPreventsParentChildMarginCollapse() -> () ! Ou
   run Testing.expect(layouts.boxes.get(layouts.firstBySource.get(0)).size.width == 47.0, "orthogonal physical width contributes to vertical block progression")
 }
 
-effect fn alignedChild(align: Align, safety: OverflowAlignment, overflow: Overflow, height: f64, childHeight: f64) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError | InvalidNode ? &mut Allocator {
+effect fn alignedChild(align: Align, safety: OverflowAlignment, overflow: Overflow, height: f32, childHeight: f32) -> LayoutTree ! OutOfMemoryError | TextError | FragmentationError | InvalidNode ? &mut Allocator {
   let mut root = Style.make()
   root.height = Dimension.px(height)
   root.alignContent = align

@@ -57,7 +57,7 @@ def main():
         print(f"{name}: {value['median_ms']:.3f} ms" + (f" ({ratio:.3f}x baseline)" if ratio is not None else ""))
     if args.record:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
-        BASELINE.write_text(json.dumps({"method": "native adapter wall time; one warmup excluded; median", "platform": platform.platform(), "silk": "0.1.0-dev.28+14bcdaa837f3", "runs": args.runs, "workloads": results}, indent=2) + "\n")
+        BASELINE.write_text(json.dumps({"method": "native adapter wall time; one warmup excluded; median", "platform": platform.platform(), "silk": "0.1.0-dev.29+94cf9559bf47", "runs": args.runs, "workloads": results}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

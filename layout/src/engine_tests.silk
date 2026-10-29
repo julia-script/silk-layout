@@ -7,7 +7,7 @@ import silk.option { Option }
 import text { TextMeasure, TextError, TextContext, TextTokenKind, TextCursor, TextBreak, TextBreakKind, TextLevel, TextAnalysis, TextShapeRequest, TextRun }
 import silk.effect { Effect }
 import silk.testing { Testing, AssertionError }
-import style { Style, Dimension, DimensionKind, Edges, Float, Display, DisplayOutside, DisplayInside, Position, BoxSizing, TextAlign, TextWrap, Direction, WhiteSpaceCollapse, TabSize, BoxDecorationBreak, FlexDirection }
+import style { Style, Dimension, DimensionKind, Edges, Float, Display, DisplayOutside, DisplayInside, Position, BoxSizing, TextAlign, TextWrap, Direction, WhiteSpaceCollapse, TabSize, BoxDecorationBreak, FlexDirection, FlexWrap }
 import geometry { Measure, MeasureRequest, Measured, BaselineSet, NaturalDimensions, ScrollbarRequest, ScrollbarMetrics, FontRequest, FontMetrics, Size, Rect, OptionalSize, AvailableKind, max, min, abs }
 import tree { Tree, LayoutTree, InvalidNode, NO_NODE }
 import engine { compute }
@@ -919,4 +919,28 @@ test effect fn widthFreeTreeClearsAncestors() ! OutOfMemoryError | InvalidNode |
   run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(root.index)) & 2048 == 0, "restyled aspect ratio clears the root")
   run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(child.index)) & 2048 == 0, "restyled aspect ratio clears the parent")
   run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(child.index)) & 1024 != 0, "the parent itself stays width free")
+}
+
+// KEY_CONTENT_FREE_TREE lets min-content probes share max-content entries, so
+// a multi-line flex container clears it on itself and its ancestors.
+test effect fn contentFreeTreeExcludesWrapping() ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut tree = run Tree.make(Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = tree.root()
+  let mut wrapping = Style.make()
+  wrapping.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  wrapping.flexWrap = FlexWrap.Wrap
+  let child = run tree.append(root, move wrapping) |> Effect.provideMut<Allocator>(&mut allocator)
+  let leaf = run tree.append(child, Style.make()) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut output = LayoutTree.make()
+  let mut content = Content { minimum: 0.0, maximum: 0.0, height: 0.0 }
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(leaf.index)) & 8192 != 0, "an empty leaf is content free")
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(child.index)) & 4096 == 0, "a wrapping flex container is not content free")
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(root.index)) & 8192 == 0, "its ancestors are not content free")
+  let mut single = Style.make()
+  single.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+  run tree.setStyle(child, move single)
+  run compute(&tree, &mut output, &mut content, OptionalSize.definite(100.0, 100.0)) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(output.facts.keyShapes.get(output.firstBySource.get(root.index)) & 8192 != 0, "a restyled single-line container frees its ancestors")
 }

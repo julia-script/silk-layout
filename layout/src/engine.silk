@@ -411,6 +411,11 @@ const KEY_PERCENT_EDGES: u16 = 512
 // whole subtree has KEY_WIDTH_FREE; see widthFreeTrees.
 const KEY_WIDTH_FREE: u16 = 1024
 const KEY_WIDTH_FREE_TREE: u16 = 2048
+// A KEY_WIDTH_FREE box that is not a multi-line flex container: with no
+// text, measured, grid or float content below it, a subtree of such boxes
+// (KEY_CONTENT_FREE_TREE) has equal min- and max-content widths.
+const KEY_CONTENT_FREE: u16 = 4096
+const KEY_CONTENT_FREE_TREE: u16 = 8192
 
 fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   let node = nodes.node(id)
@@ -429,26 +434,34 @@ fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   let columnWrap = isFlex(style) && style.flexWrap != FlexWrap.NoWrap && (style.flexDirection == FlexDirection.Column || style.flexDirection == FlexDirection.ColumnReverse)
   if (node.kind == BoxKind.Block || node.kind == BoxKind.Flex) && node.measurement == Measurement.None && style.writingMode == WritingMode.HorizontalTb && style.aspectRatio <= 0.0 && style.overflowX == Overflow.Visible && style.overflowY == Overflow.Visible && style.float == Float.None && !columnWrap {
     shape = shape | KEY_WIDTH_FREE
+    if !isFlex(style) || style.flexWrap == FlexWrap.NoWrap { shape = shape | KEY_CONTENT_FREE }
   }
   return shape
 }
 
-// Sets KEY_WIDTH_FREE_TREE on boxes whose whole subtree is KEY_WIDTH_FREE.
-// A child's id is always greater than its parent's, so one reverse pass
-// sees every child before its parent.
+// Sets KEY_WIDTH_FREE_TREE and KEY_CONTENT_FREE_TREE on boxes whose whole
+// subtree has KEY_WIDTH_FREE and KEY_CONTENT_FREE. A child's id is always
+// greater than its parent's, so one reverse pass sees every child before
+// its parent.
 fn widthFreeTrees(nodes: &BoxTree, shapes: &mut List<u16>) {
   let count = shapes.length()
   let slice = shapes.asMutSlice()
   let mut id: usize = 0
   while id < count {
-    if slice[id] & KEY_WIDTH_FREE != 0 { slice[id] = slice[id] | KEY_WIDTH_FREE_TREE } else { slice[id] = slice[id] & ~KEY_WIDTH_FREE_TREE }
+    let mut shape = slice[id] & ~(KEY_WIDTH_FREE_TREE | KEY_CONTENT_FREE_TREE)
+    if shape & KEY_WIDTH_FREE != 0 { shape = shape | KEY_WIDTH_FREE_TREE }
+    if shape & KEY_CONTENT_FREE != 0 { shape = shape | KEY_CONTENT_FREE_TREE }
+    slice[id] = shape
     id = id + 1
   }
   id = count
   while id > 0 {
     id = id - 1
     let parent = nodes.node(id).parent
-    if slice[id] & KEY_WIDTH_FREE_TREE == 0 && parent != NO_NODE && parent < count { slice[parent] = slice[parent] & ~KEY_WIDTH_FREE_TREE }
+    if parent != NO_NODE && parent < count {
+      let missing = (KEY_WIDTH_FREE_TREE | KEY_CONTENT_FREE_TREE) & ~slice[id]
+      slice[parent] = slice[parent] & ~missing
+    }
   }
 }
 
@@ -483,6 +496,11 @@ pub fn normalizeKey(shape: u16, key: &mut Input, viewportFree: bool) {
   }
   if key.known.widthDefinite { key.availableWidth = AvailableSpace.maxContent() }
   if key.known.heightDefinite { key.availableHeight = AvailableSpace.maxContent() }
+  // Min- and max-content widths agree in a content-free subtree, so its
+  // min-content probes share the max-content entry.
+  if key.intrinsicWidth && shape & KEY_CONTENT_FREE_TREE != 0 && key.availableWidth.kind == AvailableKind.MinContent && key.parentWritingMode == WritingMode.HorizontalTb {
+    key.availableWidth = AvailableSpace.maxContent()
+  }
   // A width-only probe of a subtree whose widths never read heights gets the
   // same answer at any height (a stretched flex item's definite height, §9.8).
   if key.intrinsicWidth && !key.fullSize && shape & KEY_WIDTH_FREE_TREE != 0 && key.parentWritingMode == WritingMode.HorizontalTb {

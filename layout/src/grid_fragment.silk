@@ -27,7 +27,7 @@ import grid_style { GridBreadthKind }
 import grid_alignment { alignItem }
 import grid_baselines as Baselines
 import grid_baselines { GridBaselines }
-import grid_fragment_scratch { FragmentItem, GridFragmentScratch }
+import grid_fragment_scratch { FragmentItem, GridFragmentScratch, logicalRow, startRow, endRow }
 
 pub struct FragmentGrid<'a> {
   pub items: &'a [GridItem],
@@ -67,6 +67,7 @@ pub fn outerBoundary(
   output: &LayoutPass,
   items: &[GridItem],
   rowCount: usize,
+  reversed: bool,
   before: bool,
   recto: bool,
 ) -> BreakBoundary {
@@ -74,7 +75,8 @@ pub fn outerBoundary(
   let mut index: usize = 0
   while index < items.length {
     let item = &items[index]
-    if before && item.row.start == 0 || !before && i32.toUsize(item.row.end) == rowCount {
+    if before && startRow(item, rowCount, reversed) == 0
+      || !before && endRow(item, rowCount, reversed) == rowCount {
       boundary.merge(itemBoundary(nodes, output, item, before, recto))
     }
     index = index + 1
@@ -144,7 +146,8 @@ effect fn prepareAllocations<'pass, 'source, M: Measure + TextMeasure>(
 )
   ! OutOfMemoryError | TextError | FragmentationError
   ? &mut Allocator {
-  run scratch.prepare(grid.items, grid.rows.length)
+  let frameAxis = Axes.make(output.frames.writingMode)
+  run scratch.prepare(grid.items, grid.rows.length, grid.axis.reverseBlock != frameAxis.reverseBlock)
   let style = nodes.style(id)
   let logical = grid.axis.box(box.*)
   let sharing = baselines.any()
@@ -343,19 +346,20 @@ effect fn fitItem<'pass, 'source, M: Measure + TextMeasure>(
     return fit
   }
   let row = i32.toUsize(item.row.start)
-  let margin = grid.axis.edges(allocation.margin)
+  let frameAxis = Axes.make(output.frames.writingMode)
+  let margin = frameAxis.edges(allocation.margin)
   let explicitMargins = style.marginBreak != MarginBreak.Auto
     && FragmentBox.applies(style, output.frames.writingMode)
   let mut marginInput = input.fragmentation
   marginInput.marginStart = input.fragmentation.marginStart && opening == 0.0 && rowStart == 0.0
   marginInput.marginEnd = input.fragmentation.marginEnd && ending == 0.0
-    && i32.toUsize(item.row.end) == grid.rows.length
+    && endRow(item, grid.rows.length, scratch.reversed) == grid.rows.length
   marginInput.forcedStart = forcedStart || old.requested.kinds.any()
   let mut authoredStart = margin.top
   let mut startDimension = style.margin.top
   if grid.axis.vertical {
     startDimension = style.margin.left
-    if grid.axis.reverseBlock {
+    if frameAxis.reverseBlock {
       startDimension = style.margin.right
     }
   }
@@ -363,6 +367,10 @@ effect fn fitItem<'pass, 'source, M: Measure + TextMeasure>(
     authoredStart = 0.0
   }
   let mut aligned = allocation.offset.y - grid.rows[row].position
+  if scratch.reversed {
+    aligned = spanSize(grid.rows, row, i32.toUsize(item.row.end))
+      - aligned - allocation.size.height
+  }
   if explicitMargins {
     aligned = aligned - authoredStart
   }
@@ -490,9 +498,11 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
   output.resumes.restore(allocationCheckpoint, &mut output.boxes)
   output.resumes.close(allocationCheckpoint)
   let style = nodes.style(id)
+  let frameAxis = Axes.make(output.frames.writingMode)
   let logical = grid.axis.box(box.*)
-  let opening = logical.inset.top
-  let ending = logical.inset.bottom
+  let frameInsets = frameAxis.edges(box.inset)
+  let opening = frameInsets.top
+  let ending = frameInsets.bottom
   let capacity = max(0.0, input.fragmentation.limit - input.fragmentation.offset - opening - ending)
   let avoidedInside = input.fragmentation.avoidInside
     || input.fragmentation.avoidsInside(style.breakInside)
@@ -506,6 +516,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
       &output,
       grid.items,
       grid.rows.length,
+      scratch.reversed,
       true,
       input.fragmentation.rectoOnRight,
     ),
@@ -516,6 +527,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
       &output,
       grid.items,
       grid.rows.length,
+      scratch.reversed,
       false,
       input.fragmentation.rectoOnRight,
     ),
@@ -575,7 +587,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
   let forcedStart = input.fragmentation.forcedStart || initial.requested.kinds.any()
   let mut index: usize = 0
   while index < grid.items.length {
-    if i32.toUsize(grid.items[index].row.start) < nextRow
+    if startRow(&grid.items[index], grid.rows.length, scratch.reversed) < nextRow
       && !output.resumes.get(grid.items[index].id).contentComplete {
       let fit = run fitItem(
         nodes,
@@ -610,6 +622,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
   let mut fallbackHandled = handled
   while nextRow < grid.rows.length && !blocked {
     let row = nextRow
+    let track = logicalRow(row, grid.rows.length, scratch.reversed)
     run discoverBefore(nodes, &mut output, &mut measurer, base, grid, &scratch, row)
     let mut boundary = rowBoundary(
       nodes,
@@ -652,10 +665,18 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
       || input.fragmentation.relaxation == BreakRelaxation.Avoidance
       || forced.kinds.any()
     let savedGap = gap
-    let mut spacing = grid.rows[row].position
+    let mut spacing = grid.rows[track].position
+    if scratch.reversed {
+      let extent = grid.axis.size(result.size).height - logical.inset.top - logical.inset.bottom
+      spacing = extent - grid.rows[track].position - grid.rows[track].base
+    }
     let mut gutter: f32 = 0.0
     if row > 0 {
-      spacing = spacing - grid.rows[row - 1].position - grid.rows[row - 1].base
+      let previous = logicalRow(row - 1, grid.rows.length, scratch.reversed)
+      spacing = grid.rows[track].position - grid.rows[previous].position - grid.rows[previous].base
+      if scratch.reversed {
+        spacing = grid.rows[previous].position - grid.rows[track].position - grid.rows[track].base
+      }
       gutter = min(grid.rowGap, max(0.0, spacing))
       spacing = spacing - gutter
       if cursor <= 0.0 || gap.remaining != 1.0 {
@@ -677,7 +698,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
       }
       break
     }
-    if capacity > 0.0 && rowStart >= capacity && grid.rows[row].base > 0.0 {
+    if capacity > 0.0 && rowStart >= capacity && grid.rows[track].base > 0.0 {
       cursor = capacity
       if !boundaryAllowed {
         blocked = true
@@ -691,8 +712,8 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
     let mut anyReady = false
     let mut anyBlocked = false
     let mut allNormal = true
-    let grows = grid.rows[row].minimum != GridBreadthKind.Length
-      || !grid.blockDefinite && grid.rows[row].maximum == GridBreadthKind.Flex
+    let grows = grid.rows[track].minimum != GridBreadthKind.Length
+      || !grid.blockDefinite && grid.rows[track].maximum == GridBreadthKind.Flex
     index = scratch.rows.asSlice()[row].firstStart
     if handled {
       run handleBefore(&mut output, grid, &scratch, row)
@@ -723,14 +744,14 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
       anyFit = anyFit || fit.fitted
       anyReady = anyReady || fit.ready
       anyBlocked = anyBlocked || fit.blocked
-      if i32.toUsize(item.row.end) == row + 1 {
+      if endRow(item, grid.rows.length, scratch.reversed) == row + 1 {
         rowExtent = max(rowExtent, fit.extent)
         allNormal = allNormal && fit.normalComplete
       }
       index = scratch.items.asSlice()[index].nextStart
     }
     if !grows {
-      rowExtent = min(rowExtent, progress.resolve(grid.rows[row].base))
+      rowExtent = min(rowExtent, progress.resolve(grid.rows[track].base))
     }
     let discovered = rowBoundary(
       nodes,
@@ -796,12 +817,19 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
     if !retainedCheckpoint {
       output.closeCheckpoint(checkpoint)
     }
+    let starts = progress.remaining == 1.0
     let reserved = progress.consume(
-      grid.rows[row].base,
+      grid.rows[track].base,
       max(max(0.0, capacity - rowStart), rowExtent),
     )
     rowExtent = max(rowExtent, reserved)
     cursor = rowStart + rowExtent
+    let geometry = &mut scratch.rows.asMutSlice()[row]
+    geometry.consumedStart = consumed + rowStart
+    geometry.consumedEnd = consumed + cursor
+    geometry.accepted = true
+    geometry.starts = starts
+    geometry.ends = progress.remaining == 0.0 && (!grows || allNormal)
     if progress.remaining > 0.0 || grows && !allNormal {
       break
     }
@@ -815,6 +843,11 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
     && !initial.started
   if blocked && fallbackCursor > 0.0 && !forcedBefore {
     output.restoreCheckpoint(fallback)
+    index = fallbackRow
+    while index < scratch.rows.length {
+      scratch.rows.asMutSlice()[index].accepted = false
+      index = index + 1
+    }
     cursor = fallbackCursor
     nextRow = fallbackRow
     progress = fallbackProgress
@@ -831,6 +864,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
       &output,
       grid.items,
       grid.rows.length,
+      scratch.reversed,
       false,
       input.fragmentation.rectoOnRight,
     ),
@@ -846,6 +880,13 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
   waiting = waiting || !ready && !state.descendantsComplete
   state.blocked = blocked
   state.skipped = waiting && !published && cursor == 0.0
+  if state.blocked || state.skipped {
+    index = 0
+    while index < scratch.rows.length {
+      scratch.rows.asMutSlice()[index].accepted = false
+      index = index + 1
+    }
+  }
   if !blocked && !state.normalContentComplete && cursor > 0.0 {
     cursor = max(cursor, capacity)
   }
@@ -868,7 +909,7 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
   } else {
     result.size.height = extent
   }
-  if grid.axis.reverseBlock {
+  if frameAxis.reverseBlock {
     index = 0
     while index < grid.items.length {
       let child = output.resumes.get(grid.items[index].id)
@@ -892,7 +933,9 @@ pub effect fn layoutGridFragment<'pass, 'source, M: Measure + TextMeasure>(
     inlineStart = grid.inlineSize - inlineStart - inlineExtent
   }
   let overflowSize = grid.axis.size(Size { width: inlineExtent, height: max(0.0, cursor) })
-  let overflowPoint = grid.axis.physicalPoint(
+  let mut physicalAxis = grid.axis
+  physicalAxis.reverseBlock = frameAxis.reverseBlock
+  let overflowPoint = physicalAxis.physicalPoint(
     Point { x: logical.inset.left + inlineStart, y: opening },
     overflowSize,
     result.size,

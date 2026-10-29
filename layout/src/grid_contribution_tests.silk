@@ -847,3 +847,72 @@ test effect fn gridAutoContributionsKeepExplicitBoundsAndNegativeMargins()
   )
     |> Effect.provideMut<Allocator>(&mut allocator)
 }
+
+// Grid §§12.5, 12.8 first measure the auto row, then stretch it to 100px.
+// Flexbox §9.2 must prepare again under that final cross constraint. Provider
+// key 3 returns 80px for definite available height, or twice a known height:
+// start alignment therefore gives 80x30, while stretch gives 200x100.
+effect fn checkGridFlexCrossConstraints()
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut mode: usize = 0
+  while mode < 2 {
+    let mut rootStyle = Style.make()
+    rootStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+    rootStyle.width = Dimension.px(200.0)
+    rootStyle.height = Dimension.px(100.0)
+    let mut tree = run Tree.make(move rootStyle)
+    let root = tree.root()
+    let mut template = GridTemplate.make()
+    run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(200.0)))
+    run tree.setGrid(root, move template)
+    let mut flexStyle = Style.make()
+    flexStyle.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
+    flexStyle.alignSelf = Align.Start
+    if mode == 1 {
+      flexStyle.alignSelf = Align.Stretch
+    }
+    let flex = run tree.append(root, move flexStyle)
+    let mut itemStyle = Style.make()
+    itemStyle.minWidth = Dimension.px(0.0)
+    itemStyle.flexShrink = 0.0
+    let item = run tree.append(flex, move itemStyle)
+    run tree.setMeasurement(item, 3)
+    let mut output = LayoutTree.make()
+    let mut provider = ContributionMeasure { calls: 0 }
+    run compute(&tree, &mut output, &mut provider, OptionalSize.definite(200.0, 100.0))
+    let bounds = run output.sourceBounds(item)
+    let container = run output.sourceBounds(flex)
+    let mut width: f32 = 80.0
+    let mut height: f32 = 30.0
+    if mode == 1 {
+      width = 200.0
+      height = 100.0
+    }
+    run Testing.expect(
+      bounds.x == 0.0 && bounds.y == 0.0 && bounds.width == width && bounds.height == height,
+      "final Flex preparation preserves both available and known cross constraints",
+    )
+    run Testing.expect(
+      container.width == 200.0 && container.height == height,
+      "start keeps the natural cross size while stretch takes the final grid row",
+    )
+    mode = mode + 1
+  }
+}
+
+test effect fn gridFlexPreparationsKeepFinalCrossConstraints()
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run checkGridFlexCrossConstraints() |> Effect.provideMut<Allocator>(&mut allocator)
+}

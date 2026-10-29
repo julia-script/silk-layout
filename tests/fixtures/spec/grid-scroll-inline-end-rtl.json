@@ -1,0 +1,90 @@
+{
+  "name": "grid-scroll-inline-end-rtl",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "alignment",
+    "scroll-state"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#overflow",
+    "https://drafts.csswg.org/css-grid-2/#grid-align",
+    "https://drafts.csswg.org/css-align-3/#overflow-scroll-position"
+  ],
+  "derivation": "End distribution shifts a 120px track by -70px in the logical inline axis of a 50px scrollport. Align \u00a75.3 opens the normally unreachable origin only to the grid subject, not the farther absolute box. Physical-axis conversion and clamped scroll yield the authored visual positions.",
+  "input": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "position": "relative",
+          "width": 50,
+          "height": 20,
+          "writingMode": "horizontal-tb",
+          "direction": "rtl",
+          "gridTemplateColumns": [
+            120
+          ],
+          "gridTemplateRows": [
+            20
+          ],
+          "justifyContent": "end",
+          "overflowX": "auto",
+          "overflowY": "auto"
+        },
+        "scrollOffset": {
+          "x": 100,
+          "y": 0
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "width": 10,
+          "height": 10
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "position": "absolute",
+          "width": 10,
+          "height": 10,
+          "inset": {
+            "left": 140,
+            "top": 0
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 20,
+        "scrollableOverflowX": 0,
+        "scrollableOverflowWidth": 120
+      },
+      {
+        "x": 40,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      },
+      {
+        "x": 70,
+        "y": 0,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

@@ -84,6 +84,8 @@ Grid probes and final layout share item placement across retained computes, keye
 
 Original native regressions exercise viewport changes within and across an automatic-repeat count boundary, then order changes, hide/show box renumbering and template replacement. They assert hand-derived item rectangles rather than cache implementation details.
 
+Grid contribution probes reuse their scalar result when the block-axis min-content and max-content requests are identical; they do not rebuild and search an identical size-cache key.
+
 Baseline scratch is allocated only for containers requesting baseline self-alignment. Retained per-item samples and sparse used-track sharing groups avoid allocating a full group record for every possible track. Ordinary final placement still uses `layoutNode` and `LayoutPass.place`; neither baseline alignment nor track distribution adds fields to `Layout` or copies its record.
 
 Empty grid containers retain distinct min-content and max-content probe constraints. Their track definitions can supply different intrinsic sizes even without children ([Grid §5.2](https://drafts.csswg.org/css-grid-2/#intrinsic-sizes)); the ordinary empty-box cache-key shortcut must not erase that distinction.

@@ -1,0 +1,119 @@
+{
+  "name": "grid-subgrid-saturated-both-axis-auto-placement",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "auto-placement",
+    "dense"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-implicit",
+    "https://drafts.csswg.org/css-grid-2/#auto-placement-algo"
+  ],
+  "derivation": "The both-axis subgrid has exactly two columns and two rows. Dense auto-placement computes hypothetical implicit rows normally, then clamps each item area into the explicit subgrid. Items1\u20134 occupy the four cells; the fifth hypothetical item in row3,column1 clamps onto row2,column1 rather than generating a third inherited row or restarting at the first cell. Column/row gaps5/7 remain between the inherited tracks.",
+  "input": {
+    "viewport": {
+      "width": 200,
+      "height": 100
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 83,
+          "gridTemplateColumns": [
+            31,
+            47
+          ],
+          "gridTemplateRows": [
+            13,
+            29
+          ],
+          "columnGap": 5,
+          "rowGap": 7
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 3,
+          "gridRowStart": 1,
+          "gridRowEnd": 3,
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": "subgrid",
+          "gridAutoFlow": "row dense"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      },
+      {
+        "parent": 1,
+        "style": {}
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 83,
+        "height": 49
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 83,
+        "height": 49
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 31,
+        "height": 13
+      },
+      {
+        "x": 36,
+        "y": 0,
+        "width": 47,
+        "height": 13
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 31,
+        "height": 29
+      },
+      {
+        "x": 36,
+        "y": 20,
+        "width": 47,
+        "height": 29
+      },
+      {
+        "x": 0,
+        "y": 20,
+        "width": 31,
+        "height": 29
+      }
+    ]
+  }
+}

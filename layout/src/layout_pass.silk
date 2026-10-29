@@ -79,6 +79,10 @@ pub struct LayoutPass<'a, 'source> {
   // Which boxes are out of flow, filled from visits by positionTree so
   // treeOverflow need not read every box's style.
   pub outOfFlowBoxes: List<bool>,
+  // The box fragments published with scrollable overflow outside their
+  // border box, possibly repeated or since rolled back (see treeOverflow).
+  pub overflowEscapes: List<usize>,
+  pub overflowMarks: List<u64>,
   pub relativeOffsets: List<Point>,
   // The containing block whose children input absoluteInput and used box
   // absoluteBox hold, and its padding rectangle absoluteRect, while
@@ -113,7 +117,7 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
   pub effect fn make(boxes: &'a mut [Layout], fragments: &'a mut FragmentArena, sources: &'source [Node]) -> LayoutPass<'a, 'source> ! OutOfMemoryError ? &mut Allocator {
     // The paragraph cache may borrow text from these source nodes.
     drop sources
-    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), visits: List<usize>.make(), outOfFlowBoxes: List<bool>.make(), relativeOffsets: List<Point>.make(), absoluteInputOwner: NO_NODE, absoluteInput: Input.make(OptionalSize.definite(0.0, 0.0)), absoluteBox: resolveBox(&Style.make(), &Input.make(OptionalSize.definite(0.0, 0.0))), absoluteRect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 }, absoluteLimits: ResolvedEdges.zero(), absoluteLimitsSet: false, absoluteScrollParent: NO_NODE, absoluteScrolled: false, absoluteScrollport: Size.zero(), parents: List<usize>.make(), keyShapes: List<u16>.make(), inPlace: false, writes: BoxWrites.make(), tracking: true, anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero(), flexScratch: List<FlexScratch>.make(), gridScratch: GridScratchPool.make() }
+    return LayoutPass { boxes: move boxes, fragments: move fragments, fragmentParent: NO_NODE, frame: NO_NODE, resumes: ResumeStore.make(), frames: Fragmentainers.empty(), frameRoots: List<usize>.make(), frameOffsets: List<f64>.make(), fullBoxes: List<FullBoxGeometry>.make(), fullIndices: List<usize>.make(), inlinePrepared: List<List<PreparedInline<'source>>>.make(), lineLimits: List<LineLimit>.make(), cache: LayoutCache.make(), previous: Snapshot.make(), next: Snapshot.make(), reusable: List<u8>.make(), floatContext: List<FloatBox>.make(), viewportFrees: List<bool>.make(), visits: List<usize>.make(), outOfFlowBoxes: List<bool>.make(), overflowEscapes: List<usize>.make(), overflowMarks: List<u64>.make(), relativeOffsets: List<Point>.make(), absoluteInputOwner: NO_NODE, absoluteInput: Input.make(OptionalSize.definite(0.0, 0.0)), absoluteBox: resolveBox(&Style.make(), &Input.make(OptionalSize.definite(0.0, 0.0))), absoluteRect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 }, absoluteLimits: ResolvedEdges.zero(), absoluteLimitsSet: false, absoluteScrollParent: NO_NODE, absoluteScrolled: false, absoluteScrollport: Size.zero(), parents: List<usize>.make(), keyShapes: List<u16>.make(), inPlace: false, writes: BoxWrites.make(), tracking: true, anchors: List<StaticAnchor>.make(), selections: List<ScrollbarSelection>.make(), frameSelections: List<List<FrameScrollbarSelection>>.make(), scrollbarSnapshots: List<ScrollbarSnapshot>.make(), hasAutoScrollbars: false, needsRelayout: false, stats: LayoutStats.zero(), flexScratch: List<FlexScratch>.make(), gridScratch: GridScratchPool.make() }
   }
   pub effect fn beginFrame(self: &mut Self, frame: usize) ! OutOfMemoryError ? &mut Allocator {
     if self.frame == NO_NODE { run self.resumes.prepare(self.boxes.length) }
@@ -411,6 +415,8 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       if first != NO_NODE {
         let kind = self.fragments.values.asSlice()[first].kind
         if kind == FragmentKind.Box {
+          let overflow = value.scrollableOverflow
+          if overflow.x < 0.0 || overflow.y < 0.0 || overflow.x + overflow.width > value.size.width || overflow.y + overflow.height > value.size.height { run self.overflowEscapes.append(first) }
           run self.fragments.edit(first)
           let fragments = self.fragments.values.asMutSlice()
           fragments[first].location = value.location

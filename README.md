@@ -1,5 +1,7 @@
 # silk-layout
 
+> **Moved.** silk-layout now lives in [silk-lang/nonstd](https://github.com/silk-lang/nonstd) under [`css/layout`](https://github.com/silk-lang/nonstd/tree/main/css/layout). This repository is archived at the state it was imported from (64e9859); open issues and pull requests there.
+
 MIT-licensed block, flexbox and grid layout in safe Silk, with specification-derived algorithms and a replaceable measurement provider. **Full CSS conformance is the target, not the current verified status.** See [standards, coverage gaps and license provenance](SPECIFICATIONS.md).
 
 ## Build and check

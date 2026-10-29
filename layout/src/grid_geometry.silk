@@ -1,0 +1,199 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.list { List }
+import grid_absolute { GridGeometry }
+import grid_lines { LineNames }
+import grid_tracks { TrackState }
+import tree { NO_NODE }
+
+struct Slot {
+  geometry: GridGeometry,
+  id: usize,
+  previous: usize,
+  nextFree: usize,
+}
+
+// Only positioned grids publish records. The box index is lazy; geometry and
+// name buffers stay in their pooled slots even after their versions are freed.
+pub struct GridGeometryStore {
+  heads: List<usize>,
+  slots: List<Slot>,
+  journal: List<usize>,
+  free: usize,
+}
+
+impl GridGeometryStore {
+  pub fn make() -> GridGeometryStore {
+    return GridGeometryStore {
+      heads: List<usize>.make(),
+      slots: List<Slot>.make(),
+      journal: List<usize>.make(),
+      free: NO_NODE,
+    }
+  }
+
+  pub fn find(self: &Self, id: usize) -> usize {
+    if id >= self.heads.length() {
+      return NO_NODE
+    }
+    return self.heads.get(id)
+  }
+
+  pub fn get(self: &Self, slot: usize) -> &GridGeometry {
+    return &self.slots.asSlice()[slot].geometry
+  }
+
+  pub fn checkpoint(self: &Self) -> usize {
+    return self.journal.length()
+  }
+
+  pub effect fn capture(
+    self: &mut Self,
+    id: usize,
+    columns: &[TrackState],
+    columnOrigin: i32,
+    columnExplicit: usize,
+    columnNames: &LineNames,
+    rows: &[TrackState],
+    rowOrigin: i32,
+    rowExplicit: usize,
+    rowNames: &LineNames,
+  )
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    if id >= self.heads.length() {
+      let additional = id + 1 - self.heads.length()
+      run self.heads.appendRepeated(NO_NODE, additional)
+    }
+    if self.free == NO_NODE {
+      let slot = self.slots.length()
+      run self.slots.append(
+        Slot { geometry: GridGeometry.make(), id: NO_NODE, previous: NO_NODE, nextFree: NO_NODE },
+      )
+      self.free = slot
+    }
+    let index = self.free
+
+    // Keep the candidate on the free chain until both axes have been copied.
+    // An allocation failure cannot publish half a geometry or lose its slot.
+    let slot = &mut self.slots.asMutSlice()[index]
+    run slot.geometry.columns.capture(columns, columnOrigin, columnExplicit, columnNames)
+    run slot.geometry.rows.capture(rows, rowOrigin, rowExplicit, rowNames)
+    run self.journal.append(index)
+    self.free = slot.nextFree
+    slot.nextFree = NO_NODE
+    slot.id = id
+    slot.previous = self.heads.get(id)
+    self.heads.set(id, index)
+  }
+
+  fn release(self: &mut Self, index: usize) {
+    let slot = &mut self.slots.asMutSlice()[index]
+    slot.id = NO_NODE
+    slot.previous = NO_NODE
+    slot.nextFree = self.free
+    self.free = index
+  }
+
+  // Reverse publication order also handles repeated writes to the same box
+  // and new writes made after restoring an inner checkpoint.
+  pub fn restore(self: &mut Self, marker: usize) {
+    let mut count = self.journal.length()
+    while count > marker {
+      count = count - 1
+      let index = self.journal.get(count)
+      let slot = &self.slots.asSlice()[index]
+      self.heads.set(slot.id, slot.previous)
+      self.release(index)
+    }
+    self.journal.truncate(count)
+  }
+
+  // Forward order ensures a journal entry is consumed before a later entry
+  // releases it as its predecessor. No free-index list needs to grow here.
+  pub fn commit(self: &mut Self) {
+    let mut at: usize = 0
+    while at < self.journal.length() {
+      let index = self.journal.get(at)
+      let previous = self.slots.asSlice()[index].previous
+      if previous != NO_NODE {
+        self.release(previous)
+      }
+      let slots = self.slots.asMutSlice()
+      slots[index].previous = NO_NODE
+      at = at + 1
+    }
+    self.journal.clear()
+  }
+
+  pub fn clear(self: &mut Self) {
+    self.heads.clear()
+    self.journal.clear()
+    self.free = NO_NODE
+    let mut at = self.slots.length()
+    while at > 0 {
+      at = at - 1
+      self.release(at)
+    }
+  }
+
+  // Invalidation and renumbering occur outside active layout checkpoints.
+  pub fn dropBox(self: &mut Self, id: usize) {
+    if self.heads.length() == 0 {
+      return
+    }
+    self.commit()
+    let index = self.find(id)
+    if index == NO_NODE {
+      return
+    }
+    self.heads.set(id, NO_NODE)
+    self.release(index)
+  }
+
+  pub effect fn remap(self: &mut Self, toOld: &[usize], toNew: &[usize])
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    if self.heads.length() == 0 {
+      return
+    }
+
+    // Do not allocate a full box index for an unused store, or for new boxes
+    // beyond the last surviving geometry. Reserve before changing any heads.
+    let mut needed: usize = 0
+    let mut id: usize = 0
+    while id < toOld.length {
+      let old = toOld[id]
+      if old != NO_NODE && self.find(old) != NO_NODE {
+        needed = id + 1
+      }
+      id = id + 1
+    }
+    if needed > self.heads.length() {
+      let additional = needed - self.heads.length()
+      run self.heads.reserve(additional)
+    }
+    self.commit()
+    self.heads.clear()
+    while self.heads.length() < needed {
+      run self.heads.append(NO_NODE)
+    }
+    let mut at: usize = 0
+    while at < self.slots.length() {
+      let old = self.slots.asSlice()[at].id
+      if old != NO_NODE {
+        let mut next = NO_NODE
+        if old < toNew.length {
+          next = toNew[old]
+        }
+        if next == NO_NODE {
+          self.release(at)
+        } else {
+          let slots = self.slots.asMutSlice()
+          slots[at].id = next
+          self.heads.set(next, at)
+        }
+      }
+      at = at + 1
+    }
+  }
+}

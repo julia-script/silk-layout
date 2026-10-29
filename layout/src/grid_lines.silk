@@ -14,6 +14,15 @@ pub struct GridSpan {
 
 impl Copy for GridSpan {}
 
+pub struct GridAbsoluteSpan {
+  pub start: i32,
+  pub end: i32,
+  pub hasStart: bool,
+  pub hasEnd: bool,
+}
+
+impl Copy for GridAbsoluteSpan {}
+
 const EXACT: usize = 0
 
 const START_ALIAS: usize = 1
@@ -38,6 +47,20 @@ pub struct LineNames {
 impl LineNames {
   pub fn make() -> LineNames {
     return LineNames { occurrences: List<Occurrence>.make(), nameOrder: List<usize>.make() }
+  }
+
+  // Final geometry needs the resolved integer occurrences, not preparation's
+  // temporary ordering of every interned source name.
+  pub effect fn copyOccurrencesFrom(self: &mut Self, source: &Self)
+    ! OutOfMemoryError
+    ? &mut Allocator {
+    self.occurrences.clear()
+    self.nameOrder.clear()
+    let mut at: usize = 0
+    while at < source.occurrences.length() {
+      run self.occurrences.append(source.occurrences.get(at))
+      at = at + 1
+    }
   }
 }
 
@@ -485,4 +508,51 @@ pub fn resolveSpan(
     }
   }
   return unanchored(start, end)
+}
+
+// Grid §10.1: resolve placement and §8.3.1 conflicts first, then turn each
+// nonexistent endpoint into an auto padding edge. Unlike in-flow placement,
+// neither an auto edge nor an unanchored span supplies an implicit track.
+pub fn resolveAbsoluteSpan(
+  start: &GridLine,
+  end: &GridLine,
+  explicitTracks: usize,
+  names: &LineNames,
+  origin: i32,
+  trackCount: usize,
+) -> GridAbsoluteSpan {
+  let explicitEnd = boundedTracks(explicitTracks)
+  let hasStart = start.kind == GridLineKind.Line && (start.name != 0 || start.number != 0)
+  let hasEnd = end.kind == GridLineKind.Line && (end.name != 0 || end.number != 0)
+  let mut result = GridAbsoluteSpan { start: 0, end: 0, hasStart: hasStart, hasEnd: hasEnd }
+  if hasStart {
+    result.start = namedPosition(start, explicitEnd, names, true)
+  }
+  if hasEnd {
+    result.end = namedPosition(end, explicitEnd, names, false)
+  }
+  if hasStart && hasEnd {
+    if result.start > result.end {
+      let first = result.start
+      result.start = result.end
+      result.end = first
+    } else if result.start == result.end {
+      result.hasEnd = false
+    }
+  } else if hasStart && end.kind == GridLineKind.Span {
+    result.end = spanEndpoint(end, result.start, explicitEnd, names, true)
+    result.hasEnd = true
+  } else if hasEnd && start.kind == GridLineKind.Span {
+    result.start = spanEndpoint(start, result.end, explicitEnd, names, false)
+    result.hasStart = true
+  }
+  let first = boundedNumber(origin)
+  let last = first + boundedTracks(trackCount)
+  if result.hasStart && (result.start < first || result.start > last) {
+    result.hasStart = false
+  }
+  if result.hasEnd && (result.end < first || result.end > last) {
+    result.hasEnd = false
+  }
+  return result
 }

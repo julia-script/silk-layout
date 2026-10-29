@@ -1794,7 +1794,7 @@ fn treeOverflow(nodes: &BoxTree, output: &mut LayoutPass, viewport: Rect, normal
     let inside = overflow.x >= 0.0 && overflow.y >= 0.0 && overflow.x + overflow.width <= fragment.size.width && overflow.y + overflow.height <= fragment.size.height
     // The childless in-flow fast path below, without reading the style.
     if marked && id != NO_NODE && kind == FragmentKind.Box && fragment.firstChild == NO_NODE && !nonpainting && parentId == limitsParent && parentCovers
-      && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0 && !output.outOfFlowBoxes.get(id)
+      && fragment.visualOffset.x == 0.0 && fragment.visualOffset.y == 0.0 && u64.bitAnd(output.outOfFlowBoxes.get(id / 64), u64.shiftLeft(1, usize.toU64(id % 64))) == 0
       && inside {
       if output.frame == NO_NODE || single { output.boxes[id].scrollableOverflow = overflow }
       continue
@@ -2062,7 +2062,7 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
   // Source preorder is not generated arena order after an inline interruption.
   // Layout an absolute ancestor before visiting any of its source descendants.
   output.outOfFlowBoxes.clear()
-  run output.outOfFlowBoxes.appendRepeated(false, output.boxes.length)
+  run output.outOfFlowBoxes.appendRepeated(0, (output.boxes.length + 63) / 64)
   // Whether no box is fixed, interrupted, or a scroll container with children.
   let mut plainParents = true
   let mut at: usize = 0
@@ -2076,7 +2076,8 @@ pub effect fn positionTree<'pass, 'source, M: Measure + TextMeasure>(nodes: &Box
     if nodes.node(id).firstChild != NO_NODE && (scrollable(usedOverflowForAxis(style, true)) || scrollable(usedOverflowForAxis(style, false))) { plainParents = false }
     if outOfFlow(style) {
       if style.position == Position.Fixed { plainParents = false }
-      output.outOfFlowBoxes.set(id, true)
+      let word = u64.bitOr(output.outOfFlowBoxes.get(id / 64), u64.shiftLeft(1, usize.toU64(id % 64)))
+      output.outOfFlowBoxes.set(id / 64, word)
       run absolute(nodes, &mut output, &mut measurer, id, viewport, false, &viewportStyle)
       // Its border box always adds to its containing block's overflow.
       let placed = output.publication(id)

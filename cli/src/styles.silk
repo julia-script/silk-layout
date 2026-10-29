@@ -1,41 +1,5 @@
-import layout.lib {
-  Style,
-  Dimension,
-  DimensionKind,
-  Edges,
-  Display,
-  DisplayOutside,
-  DisplayInside,
-  BoxSizing,
-  Direction,
-  UnicodeBidi,
-  WritingMode,
-  TextOrientation,
-  FlexDirection,
-  FlexWrap,
-  Align,
-  OverflowAlignment,
-  Overflow,
-  ScrollbarWidth,
-  ScrollbarGutter,
-  Position,
-  Float,
-  Clear,
-  Visibility
-}
-import layout.lib {
-  LineHeight,
-  VerticalAlign,
-  VerticalAlignKind,
-  BaselineSource,
-  TextAlign,
-  TextJustify,
-  TextIndent,
-  TextWrap,
-  WhiteSpaceCollapse,
-  TabSize,
-  BoxDecorationBreak
-}
+import layout.lib { Style, Dimension, DimensionKind, Edges, Display, DisplayOutside, DisplayInside, BoxSizing, Direction, UnicodeBidi, WritingMode, TextOrientation, FlexDirection, FlexWrap, Align, OverflowAlignment, Overflow, ScrollbarWidth, ScrollbarGutter, Position, Float, Clear, Visibility }
+import layout.lib { LineHeight, VerticalAlign, VerticalAlignKind, BaselineSource, TextAlign, TextJustify, TextIndent, TextWrap, WhiteSpaceCollapse, TabSize, BoxDecorationBreak }
 import layout.lib { BreakBetween, BreakInside, MarginBreak }
 import silk.num.f32
 import silk.core.option { Option }
@@ -44,362 +8,175 @@ import silk.json.value { Value }
 import protocol as P
 import protocol { ProtocolError }
 
-effect fn parseDisplay(value: &Value) -> Display
-  ! ProtocolError {
+effect fn parseDisplay(value: &Value) -> Display ! ProtocolError {
   let name = run P.text(value)
-  if name == "none" {
-    return Display.None
-  }
-  if name == "contents" {
-    return Display.Contents
-  }
-  if name == "block" || name == "flow" || name == "block flow" || name == "flow block" {
-    return Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flow }
-  }
-  if name == "inline" || name == "inline flow" || name == "flow inline" {
-    return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Flow }
-  }
-  if name == "flow-root" || name == "block flow-root" || name == "flow-root block" {
-    return Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot }
-  }
-  if name == "flex" || name == "block flex" || name == "flex block" {
-    return Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex }
-  }
-  if name == "inline-block" || name == "inline flow-root" || name == "flow-root inline" {
-    return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.FlowRoot }
-  }
-  if name == "inline-flex" || name == "inline flex" || name == "flex inline" {
-    return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Flex }
-  }
-  if name == "grid" || name == "block grid" || name == "grid block" {
-    return Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
-  }
-  if name == "inline-grid" || name == "inline grid" || name == "grid inline" {
-    return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Grid }
-  }
+  if name == "none" { return Display.None }
+  if name == "contents" { return Display.Contents }
+  if name == "block" || name == "flow" || name == "block flow" || name == "flow block" { return Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flow } }
+  if name == "inline" || name == "inline flow" || name == "flow inline" { return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Flow } }
+  if name == "flow-root" || name == "block flow-root" || name == "flow-root block" { return Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.FlowRoot } }
+  if name == "flex" || name == "block flex" || name == "flex block" { return Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Flex } }
+  if name == "inline-block" || name == "inline flow-root" || name == "flow-root inline" { return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.FlowRoot } }
+  if name == "inline-flex" || name == "inline flex" || name == "flex inline" { return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Flex } }
+  if name == "grid" || name == "block grid" || name == "grid block" { return Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid } }
+  if name == "inline-grid" || name == "inline grid" || name == "grid inline" { return Display.Box { outside: DisplayOutside.Inline, inside: DisplayInside.Grid } }
   fail P.invalid("invalid Display value")
 }
 
-effect fn parseBoxSizing(value: &Value) -> BoxSizing
-  ! ProtocolError {
+effect fn parseBoxSizing(value: &Value) -> BoxSizing ! ProtocolError {
   let name = run P.text(value)
-  if name == "content-box" {
-    return BoxSizing.ContentBox
-  }
-  if name == "border-box" {
-    return BoxSizing.BorderBox
-  }
+  if name == "content-box" { return BoxSizing.ContentBox }
+  if name == "border-box" { return BoxSizing.BorderBox }
   fail P.invalid("invalid BoxSizing value")
 }
 
-effect fn parseDirection(value: &Value) -> Direction
-  ! ProtocolError {
+effect fn parseDirection(value: &Value) -> Direction ! ProtocolError {
   let name = run P.text(value)
-  if name == "ltr" {
-    return Direction.Ltr
-  }
-  if name == "rtl" {
-    return Direction.Rtl
-  }
+  if name == "ltr" { return Direction.Ltr }
+  if name == "rtl" { return Direction.Rtl }
   fail P.invalid("invalid Direction value")
 }
 
-effect fn parseUnicodeBidi(value: &Value) -> UnicodeBidi
-  ! ProtocolError {
+effect fn parseUnicodeBidi(value: &Value) -> UnicodeBidi ! ProtocolError {
   let name = run P.text(value)
-  if name == "normal" {
-    return UnicodeBidi.Normal
-  }
-  if name == "embed" {
-    return UnicodeBidi.Embed
-  }
-  if name == "isolate" {
-    return UnicodeBidi.Isolate
-  }
-  if name == "bidi-override" {
-    return UnicodeBidi.BidiOverride
-  }
-  if name == "isolate-override" {
-    return UnicodeBidi.IsolateOverride
-  }
-  if name == "plaintext" {
-    return UnicodeBidi.Plaintext
-  }
+  if name == "normal" { return UnicodeBidi.Normal }
+  if name == "embed" { return UnicodeBidi.Embed }
+  if name == "isolate" { return UnicodeBidi.Isolate }
+  if name == "bidi-override" { return UnicodeBidi.BidiOverride }
+  if name == "isolate-override" { return UnicodeBidi.IsolateOverride }
+  if name == "plaintext" { return UnicodeBidi.Plaintext }
   fail P.invalid("invalid UnicodeBidi value")
 }
 
-effect fn parseWritingMode(value: &Value) -> WritingMode
-  ! ProtocolError {
+effect fn parseWritingMode(value: &Value) -> WritingMode ! ProtocolError {
   let name = run P.text(value)
-  if name == "horizontal-tb" {
-    return WritingMode.HorizontalTb
-  }
-  if name == "vertical-rl" {
-    return WritingMode.VerticalRl
-  }
-  if name == "vertical-lr" {
-    return WritingMode.VerticalLr
-  }
-  if name == "sideways-rl" {
-    return WritingMode.SidewaysRl
-  }
-  if name == "sideways-lr" {
-    return WritingMode.SidewaysLr
-  }
+  if name == "horizontal-tb" { return WritingMode.HorizontalTb }
+  if name == "vertical-rl" { return WritingMode.VerticalRl }
+  if name == "vertical-lr" { return WritingMode.VerticalLr }
+  if name == "sideways-rl" { return WritingMode.SidewaysRl }
+  if name == "sideways-lr" { return WritingMode.SidewaysLr }
   fail P.invalid("invalid WritingMode value")
 }
 
-effect fn parseTextOrientation(value: &Value) -> TextOrientation
-  ! ProtocolError {
+effect fn parseTextOrientation(value: &Value) -> TextOrientation ! ProtocolError {
   let name = run P.text(value)
-  if name == "mixed" {
-    return TextOrientation.Mixed
-  }
-  if name == "upright" {
-    return TextOrientation.Upright
-  }
-  if name == "sideways" {
-    return TextOrientation.Sideways
-  }
+  if name == "mixed" { return TextOrientation.Mixed }
+  if name == "upright" { return TextOrientation.Upright }
+  if name == "sideways" { return TextOrientation.Sideways }
   fail P.invalid("invalid TextOrientation value")
 }
 
-effect fn parseFlexDirection(value: &Value) -> FlexDirection
-  ! ProtocolError {
+effect fn parseFlexDirection(value: &Value) -> FlexDirection ! ProtocolError {
   let name = run P.text(value)
-  if name == "row" {
-    return FlexDirection.Row
-  }
-  if name == "row-reverse" {
-    return FlexDirection.RowReverse
-  }
-  if name == "column" {
-    return FlexDirection.Column
-  }
-  if name == "column-reverse" {
-    return FlexDirection.ColumnReverse
-  }
+  if name == "row" { return FlexDirection.Row }
+  if name == "row-reverse" { return FlexDirection.RowReverse }
+  if name == "column" { return FlexDirection.Column }
+  if name == "column-reverse" { return FlexDirection.ColumnReverse }
   fail P.invalid("invalid FlexDirection value")
 }
 
-effect fn parseFlexWrap(value: &Value) -> FlexWrap
-  ! ProtocolError {
+effect fn parseFlexWrap(value: &Value) -> FlexWrap ! ProtocolError {
   let name = run P.text(value)
-  if name == "nowrap" {
-    return FlexWrap.NoWrap
-  }
-  if name == "wrap" {
-    return FlexWrap.Wrap
-  }
-  if name == "wrap-reverse" {
-    return FlexWrap.WrapReverse
-  }
+  if name == "nowrap" { return FlexWrap.NoWrap }
+  if name == "wrap" { return FlexWrap.Wrap }
+  if name == "wrap-reverse" { return FlexWrap.WrapReverse }
   fail P.invalid("invalid FlexWrap value")
 }
 
-effect fn parseAlign(value: &Value) -> Align
-  ! ProtocolError {
+effect fn parseAlign(value: &Value) -> Align ! ProtocolError {
   let name = run P.text(value)
-  if name == "auto" {
-    return Align.Auto
-  }
-  if name == "normal" {
-    return Align.Normal
-  }
-  if name == "start" {
-    return Align.Start
-  }
-  if name == "end" {
-    return Align.End
-  }
-  if name == "flex-start" || name == "flow-start" {
-    return Align.FlexStart
-  }
-  if name == "flex-end" || name == "flow-end" {
-    return Align.FlexEnd
-  }
-  if name == "center" {
-    return Align.Center
-  }
-  if name == "stretch" {
-    return Align.Stretch
-  }
-  if name == "space-between" {
-    return Align.SpaceBetween
-  }
-  if name == "space-around" {
-    return Align.SpaceAround
-  }
-  if name == "space-evenly" {
-    return Align.SpaceEvenly
-  }
-  if name == "baseline" || name == "first baseline" {
-    return Align.Baseline
-  }
-  if name == "last baseline" {
-    return Align.LastBaseline
-  }
-  if name == "self-start" {
-    return Align.SelfStart
-  }
-  if name == "self-end" {
-    return Align.SelfEnd
-  }
-  if name == "left" {
-    return Align.Left
-  }
-  if name == "right" {
-    return Align.Right
-  }
+  if name == "auto" { return Align.Auto }
+  if name == "normal" { return Align.Normal }
+  if name == "start" { return Align.Start }
+  if name == "end" { return Align.End }
+  if name == "flex-start" || name == "flow-start" { return Align.FlexStart }
+  if name == "flex-end" || name == "flow-end" { return Align.FlexEnd }
+  if name == "center" { return Align.Center }
+  if name == "stretch" { return Align.Stretch }
+  if name == "space-between" { return Align.SpaceBetween }
+  if name == "space-around" { return Align.SpaceAround }
+  if name == "space-evenly" { return Align.SpaceEvenly }
+  if name == "baseline" || name == "first baseline" { return Align.Baseline }
+  if name == "last baseline" { return Align.LastBaseline }
+  if name == "self-start" { return Align.SelfStart }
+  if name == "self-end" { return Align.SelfEnd }
+  if name == "left" { return Align.Left }
+  if name == "right" { return Align.Right }
   fail P.invalid("invalid Align value")
 }
 
-effect fn parseOverflow(value: &Value) -> Overflow
-  ! ProtocolError {
+effect fn parseOverflow(value: &Value) -> Overflow ! ProtocolError {
   let name = run P.text(value)
-  if name == "visible" {
-    return Overflow.Visible
-  }
-  if name == "clip" {
-    return Overflow.Clip
-  }
-  if name == "hidden" {
-    return Overflow.Hidden
-  }
-  if name == "scroll" {
-    return Overflow.Scroll
-  }
-  if name == "auto" || name == "overlay" {
-    return Overflow.Auto
-  }
+  if name == "visible" { return Overflow.Visible }
+  if name == "clip" { return Overflow.Clip }
+  if name == "hidden" { return Overflow.Hidden }
+  if name == "scroll" { return Overflow.Scroll }
+  if name == "auto" || name == "overlay" { return Overflow.Auto }
   fail P.invalid("invalid Overflow value")
 }
 
-effect fn parseScrollbarWidth(value: &Value) -> ScrollbarWidth
-  ! ProtocolError {
+effect fn parseScrollbarWidth(value: &Value) -> ScrollbarWidth ! ProtocolError {
   let name = run P.text(value)
-  if name == "auto" {
-    return ScrollbarWidth.Auto
-  }
-  if name == "thin" {
-    return ScrollbarWidth.Thin
-  }
-  if name == "none" {
-    return ScrollbarWidth.None
-  }
+  if name == "auto" { return ScrollbarWidth.Auto }
+  if name == "thin" { return ScrollbarWidth.Thin }
+  if name == "none" { return ScrollbarWidth.None }
   fail P.invalid("scrollbarWidth must be auto, thin, or none")
 }
 
-effect fn parseScrollbarGutter(value: &Value) -> ScrollbarGutter
-  ! ProtocolError {
+effect fn parseScrollbarGutter(value: &Value) -> ScrollbarGutter ! ProtocolError {
   let name = run P.text(value)
-  if name == "auto" {
-    return ScrollbarGutter.Auto
-  }
-  if name == "stable" {
-    return ScrollbarGutter.Stable
-  }
-  if name == "stable both-edges" || name == "both-edges stable" {
-    return ScrollbarGutter.StableBothEdges
-  }
+  if name == "auto" { return ScrollbarGutter.Auto }
+  if name == "stable" { return ScrollbarGutter.Stable }
+  if name == "stable both-edges" || name == "both-edges stable" { return ScrollbarGutter.StableBothEdges }
   fail P.invalid("scrollbarGutter must be auto, stable, or stable both-edges")
 }
 
-effect fn parsePosition(value: &Value) -> Position
-  ! ProtocolError {
+effect fn parsePosition(value: &Value) -> Position ! ProtocolError {
   let name = run P.text(value)
-  if name == "static" {
-    return Position.Static
-  }
-  if name == "relative" {
-    return Position.Relative
-  }
-  if name == "absolute" {
-    return Position.Absolute
-  }
-  if name == "fixed" {
-    return Position.Fixed
-  }
-  if name == "sticky" {
-    return Position.Sticky
-  }
+  if name == "static" { return Position.Static }
+  if name == "relative" { return Position.Relative }
+  if name == "absolute" { return Position.Absolute }
+  if name == "fixed" { return Position.Fixed }
+  if name == "sticky" { return Position.Sticky }
   fail P.invalid("invalid Position value")
 }
 
-effect fn parseFloat(value: &Value) -> Float
-  ! ProtocolError {
+effect fn parseFloat(value: &Value) -> Float ! ProtocolError {
   let name = run P.text(value)
-  if name == "none" {
-    return Float.None
-  }
-  if name == "left" {
-    return Float.Left
-  }
-  if name == "right" {
-    return Float.Right
-  }
+  if name == "none" { return Float.None }
+  if name == "left" { return Float.Left }
+  if name == "right" { return Float.Right }
   fail P.invalid("invalid Float value")
 }
 
-effect fn parseClear(value: &Value) -> Clear
-  ! ProtocolError {
+effect fn parseClear(value: &Value) -> Clear ! ProtocolError {
   let name = run P.text(value)
-  if name == "none" {
-    return Clear.None
-  }
-  if name == "left" {
-    return Clear.Left
-  }
-  if name == "right" {
-    return Clear.Right
-  }
-  if name == "both" {
-    return Clear.Both
-  }
+  if name == "none" { return Clear.None }
+  if name == "left" { return Clear.Left }
+  if name == "right" { return Clear.Right }
+  if name == "both" { return Clear.Both }
   fail P.invalid("invalid Clear value")
 }
 
-effect fn parseVisibility(value: &Value) -> Visibility
-  ! ProtocolError {
+effect fn parseVisibility(value: &Value) -> Visibility ! ProtocolError {
   let name = run P.text(value)
-  if name == "visible" {
-    return Visibility.Visible
-  }
-  if name == "hidden" {
-    return Visibility.Hidden
-  }
-  if name == "collapse" {
-    return Visibility.Collapse
-  }
+  if name == "visible" { return Visibility.Visible }
+  if name == "hidden" { return Visibility.Hidden }
+  if name == "collapse" { return Visibility.Collapse }
   fail P.invalid("invalid Visibility value")
 }
 
-effect fn dimension(value: &Value) -> Dimension
-  ! ProtocolError {
+effect fn dimension(value: &Value) -> Dimension ! ProtocolError {
   match &value.* {
-    Value.Number { text: _ } => {
-      return Dimension.px(run P.number(value))
-    }
+    Value.Number { text: _ } => { return Dimension.px(run P.number(value)) }
     Value.String { text: _ } => {
       let name = run P.text(value)
-      if name == "auto" {
-        return Dimension.auto()
-      }
-      if name == "min-content" {
-        return Dimension.keyword(DimensionKind.MinContent)
-      }
-      if name == "max-content" {
-        return Dimension.keyword(DimensionKind.MaxContent)
-      }
-      if name == "fit-content" {
-        return Dimension.keyword(DimensionKind.FitContent)
-      }
-      if name == "content" {
-        return Dimension.keyword(DimensionKind.Content)
-      }
-      if name == "none" {
-        return Dimension.keyword(DimensionKind.None)
-      }
+      if name == "auto" { return Dimension.auto() }
+      if name == "min-content" { return Dimension.keyword(DimensionKind.MinContent) }
+      if name == "max-content" { return Dimension.keyword(DimensionKind.MaxContent) }
+      if name == "fit-content" { return Dimension.keyword(DimensionKind.FitContent) }
+      if name == "content" { return Dimension.keyword(DimensionKind.Content) }
+      if name == "none" { return Dimension.keyword(DimensionKind.None) }
       fail P.invalid("invalid dimension keyword")
     }
     _ => {
@@ -413,77 +190,46 @@ effect fn dimension(value: &Value) -> Dimension
   }
 }
 
-effect fn gap(value: &Value) -> Dimension
-  ! ProtocolError {
+effect fn gap(value: &Value) -> Dimension ! ProtocolError {
   match &value.* {
     Value.String { text: _ } => {
       let name = run P.text(value)
-      if name == "normal" {
-        return Dimension.normal()
-      }
+      if name == "normal" { return Dimension.normal() }
     }
     _ => {}
   }
   return run dimension(value)
 }
 
-effect fn edges(value: &Value, initial: Edges) -> Edges
-  ! ProtocolError {
+effect fn edges(value: &Value, initial: Edges) -> Edges ! ProtocolError {
   match &value.* {
-    Value.Number { text: _ } => {
-      return Edges.all(run dimension(value))
-    }
-    Value.String { text: _ } => {
-      return Edges.all(run dimension(value))
-    }
+    Value.Number { text: _ } => { return Edges.all(run dimension(value)) }
+    Value.String { text: _ } => { return Edges.all(run dimension(value)) }
     _ => {}
   }
-  if P.has(value, "percent") {
-    return Edges.all(run dimension(value))
-  }
+  if P.has(value, "percent") { return Edges.all(run dimension(value)) }
   run P.fields(value, &["top", "right", "bottom", "left"])
   let mut result = initial
-  if P.has(value, "top") {
-    result.top = run dimension(run P.required(value, "top"))
-  }
-  if P.has(value, "right") {
-    result.right = run dimension(run P.required(value, "right"))
-  }
-  if P.has(value, "bottom") {
-    result.bottom = run dimension(run P.required(value, "bottom"))
-  }
-  if P.has(value, "left") {
-    result.left = run dimension(run P.required(value, "left"))
-  }
+  if P.has(value, "top") { result.top = run dimension(run P.required(value, "top")) }
+  if P.has(value, "right") { result.right = run dimension(run P.required(value, "right")) }
+  if P.has(value, "bottom") { result.bottom = run dimension(run P.required(value, "bottom")) }
+  if P.has(value, "left") { result.left = run dimension(run P.required(value, "left")) }
   return result
 }
-
-effect fn safety(value: &Value) -> OverflowAlignment
-  ! ProtocolError {
+effect fn safety(value: &Value) -> OverflowAlignment ! ProtocolError {
   let name = run P.text(value)
-  if name == "default" {
-    return OverflowAlignment.Default
-  }
-  if name == "safe" {
-    return OverflowAlignment.Safe
-  }
-  if name == "unsafe" {
-    return OverflowAlignment.Unsafe
-  }
+  if name == "default" { return OverflowAlignment.Default }
+  if name == "safe" { return OverflowAlignment.Safe }
+  if name == "unsafe" { return OverflowAlignment.Unsafe }
   fail P.invalid("alignment safety must be default, safe, or unsafe")
 }
 
-effect fn parseLineHeight(value: &Value) -> LineHeight
-  ! ProtocolError {
+effect fn parseLineHeight(value: &Value) -> LineHeight ! ProtocolError {
   match &value.* {
-    Value.Number { text: _ } => {
-      return LineHeight.Number { value: run P.nonnegative(value) }
-    }
+    Value.Number { text: _ } => { return LineHeight.Number { value: run P.nonnegative(value) } }
     Value.String { text: _ } => {
       let name = run P.text(value)
-      if name == "normal" {
-        return LineHeight.Normal
-      }
+      if name == "normal" { return LineHeight.Normal }
       fail P.invalid("lineHeight must be normal, a nonnegative number, or a length object")
     }
     _ => {
@@ -493,171 +239,99 @@ effect fn parseLineHeight(value: &Value) -> LineHeight
   }
 }
 
-effect fn parseVerticalAlign(value: &Value) -> VerticalAlign
-  ! ProtocolError {
+effect fn parseVerticalAlign(value: &Value) -> VerticalAlign ! ProtocolError {
   let mut kind = VerticalAlignKind.Shift
   match &value.* {
     Value.String { text: _ } => {
       let name = run P.text(value)
-      if name == "baseline" {
-        kind = VerticalAlignKind.Baseline
-      } else if name == "middle" {
-        kind = VerticalAlignKind.Middle
-      } else if name == "text-top" {
-        kind = VerticalAlignKind.TextTop
-      } else if name == "text-bottom" {
-        kind = VerticalAlignKind.TextBottom
-      } else if name == "top" {
-        kind = VerticalAlignKind.Top
-      } else if name == "bottom" {
-        kind = VerticalAlignKind.Bottom
-      } else if name == "sub" {
-        kind = VerticalAlignKind.Sub
-      } else if name == "super" {
-        kind = VerticalAlignKind.Super
-      } else {
-        fail P.invalid("invalid verticalAlign keyword")
-      }
+      if name == "baseline" { kind = VerticalAlignKind.Baseline }
+      else if name == "middle" { kind = VerticalAlignKind.Middle }
+      else if name == "text-top" { kind = VerticalAlignKind.TextTop }
+      else if name == "text-bottom" { kind = VerticalAlignKind.TextBottom }
+      else if name == "top" { kind = VerticalAlignKind.Top }
+      else if name == "bottom" { kind = VerticalAlignKind.Bottom }
+      else if name == "sub" { kind = VerticalAlignKind.Sub }
+      else if name == "super" { kind = VerticalAlignKind.Super }
+      else { fail P.invalid("invalid verticalAlign keyword") }
       return VerticalAlign { kind: kind, shift: Dimension.px(0.0) }
     }
     _ => {
       let shift = run dimension(value)
-      if shift.value - shift.value != 0.0 || shift.percent - shift.percent != 0.0 {
-        fail P.invalid("verticalAlign shift must be finite")
-      }
+      if shift.value - shift.value != 0.0 || shift.percent - shift.percent != 0.0 { fail P.invalid("verticalAlign shift must be finite") }
       return VerticalAlign { kind: kind, shift: shift }
     }
   }
 }
 
-effect fn parseBaselineSource(value: &Value) -> BaselineSource
-  ! ProtocolError {
+effect fn parseBaselineSource(value: &Value) -> BaselineSource ! ProtocolError {
   let name = run P.text(value)
-  if name == "auto" {
-    return BaselineSource.Auto
-  }
-  if name == "first" {
-    return BaselineSource.First
-  }
-  if name == "last" {
-    return BaselineSource.Last
-  }
+  if name == "auto" { return BaselineSource.Auto }
+  if name == "first" { return BaselineSource.First }
+  if name == "last" { return BaselineSource.Last }
   fail P.invalid("invalid baselineSource")
 }
 
-effect fn parseTextAlign(value: &Value, allowAuto: bool) -> TextAlign
-  ! ProtocolError {
+effect fn parseTextAlign(value: &Value, allowAuto: bool) -> TextAlign ! ProtocolError {
   let name = run P.text(value)
-  if allowAuto && name == "auto" {
-    return TextAlign.Auto
-  }
-  if name == "start" {
-    return TextAlign.Start
-  }
-  if name == "end" {
-    return TextAlign.End
-  }
-  if name == "left" {
-    return TextAlign.Left
-  }
-  if name == "right" {
-    return TextAlign.Right
-  }
-  if name == "center" {
-    return TextAlign.Center
-  }
-  if name == "justify" {
-    return TextAlign.Justify
-  }
+  if allowAuto && name == "auto" { return TextAlign.Auto }
+  if name == "start" { return TextAlign.Start }
+  if name == "end" { return TextAlign.End }
+  if name == "left" { return TextAlign.Left }
+  if name == "right" { return TextAlign.Right }
+  if name == "center" { return TextAlign.Center }
+  if name == "justify" { return TextAlign.Justify }
   fail P.invalid("invalid text alignment")
 }
 
-effect fn parseTextJustify(value: &Value) -> TextJustify
-  ! ProtocolError {
+effect fn parseTextJustify(value: &Value) -> TextJustify ! ProtocolError {
   let name = run P.text(value)
-  if name == "auto" {
-    return TextJustify.Auto
-  }
-  if name == "none" {
-    return TextJustify.None
-  }
-  if name == "inter-word" {
-    return TextJustify.InterWord
-  }
-  if name == "inter-character" || name == "distribute" {
-    return TextJustify.InterCharacter
-  }
+  if name == "auto" { return TextJustify.Auto }
+  if name == "none" { return TextJustify.None }
+  if name == "inter-word" { return TextJustify.InterWord }
+  if name == "inter-character" || name == "distribute" { return TextJustify.InterCharacter }
   fail P.invalid("invalid textJustify value")
 }
 
-effect fn parseTextIndent(value: &Value) -> TextIndent
-  ! ProtocolError {
+effect fn parseTextIndent(value: &Value) -> TextIndent ! ProtocolError {
   let mut result = TextIndent { value: Dimension.px(0.0), hanging: false, eachLine: false }
   if P.has(value, "value") {
     run P.fields(value, &["value", "hanging", "eachLine"])
     result.value = run dimension(run P.required(value, "value"))
-    if P.has(value, "hanging") {
-      result.hanging = run P.boolean(run P.required(value, "hanging"))
-    }
-    if P.has(value, "eachLine") {
-      result.eachLine = run P.boolean(run P.required(value, "eachLine"))
-    }
+    if P.has(value, "hanging") { result.hanging = run P.boolean(run P.required(value, "hanging")) }
+    if P.has(value, "eachLine") { result.eachLine = run P.boolean(run P.required(value, "eachLine")) }
   } else {
     result.value = run dimension(value)
   }
-  if result.value.kind != DimensionKind.Length && result.value.kind != DimensionKind.Percent
-    && result.value.kind != DimensionKind.Calc {
+  if result.value.kind != DimensionKind.Length && result.value.kind != DimensionKind.Percent && result.value.kind != DimensionKind.Calc {
     fail P.invalid("textIndent requires a length-percentage")
   }
-  if result.value.value - result.value.value != 0.0
-    || result.value.percent - result.value.percent != 0.0 {
+  if result.value.value - result.value.value != 0.0 || result.value.percent - result.value.percent != 0.0 {
     fail P.invalid("textIndent requires finite coefficients")
   }
   return result
 }
 
-effect fn parseTextWrap(value: &Value) -> TextWrap
-  ! ProtocolError {
+effect fn parseTextWrap(value: &Value) -> TextWrap ! ProtocolError {
   let name = run P.text(value)
-  if name == "wrap" {
-    return TextWrap.Wrap
-  }
-  if name == "nowrap" {
-    return TextWrap.NoWrap
-  }
+  if name == "wrap" { return TextWrap.Wrap }
+  if name == "nowrap" { return TextWrap.NoWrap }
   fail P.invalid("textWrap must be wrap or nowrap")
 }
 
-effect fn parseWhiteSpaceCollapse(value: &Value) -> WhiteSpaceCollapse
-  ! ProtocolError {
+effect fn parseWhiteSpaceCollapse(value: &Value) -> WhiteSpaceCollapse ! ProtocolError {
   let name = run P.text(value)
-  if name == "collapse" {
-    return WhiteSpaceCollapse.Collapse
-  }
-  if name == "discard" {
-    return WhiteSpaceCollapse.Discard
-  }
-  if name == "preserve" {
-    return WhiteSpaceCollapse.Preserve
-  }
-  if name == "preserve-breaks" {
-    return WhiteSpaceCollapse.PreserveBreaks
-  }
-  if name == "preserve-spaces" {
-    return WhiteSpaceCollapse.PreserveSpaces
-  }
-  if name == "break-spaces" {
-    return WhiteSpaceCollapse.BreakSpaces
-  }
+  if name == "collapse" { return WhiteSpaceCollapse.Collapse }
+  if name == "discard" { return WhiteSpaceCollapse.Discard }
+  if name == "preserve" { return WhiteSpaceCollapse.Preserve }
+  if name == "preserve-breaks" { return WhiteSpaceCollapse.PreserveBreaks }
+  if name == "preserve-spaces" { return WhiteSpaceCollapse.PreserveSpaces }
+  if name == "break-spaces" { return WhiteSpaceCollapse.BreakSpaces }
   fail P.invalid("invalid whiteSpaceCollapse value")
 }
 
-effect fn parseTabSize(value: &Value) -> TabSize
-  ! ProtocolError {
+effect fn parseTabSize(value: &Value) -> TabSize ! ProtocolError {
   match &value.* {
-    Value.Number { text: _ } => {
-      return TabSize.Number { value: run P.nonnegative(value) }
-    }
+    Value.Number { text: _ } => { return TabSize.Number { value: run P.nonnegative(value) } }
     _ => {
       run P.fields(value, &["length"])
       return TabSize.Length { value: run P.nonnegative(run P.required(value, "length")) }
@@ -665,463 +339,149 @@ effect fn parseTabSize(value: &Value) -> TabSize
   }
 }
 
-effect fn parseDecorationBreak(value: &Value) -> BoxDecorationBreak
-  ! ProtocolError {
+effect fn parseDecorationBreak(value: &Value) -> BoxDecorationBreak ! ProtocolError {
   let name = run P.text(value)
-  if name == "slice" {
-    return BoxDecorationBreak.Slice
-  }
-  if name == "clone" {
-    return BoxDecorationBreak.Clone
-  }
+  if name == "slice" { return BoxDecorationBreak.Slice }
+  if name == "clone" { return BoxDecorationBreak.Clone }
   fail P.invalid("boxDecorationBreak must be slice or clone")
 }
 
-effect fn parseMarginBreak(value: &Value) -> MarginBreak
-  ! ProtocolError {
+effect fn parseMarginBreak(value: &Value) -> MarginBreak ! ProtocolError {
   let name = run P.text(value)
-  if name == "auto" {
-    return MarginBreak.Auto
-  }
-  if name == "keep" {
-    return MarginBreak.Keep
-  }
-  if name == "discard" {
-    return MarginBreak.Discard
-  }
+  if name == "auto" { return MarginBreak.Auto }
+  if name == "keep" { return MarginBreak.Keep }
+  if name == "discard" { return MarginBreak.Discard }
   fail P.invalid("marginBreak must be auto, keep, or discard")
 }
 
-effect fn parseBreakBetween(value: &Value) -> BreakBetween
-  ! ProtocolError {
+effect fn parseBreakBetween(value: &Value) -> BreakBetween ! ProtocolError {
   let name = run P.text(value)
-  if name == "auto" {
-    return BreakBetween.Auto
-  }
-  if name == "avoid" {
-    return BreakBetween.Avoid
-  }
-  if name == "always" {
-    return BreakBetween.Always
-  }
-  if name == "all" {
-    return BreakBetween.All
-  }
-  if name == "avoid-page" {
-    return BreakBetween.AvoidPage
-  }
-  if name == "page" {
-    return BreakBetween.Page
-  }
-  if name == "left" {
-    return BreakBetween.Left
-  }
-  if name == "right" {
-    return BreakBetween.Right
-  }
-  if name == "recto" {
-    return BreakBetween.Recto
-  }
-  if name == "verso" {
-    return BreakBetween.Verso
-  }
-  if name == "avoid-column" {
-    return BreakBetween.AvoidColumn
-  }
-  if name == "column" {
-    return BreakBetween.Column
-  }
-  if name == "avoid-region" {
-    return BreakBetween.AvoidRegion
-  }
-  if name == "region" {
-    return BreakBetween.Region
-  }
+  if name == "auto" { return BreakBetween.Auto }
+  if name == "avoid" { return BreakBetween.Avoid }
+  if name == "always" { return BreakBetween.Always }
+  if name == "all" { return BreakBetween.All }
+  if name == "avoid-page" { return BreakBetween.AvoidPage }
+  if name == "page" { return BreakBetween.Page }
+  if name == "left" { return BreakBetween.Left }
+  if name == "right" { return BreakBetween.Right }
+  if name == "recto" { return BreakBetween.Recto }
+  if name == "verso" { return BreakBetween.Verso }
+  if name == "avoid-column" { return BreakBetween.AvoidColumn }
+  if name == "column" { return BreakBetween.Column }
+  if name == "avoid-region" { return BreakBetween.AvoidRegion }
+  if name == "region" { return BreakBetween.Region }
   fail P.invalid("invalid breakBefore or breakAfter value")
 }
 
-effect fn parseBreakInside(value: &Value) -> BreakInside
-  ! ProtocolError {
+effect fn parseBreakInside(value: &Value) -> BreakInside ! ProtocolError {
   let name = run P.text(value)
-  if name == "auto" {
-    return BreakInside.Auto
-  }
-  if name == "avoid" {
-    return BreakInside.Avoid
-  }
-  if name == "avoid-page" {
-    return BreakInside.AvoidPage
-  }
-  if name == "avoid-column" {
-    return BreakInside.AvoidColumn
-  }
-  if name == "avoid-region" {
-    return BreakInside.AvoidRegion
-  }
+  if name == "auto" { return BreakInside.Auto }
+  if name == "avoid" { return BreakInside.Avoid }
+  if name == "avoid-page" { return BreakInside.AvoidPage }
+  if name == "avoid-column" { return BreakInside.AvoidColumn }
+  if name == "avoid-region" { return BreakInside.AvoidRegion }
   fail P.invalid("invalid breakInside value")
 }
 
-effect fn parseLineCount(value: &Value) -> usize
-  ! ProtocolError {
+effect fn parseLineCount(value: &Value) -> usize ! ProtocolError {
   let count = run P.finite(value)
   if count <= 0.0 || f32.trunc(count) != count {
     fail P.invalid("orphans and widows must be positive integers")
   }
   return match move f32.checkedToUsize(count) {
     Option<usize>.Some { value: result } => result
-    Option<usize>.None => {
-      fail P.invalid("orphans or widows exceeds usize range")
-    }
+    Option<usize>.None => { fail P.invalid("orphans or widows exceeds usize range") }
   }
 }
 
-pub effect fn parse(value: &Value) -> Style
-  ! ProtocolError {
-  run P.fields(
-    value,
-    &[
-      "width",
-      "height",
-      "minWidth",
-      "minHeight",
-      "maxWidth",
-      "maxHeight",
-      "flexBasis",
-      "rowGap",
-      "columnGap",
-      "display",
-      "boxSizing",
-      "direction",
-      "unicodeBidi",
-      "writingMode",
-      "textOrientation",
-      "flexDirection",
-      "flexWrap",
-      "justifyContent",
-      "justifySelf",
-      "justifyItems",
-      "alignItems",
-      "alignSelf",
-      "alignContent",
-      "overflowX",
-      "overflowY",
-      "scrollbarWidth",
-      "scrollbarGutter",
-      "position",
-      "float",
-      "clear",
-      "visibility",
-      "margin",
-      "padding",
-      "border",
-      "inset",
-      "flexGrow",
-      "flexShrink",
-      "aspectRatio",
-      "aspectRatioAuto",
-      "justifyContentSafety",
-      "justifySelfSafety",
-      "justifyItemsSafety",
-      "alignContentSafety",
-      "alignItemsSafety",
-      "alignSelfSafety",
-      "replaced",
-      "order",
-      "marginTop",
-      "marginRight",
-      "marginBottom",
-      "marginLeft",
-      "paddingTop",
-      "paddingRight",
-      "paddingBottom",
-      "paddingLeft",
-      "borderTop",
-      "borderRight",
-      "borderBottom",
-      "borderLeft",
-      "insetTop",
-      "insetRight",
-      "insetBottom",
-      "insetLeft",
-      "fontKey",
-      "lineHeight",
-      "verticalAlign",
-      "baselineSource",
-      "textAlign",
-      "textAlignLast",
-      "textJustify",
-      "textIndent",
-      "textWrap",
-      "whiteSpaceCollapse",
-      "tabSize",
-      "boxDecorationBreak",
-      "marginBreak",
-      "breakBefore",
-      "breakAfter",
-      "breakInside",
-      "orphans",
-      "widows",
-      "gridTemplateRows",
-      "gridTemplateColumns",
-      "gridTemplateAreas",
-      "gridAutoRows",
-      "gridAutoColumns",
-      "gridAutoFlow",
-      "gridRowStart",
-      "gridRowEnd",
-      "gridColumnStart",
-      "gridColumnEnd",
-    ],
-  )
+
+pub effect fn parse(value: &Value) -> Style ! ProtocolError {
+  run P.fields(value, &["width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "flexBasis", "rowGap", "columnGap", "display", "boxSizing", "direction", "unicodeBidi", "writingMode", "textOrientation", "flexDirection", "flexWrap", "justifyContent", "justifySelf", "justifyItems", "alignItems", "alignSelf", "alignContent", "overflowX", "overflowY", "scrollbarWidth", "scrollbarGutter", "position", "float", "clear", "visibility", "margin", "padding", "border", "inset", "flexGrow", "flexShrink", "aspectRatio", "aspectRatioAuto", "justifyContentSafety", "justifySelfSafety", "justifyItemsSafety", "alignContentSafety", "alignItemsSafety", "alignSelfSafety", "replaced", "order", "marginTop", "marginRight", "marginBottom", "marginLeft", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTop", "borderRight", "borderBottom", "borderLeft", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontKey", "lineHeight", "verticalAlign", "baselineSource", "textAlign", "textAlignLast", "textJustify", "textIndent", "textWrap", "whiteSpaceCollapse", "tabSize", "boxDecorationBreak", "marginBreak", "breakBefore", "breakAfter", "breakInside", "orphans", "widows", "gridTemplateRows", "gridTemplateColumns", "gridTemplateAreas", "gridAutoRows", "gridAutoColumns", "gridAutoFlow", "gridRowStart", "gridRowEnd", "gridColumnStart", "gridColumnEnd"])
   let mut style = Style.make()
-  if P.has(value, "width") {
-    style.width = run dimension(run P.required(value, "width"))
-  }
-  if P.has(value, "height") {
-    style.height = run dimension(run P.required(value, "height"))
-  }
-  if P.has(value, "minWidth") {
-    style.minWidth = run dimension(run P.required(value, "minWidth"))
-  }
-  if P.has(value, "minHeight") {
-    style.minHeight = run dimension(run P.required(value, "minHeight"))
-  }
-  if P.has(value, "maxWidth") {
-    style.maxWidth = run dimension(run P.required(value, "maxWidth"))
-  }
-  if P.has(value, "maxHeight") {
-    style.maxHeight = run dimension(run P.required(value, "maxHeight"))
-  }
-  if P.has(value, "flexBasis") {
-    style.flexBasis = run dimension(run P.required(value, "flexBasis"))
-  }
-  if P.has(value, "rowGap") {
-    style.rowGap = run gap(run P.required(value, "rowGap"))
-  }
-  if P.has(value, "columnGap") {
-    style.columnGap = run gap(run P.required(value, "columnGap"))
-  }
-  if P.has(value, "display") {
-    style.display = run parseDisplay(run P.required(value, "display"))
-  }
-  if P.has(value, "boxSizing") {
-    style.boxSizing = run parseBoxSizing(run P.required(value, "boxSizing"))
-  }
-  if P.has(value, "direction") {
-    style.direction = run parseDirection(run P.required(value, "direction"))
-  }
-  if P.has(value, "unicodeBidi") {
-    style.unicodeBidi = run parseUnicodeBidi(run P.required(value, "unicodeBidi"))
-  }
-  if P.has(value, "writingMode") {
-    style.writingMode = run parseWritingMode(run P.required(value, "writingMode"))
-  }
-  if P.has(value, "textOrientation") {
-    style.textOrientation = run parseTextOrientation(run P.required(value, "textOrientation"))
-  }
-  if P.has(value, "flexDirection") {
-    style.flexDirection = run parseFlexDirection(run P.required(value, "flexDirection"))
-  }
-  if P.has(value, "flexWrap") {
-    style.flexWrap = run parseFlexWrap(run P.required(value, "flexWrap"))
-  }
-  if P.has(value, "justifyContent") {
-    style.justifyContent = run parseAlign(run P.required(value, "justifyContent"))
-  }
-  if P.has(value, "justifySelf") {
-    style.justifySelf = run parseAlign(run P.required(value, "justifySelf"))
-  }
-  if P.has(value, "justifyItems") {
-    style.justifyItems = run parseAlign(run P.required(value, "justifyItems"))
-  }
-  if P.has(value, "alignItems") {
-    style.alignItems = run parseAlign(run P.required(value, "alignItems"))
-  }
-  if P.has(value, "alignSelf") {
-    style.alignSelf = run parseAlign(run P.required(value, "alignSelf"))
-  }
-  if P.has(value, "alignContent") {
-    style.alignContent = run parseAlign(run P.required(value, "alignContent"))
-  }
-  if P.has(value, "overflowX") {
-    style.overflowX = run parseOverflow(run P.required(value, "overflowX"))
-  }
-  if P.has(value, "overflowY") {
-    style.overflowY = run parseOverflow(run P.required(value, "overflowY"))
-  }
-  if P.has(value, "scrollbarWidth") {
-    style.scrollbarWidth = run parseScrollbarWidth(run P.required(value, "scrollbarWidth"))
-  }
-  if P.has(value, "scrollbarGutter") {
-    style.scrollbarGutter = run parseScrollbarGutter(run P.required(value, "scrollbarGutter"))
-  }
-  if P.has(value, "position") {
-    style.position = run parsePosition(run P.required(value, "position"))
-  }
-  if P.has(value, "float") {
-    style.float = run parseFloat(run P.required(value, "float"))
-  }
-  if P.has(value, "clear") {
-    style.clear = run parseClear(run P.required(value, "clear"))
-  }
-  if P.has(value, "visibility") {
-    style.visibility = run parseVisibility(run P.required(value, "visibility"))
-  }
-  if P.has(value, "margin") {
-    style.margin = run edges(run P.required(value, "margin"), style.margin)
-  }
-  if P.has(value, "marginTop") {
-    style.margin.top = run dimension(run P.required(value, "marginTop"))
-  }
-  if P.has(value, "marginRight") {
-    style.margin.right = run dimension(run P.required(value, "marginRight"))
-  }
-  if P.has(value, "marginBottom") {
-    style.margin.bottom = run dimension(run P.required(value, "marginBottom"))
-  }
-  if P.has(value, "marginLeft") {
-    style.margin.left = run dimension(run P.required(value, "marginLeft"))
-  }
-  if P.has(value, "padding") {
-    style.padding = run edges(run P.required(value, "padding"), style.padding)
-  }
-  if P.has(value, "paddingTop") {
-    style.padding.top = run dimension(run P.required(value, "paddingTop"))
-  }
-  if P.has(value, "paddingRight") {
-    style.padding.right = run dimension(run P.required(value, "paddingRight"))
-  }
-  if P.has(value, "paddingBottom") {
-    style.padding.bottom = run dimension(run P.required(value, "paddingBottom"))
-  }
-  if P.has(value, "paddingLeft") {
-    style.padding.left = run dimension(run P.required(value, "paddingLeft"))
-  }
-  if P.has(value, "border") {
-    style.border = run edges(run P.required(value, "border"), style.border)
-  }
-  if P.has(value, "borderTop") {
-    style.border.top = run dimension(run P.required(value, "borderTop"))
-  }
-  if P.has(value, "borderRight") {
-    style.border.right = run dimension(run P.required(value, "borderRight"))
-  }
-  if P.has(value, "borderBottom") {
-    style.border.bottom = run dimension(run P.required(value, "borderBottom"))
-  }
-  if P.has(value, "borderLeft") {
-    style.border.left = run dimension(run P.required(value, "borderLeft"))
-  }
-  if P.has(value, "inset") {
-    style.inset = run edges(run P.required(value, "inset"), style.inset)
-  }
-  if P.has(value, "insetTop") {
-    style.inset.top = run dimension(run P.required(value, "insetTop"))
-  }
-  if P.has(value, "insetRight") {
-    style.inset.right = run dimension(run P.required(value, "insetRight"))
-  }
-  if P.has(value, "insetBottom") {
-    style.inset.bottom = run dimension(run P.required(value, "insetBottom"))
-  }
-  if P.has(value, "insetLeft") {
-    style.inset.left = run dimension(run P.required(value, "insetLeft"))
-  }
-  if P.has(value, "flexGrow") {
-    style.flexGrow = run P.nonnegative(run P.required(value, "flexGrow"))
-  }
-  if P.has(value, "flexShrink") {
-    style.flexShrink = run P.nonnegative(run P.required(value, "flexShrink"))
-  }
-  if P.has(value, "aspectRatio") {
-    style.aspectRatio = run P.nonnegative(run P.required(value, "aspectRatio"))
-  }
-  if P.has(value, "aspectRatioAuto") {
-    style.aspectRatioAuto = run P.boolean(run P.required(value, "aspectRatioAuto"))
-  }
-  if P.has(value, "justifyContentSafety") {
-    style.justifyContentSafety = run safety(run P.required(value, "justifyContentSafety"))
-  }
-  if P.has(value, "justifySelfSafety") {
-    style.justifySelfSafety = run safety(run P.required(value, "justifySelfSafety"))
-  }
-  if P.has(value, "justifyItemsSafety") {
-    style.justifyItemsSafety = run safety(run P.required(value, "justifyItemsSafety"))
-  }
-  if P.has(value, "alignContentSafety") {
-    style.alignContentSafety = run safety(run P.required(value, "alignContentSafety"))
-  }
-  if P.has(value, "alignItemsSafety") {
-    style.alignItemsSafety = run safety(run P.required(value, "alignItemsSafety"))
-  }
-  if P.has(value, "alignSelfSafety") {
-    style.alignSelfSafety = run safety(run P.required(value, "alignSelfSafety"))
-  }
-  if P.has(value, "replaced") {
-    style.replaced = run P.boolean(run P.required(value, "replaced"))
-  }
-  if P.has(value, "order") {
-    style.order = run P.integer(run P.required(value, "order"))
-  }
+  if P.has(value, "width") { style.width = run dimension(run P.required(value, "width")) }
+  if P.has(value, "height") { style.height = run dimension(run P.required(value, "height")) }
+  if P.has(value, "minWidth") { style.minWidth = run dimension(run P.required(value, "minWidth")) }
+  if P.has(value, "minHeight") { style.minHeight = run dimension(run P.required(value, "minHeight")) }
+  if P.has(value, "maxWidth") { style.maxWidth = run dimension(run P.required(value, "maxWidth")) }
+  if P.has(value, "maxHeight") { style.maxHeight = run dimension(run P.required(value, "maxHeight")) }
+  if P.has(value, "flexBasis") { style.flexBasis = run dimension(run P.required(value, "flexBasis")) }
+  if P.has(value, "rowGap") { style.rowGap = run gap(run P.required(value, "rowGap")) }
+  if P.has(value, "columnGap") { style.columnGap = run gap(run P.required(value, "columnGap")) }
+  if P.has(value, "display") { style.display = run parseDisplay(run P.required(value, "display")) }
+  if P.has(value, "boxSizing") { style.boxSizing = run parseBoxSizing(run P.required(value, "boxSizing")) }
+  if P.has(value, "direction") { style.direction = run parseDirection(run P.required(value, "direction")) }
+  if P.has(value, "unicodeBidi") { style.unicodeBidi = run parseUnicodeBidi(run P.required(value, "unicodeBidi")) }
+  if P.has(value, "writingMode") { style.writingMode = run parseWritingMode(run P.required(value, "writingMode")) }
+  if P.has(value, "textOrientation") { style.textOrientation = run parseTextOrientation(run P.required(value, "textOrientation")) }
+  if P.has(value, "flexDirection") { style.flexDirection = run parseFlexDirection(run P.required(value, "flexDirection")) }
+  if P.has(value, "flexWrap") { style.flexWrap = run parseFlexWrap(run P.required(value, "flexWrap")) }
+  if P.has(value, "justifyContent") { style.justifyContent = run parseAlign(run P.required(value, "justifyContent")) }
+  if P.has(value, "justifySelf") { style.justifySelf = run parseAlign(run P.required(value, "justifySelf")) }
+  if P.has(value, "justifyItems") { style.justifyItems = run parseAlign(run P.required(value, "justifyItems")) }
+  if P.has(value, "alignItems") { style.alignItems = run parseAlign(run P.required(value, "alignItems")) }
+  if P.has(value, "alignSelf") { style.alignSelf = run parseAlign(run P.required(value, "alignSelf")) }
+  if P.has(value, "alignContent") { style.alignContent = run parseAlign(run P.required(value, "alignContent")) }
+  if P.has(value, "overflowX") { style.overflowX = run parseOverflow(run P.required(value, "overflowX")) }
+  if P.has(value, "overflowY") { style.overflowY = run parseOverflow(run P.required(value, "overflowY")) }
+  if P.has(value, "scrollbarWidth") { style.scrollbarWidth = run parseScrollbarWidth(run P.required(value, "scrollbarWidth")) }
+  if P.has(value, "scrollbarGutter") { style.scrollbarGutter = run parseScrollbarGutter(run P.required(value, "scrollbarGutter")) }
+  if P.has(value, "position") { style.position = run parsePosition(run P.required(value, "position")) }
+  if P.has(value, "float") { style.float = run parseFloat(run P.required(value, "float")) }
+  if P.has(value, "clear") { style.clear = run parseClear(run P.required(value, "clear")) }
+  if P.has(value, "visibility") { style.visibility = run parseVisibility(run P.required(value, "visibility")) }
+  if P.has(value, "margin") { style.margin = run edges(run P.required(value, "margin"), style.margin) }
+  if P.has(value, "marginTop") { style.margin.top = run dimension(run P.required(value, "marginTop")) }
+  if P.has(value, "marginRight") { style.margin.right = run dimension(run P.required(value, "marginRight")) }
+  if P.has(value, "marginBottom") { style.margin.bottom = run dimension(run P.required(value, "marginBottom")) }
+  if P.has(value, "marginLeft") { style.margin.left = run dimension(run P.required(value, "marginLeft")) }
+  if P.has(value, "padding") { style.padding = run edges(run P.required(value, "padding"), style.padding) }
+  if P.has(value, "paddingTop") { style.padding.top = run dimension(run P.required(value, "paddingTop")) }
+  if P.has(value, "paddingRight") { style.padding.right = run dimension(run P.required(value, "paddingRight")) }
+  if P.has(value, "paddingBottom") { style.padding.bottom = run dimension(run P.required(value, "paddingBottom")) }
+  if P.has(value, "paddingLeft") { style.padding.left = run dimension(run P.required(value, "paddingLeft")) }
+  if P.has(value, "border") { style.border = run edges(run P.required(value, "border"), style.border) }
+  if P.has(value, "borderTop") { style.border.top = run dimension(run P.required(value, "borderTop")) }
+  if P.has(value, "borderRight") { style.border.right = run dimension(run P.required(value, "borderRight")) }
+  if P.has(value, "borderBottom") { style.border.bottom = run dimension(run P.required(value, "borderBottom")) }
+  if P.has(value, "borderLeft") { style.border.left = run dimension(run P.required(value, "borderLeft")) }
+  if P.has(value, "inset") { style.inset = run edges(run P.required(value, "inset"), style.inset) }
+  if P.has(value, "insetTop") { style.inset.top = run dimension(run P.required(value, "insetTop")) }
+  if P.has(value, "insetRight") { style.inset.right = run dimension(run P.required(value, "insetRight")) }
+  if P.has(value, "insetBottom") { style.inset.bottom = run dimension(run P.required(value, "insetBottom")) }
+  if P.has(value, "insetLeft") { style.inset.left = run dimension(run P.required(value, "insetLeft")) }
+  if P.has(value, "flexGrow") { style.flexGrow = run P.nonnegative(run P.required(value, "flexGrow")) }
+  if P.has(value, "flexShrink") { style.flexShrink = run P.nonnegative(run P.required(value, "flexShrink")) }
+  if P.has(value, "aspectRatio") { style.aspectRatio = run P.nonnegative(run P.required(value, "aspectRatio")) }
+  if P.has(value, "aspectRatioAuto") { style.aspectRatioAuto = run P.boolean(run P.required(value, "aspectRatioAuto")) }
+  if P.has(value, "justifyContentSafety") { style.justifyContentSafety = run safety(run P.required(value, "justifyContentSafety")) }
+  if P.has(value, "justifySelfSafety") { style.justifySelfSafety = run safety(run P.required(value, "justifySelfSafety")) }
+  if P.has(value, "justifyItemsSafety") { style.justifyItemsSafety = run safety(run P.required(value, "justifyItemsSafety")) }
+  if P.has(value, "alignContentSafety") { style.alignContentSafety = run safety(run P.required(value, "alignContentSafety")) }
+  if P.has(value, "alignItemsSafety") { style.alignItemsSafety = run safety(run P.required(value, "alignItemsSafety")) }
+  if P.has(value, "alignSelfSafety") { style.alignSelfSafety = run safety(run P.required(value, "alignSelfSafety")) }
+  if P.has(value, "replaced") { style.replaced = run P.boolean(run P.required(value, "replaced")) }
+  if P.has(value, "order") { style.order = run P.integer(run P.required(value, "order")) }
   if P.has(value, "fontKey") {
     let key = run P.integer(run P.required(value, "fontKey"))
-    if key < 0 {
-      fail P.invalid("fontKey must be a nonnegative integer")
-    }
+    if key < 0 { fail P.invalid("fontKey must be a nonnegative integer") }
     style.fontKey = i32.toUsize(key)
   }
-  if P.has(value, "lineHeight") {
-    style.lineHeight = run parseLineHeight(run P.required(value, "lineHeight"))
-  }
-  if P.has(value, "verticalAlign") {
-    style.verticalAlign = run parseVerticalAlign(run P.required(value, "verticalAlign"))
-  }
-  if P.has(value, "baselineSource") {
-    style.baselineSource = run parseBaselineSource(run P.required(value, "baselineSource"))
-  }
-  if P.has(value, "textAlign") {
-    style.textAlign = run parseTextAlign(run P.required(value, "textAlign"), false)
-  }
-  if P.has(value, "textAlignLast") {
-    style.textAlignLast = run parseTextAlign(run P.required(value, "textAlignLast"), true)
-  }
-  if P.has(value, "textJustify") {
-    style.textJustify = run parseTextJustify(run P.required(value, "textJustify"))
-  }
-  if P.has(value, "textIndent") {
-    style.textIndent = run parseTextIndent(run P.required(value, "textIndent"))
-  }
-  if P.has(value, "textWrap") {
-    style.textWrap = run parseTextWrap(run P.required(value, "textWrap"))
-  }
-  if P.has(value, "whiteSpaceCollapse") {
-    style.whiteSpaceCollapse = run parseWhiteSpaceCollapse(
-      run P.required(value, "whiteSpaceCollapse"),
-    )
-  }
-  if P.has(value, "tabSize") {
-    style.tabSize = run parseTabSize(run P.required(value, "tabSize"))
-  }
-  if P.has(value, "boxDecorationBreak") {
-    style.boxDecorationBreak = run parseDecorationBreak(run P.required(value, "boxDecorationBreak"))
-  }
-  if P.has(value, "marginBreak") {
-    style.marginBreak = run parseMarginBreak(run P.required(value, "marginBreak"))
-  }
-  if P.has(value, "breakBefore") {
-    style.breakBefore = run parseBreakBetween(run P.required(value, "breakBefore"))
-  }
-  if P.has(value, "breakAfter") {
-    style.breakAfter = run parseBreakBetween(run P.required(value, "breakAfter"))
-  }
-  if P.has(value, "breakInside") {
-    style.breakInside = run parseBreakInside(run P.required(value, "breakInside"))
-  }
-  if P.has(value, "orphans") {
-    style.orphans = run parseLineCount(run P.required(value, "orphans"))
-  }
-  if P.has(value, "widows") {
-    style.widows = run parseLineCount(run P.required(value, "widows"))
-  }
+  if P.has(value, "lineHeight") { style.lineHeight = run parseLineHeight(run P.required(value, "lineHeight")) }
+  if P.has(value, "verticalAlign") { style.verticalAlign = run parseVerticalAlign(run P.required(value, "verticalAlign")) }
+  if P.has(value, "baselineSource") { style.baselineSource = run parseBaselineSource(run P.required(value, "baselineSource")) }
+  if P.has(value, "textAlign") { style.textAlign = run parseTextAlign(run P.required(value, "textAlign"), false) }
+  if P.has(value, "textAlignLast") { style.textAlignLast = run parseTextAlign(run P.required(value, "textAlignLast"), true) }
+  if P.has(value, "textJustify") { style.textJustify = run parseTextJustify(run P.required(value, "textJustify")) }
+  if P.has(value, "textIndent") { style.textIndent = run parseTextIndent(run P.required(value, "textIndent")) }
+  if P.has(value, "textWrap") { style.textWrap = run parseTextWrap(run P.required(value, "textWrap")) }
+  if P.has(value, "whiteSpaceCollapse") { style.whiteSpaceCollapse = run parseWhiteSpaceCollapse(run P.required(value, "whiteSpaceCollapse")) }
+  if P.has(value, "tabSize") { style.tabSize = run parseTabSize(run P.required(value, "tabSize")) }
+  if P.has(value, "boxDecorationBreak") { style.boxDecorationBreak = run parseDecorationBreak(run P.required(value, "boxDecorationBreak")) }
+  if P.has(value, "marginBreak") { style.marginBreak = run parseMarginBreak(run P.required(value, "marginBreak")) }
+  if P.has(value, "breakBefore") { style.breakBefore = run parseBreakBetween(run P.required(value, "breakBefore")) }
+  if P.has(value, "breakAfter") { style.breakAfter = run parseBreakBetween(run P.required(value, "breakAfter")) }
+  if P.has(value, "breakInside") { style.breakInside = run parseBreakInside(run P.required(value, "breakInside")) }
+  if P.has(value, "orphans") { style.orphans = run parseLineCount(run P.required(value, "orphans")) }
+  if P.has(value, "widows") { style.widows = run parseLineCount(run P.required(value, "widows")) }
   return move style
 }

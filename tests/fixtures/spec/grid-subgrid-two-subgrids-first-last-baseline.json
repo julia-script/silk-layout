@@ -1,0 +1,177 @@
+{
+  "name": "grid-subgrid-two-subgrids-first-last-baseline",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "baseline"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#algo-baseline-shims",
+    "https://drafts.csswg.org/css-grid-2/#row-align"
+  ],
+  "derivation": "Each parent row has two row-subgrids and no direct outer baseline-aligned item. Empty 13px and29px leaves synthesize alphabetic baselines at their bottom border edges and must share a group across the two subgrid boundaries. In the first row, first-baseline alignment puts the common baseline at29, giving child offsets16 and0. In the second 43px row, last-baseline alignment end-aligns the group, placing the baseline at43 relative to each subgrid and giving offsets30 and14. The second row starts at43+7=50; its world baseline is93. All subgrids stretch to43px; independent singleton groups would leave the first-row short leaf at0, violating the common baseline. Coordinates are parent-relative.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 78,
+          "gridTemplateColumns": [
+            31,
+            47
+          ],
+          "gridTemplateRows": [
+            43,
+            43
+          ],
+          "rowGap": 7
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "gridTemplateColumns": [
+            31
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 11,
+          "height": 13,
+          "alignSelf": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 2,
+          "gridRowStart": 1,
+          "gridTemplateColumns": [
+            47
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "width": 17,
+          "height": 29,
+          "alignSelf": "baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridRowStart": 2,
+          "gridTemplateColumns": [
+            31
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 5,
+        "style": {
+          "width": 11,
+          "height": 13,
+          "alignSelf": "last baseline"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 2,
+          "gridRowStart": 2,
+          "gridTemplateColumns": [
+            47
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 7,
+        "style": {
+          "width": 17,
+          "height": 29,
+          "alignSelf": "last baseline"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 78,
+        "height": 93
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 31,
+        "height": 43
+      },
+      {
+        "x": 0,
+        "y": 16,
+        "width": 11,
+        "height": 13
+      },
+      {
+        "x": 31,
+        "y": 0,
+        "width": 47,
+        "height": 43
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 17,
+        "height": 29
+      },
+      {
+        "x": 0,
+        "y": 50,
+        "width": 31,
+        "height": 43
+      },
+      {
+        "x": 0,
+        "y": 30,
+        "width": 11,
+        "height": 13
+      },
+      {
+        "x": 31,
+        "y": 50,
+        "width": 47,
+        "height": 43
+      },
+      {
+        "x": 0,
+        "y": 14,
+        "width": 17,
+        "height": 29
+      }
+    ]
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "name": "grid-subgrid-larger-gap-difference-negative-mbp",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing",
+    "gutters",
+    "negative-margin"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-margins",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-gaps",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution"
+  ],
+  "derivation": "The subgrid has start MBP -7+2+3=-2 and end MBP -5+1+2=-2. Its 28px gutter differs from the parent's 12px by 16px, giving 8px extra margin at each interior item edge. For fixed leaves20/30/40, parent max-content columns are20-2+(8),30+2*(8),40+(8)-2, hence total width142 including two12px gaps. The subgrid border box starts at x=-7 and has width142+7+5=154. Its first leaf starts at border+padding=5 relative to that box (world x=-2); remaining relative starts are53 and111. Negative MBP and negative interior gap adjustments are not clamped to zero. Coordinates are parent-relative.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "max-content",
+            "max-content",
+            "max-content"
+          ],
+          "gridTemplateRows": [
+            19
+          ],
+          "columnGap": 12
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 4,
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            19
+          ],
+          "columnGap": 28,
+          "margin": {
+            "left": -7,
+            "right": -5
+          },
+          "border": {
+            "left": 2,
+            "right": 1
+          },
+          "padding": {
+            "left": 3,
+            "right": 2
+          }
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 20,
+          "gridColumnStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 30,
+          "gridColumnStart": 2
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "width": 40,
+          "gridColumnStart": 3
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 142,
+        "height": 19
+      },
+      {
+        "x": -7,
+        "y": 0,
+        "width": 154,
+        "height": 19
+      },
+      {
+        "x": 5,
+        "y": 0,
+        "width": 20,
+        "height": 19
+      },
+      {
+        "x": 53,
+        "y": 0,
+        "width": 30,
+        "height": 19
+      },
+      {
+        "x": 111,
+        "y": 0,
+        "width": 40,
+        "height": 19
+      }
+    ]
+  }
+}

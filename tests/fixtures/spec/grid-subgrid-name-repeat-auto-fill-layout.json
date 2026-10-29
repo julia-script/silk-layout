@@ -1,0 +1,128 @@
+{
+  "name": "grid-subgrid-name-repeat-auto-fill-layout",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "named-lines",
+    "auto-repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#auto-repeat",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-span",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-line-name-inheritance"
+  ],
+  "derivation": "Four inherited tracks give five line-name groups. The authored [lead], repeat(auto-fill,[tick]), [tail] expands to [lead][tick][tick][tick][tail], with no merging of adjacent name-repeat groups. Thus 2 tick is line 3 at x=17+23=40; a one-track item there is 31px wide. The item ending at tail spans the last 41px track starting at x=71. These placements test expansion through actual item geometry rather than parser metadata.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 112,
+          "gridTemplateColumns": [
+            17,
+            23,
+            31,
+            41
+          ],
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 5,
+          "gridTemplateColumns": {
+            "subgrid": [
+              {
+                "names": [
+                  "lead"
+                ]
+              },
+              {
+                "repeat": {
+                  "count": "auto-fill",
+                  "lines": [
+                    {
+                      "names": [
+                        "tick"
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "names": [
+                  "tail"
+                ]
+              }
+            ]
+          },
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": {
+            "line": 2,
+            "name": "tick"
+          },
+          "gridColumnEnd": {
+            "span": 1
+          },
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": {
+            "span": 1
+          },
+          "gridColumnEnd": "tail",
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 112,
+        "height": 19
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 112,
+        "height": 19
+      },
+      {
+        "x": 40,
+        "y": 0,
+        "width": 31,
+        "height": 19
+      },
+      {
+        "x": 71,
+        "y": 0,
+        "width": 41,
+        "height": 19
+      }
+    ]
+  }
+}

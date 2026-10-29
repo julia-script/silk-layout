@@ -1,0 +1,115 @@
+{
+  "name": "grid-subgrid-stage-definite-row-approximation",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "staged-recursion",
+    "aspect-ratio"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes"
+  ],
+  "derivation": "A owns columns; B inherits those columns and owns a fixed 40px row; C inherits B's row and owns a max-content column. In Grid 12.1 step 1 the definite maximum of B's row supplies the 40px approximation through C, so the empty 2:1 item's 100% height contributes 80px to C and then A, exceeding the overlapping 20px marker. The row pass returns B's 40px height to A. The inline contribution remains 80px, so the adjustment check makes no change. A, B and C finish 80x40; the marker remains 20x30. Completing C independently before inheriting B's row would lose the initial 40px estimate. Coordinates are parent-relative.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "max-content"
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            40
+          ]
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            "max-content"
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "height": {
+            "percent": 1
+          },
+          "aspectRatio": 2,
+          "justifySelf": "start",
+          "alignSelf": "start"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "width": 20,
+          "height": 30
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 80,
+        "height": 40
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 30
+      }
+    ]
+  }
+}

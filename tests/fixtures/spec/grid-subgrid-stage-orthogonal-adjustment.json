@@ -1,0 +1,118 @@
+{
+  "name": "grid-subgrid-stage-orthogonal-adjustment",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "staged-recursion",
+    "aspect-ratio",
+    "writing-modes"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes"
+  ],
+  "derivation": "Orthogonal reversal of the same physical-axis dependency: A is horizontal; B and C are vertical-lr. B's local rows inherit A's physical columns, while B's local columns are standalone. C's local columns inherit B's physical-y columns and C's local rows are standalone max-content tracks. Grid 12.1 requires A's physical-x sizing first, hence B/C local ROW sizing before their local COLUMN sizing, reversing independent vertical-grid order. The horizontal 20x30 marker supplies an initial physical-x contribution of 20px; the empty ratio item's 100% physical height is unresolved against the infinite auto-track approximation. The physical-y pass sizes B's standalone column to 30px and C inherits it. The 2:1 ratio item now contributes 60px horizontally, so the single physical-x adjustment changes C's local row and A's column to 60px. The second-axis check leaves 30px unchanged. Vertical-lr gives a left-to-right block axis, so all origins remain zero. The ratio item is explicitly horizontal, avoiding an intrinsic orthogonal text-layout policy. Coordinates are parent-relative.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "max-content"
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            "auto"
+          ],
+          "gridTemplateRows": "subgrid",
+          "writingMode": "vertical-lr"
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            "max-content"
+          ],
+          "writingMode": "vertical-lr"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "height": {
+            "percent": 1
+          },
+          "aspectRatio": 2,
+          "justifySelf": "start",
+          "alignSelf": "start"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "width": 20,
+          "height": 30
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 30
+      }
+    ]
+  }
+}

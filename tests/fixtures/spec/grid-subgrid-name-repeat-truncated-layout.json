@@ -1,0 +1,135 @@
+{
+  "name": "grid-subgrid-name-repeat-truncated-layout",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "named-lines",
+    "repeat"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#subgrid-span",
+    "https://drafts.csswg.org/css-grid-2/#typedef-name-repeat",
+    "https://drafts.csswg.org/css-grid-2/#grid-placement-slot"
+  ],
+  "derivation": "The explicit three-track span has only four lines, truncating repeat(3,[a][b]) from six groups to [a][b][a][b]. Negative named indices must search this truncated list: -2 a is line 1, not the discarded-list line 3. Its item therefore occupies the first 17px track at x0. The item from b to -1 b spans lines2..4, x17 and width23+31=54. A trailing auto-fill has zero repetitions because the fixed groups already fill the span; it must not displace the retained names.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": 71,
+          "gridTemplateColumns": [
+            17,
+            23,
+            31
+          ],
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridColumnEnd": 4,
+          "gridTemplateColumns": {
+            "subgrid": [
+              {
+                "repeat": {
+                  "count": 3,
+                  "lines": [
+                    {
+                      "names": [
+                        "a"
+                      ]
+                    },
+                    {
+                      "names": [
+                        "b"
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "repeat": {
+                  "count": "auto-fill",
+                  "lines": [
+                    {
+                      "names": [
+                        "unused"
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "gridTemplateRows": [
+            19
+          ]
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": {
+            "line": -2,
+            "name": "a"
+          },
+          "gridColumnEnd": {
+            "span": 1
+          },
+          "gridRowStart": 1
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": "b",
+          "gridColumnEnd": {
+            "line": -1,
+            "name": "b"
+          },
+          "gridRowStart": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 71,
+        "height": 19
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 71,
+        "height": 19
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 17,
+        "height": 19
+      },
+      {
+        "x": 17,
+        "y": 0,
+        "width": 54,
+        "height": 19
+      }
+    ]
+  }
+}

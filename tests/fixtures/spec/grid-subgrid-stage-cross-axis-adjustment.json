@@ -1,0 +1,115 @@
+{
+  "name": "grid-subgrid-stage-cross-axis-adjustment",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "staged-recursion",
+    "aspect-ratio"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing",
+    "https://drafts.csswg.org/css-grid-2/#subgrid-item-contribution",
+    "https://drafts.csswg.org/css-grid-2/#intrinsic-sizes"
+  ],
+  "derivation": "A owns columns; B inherits those columns but owns an auto row; C inherits B's row and owns a max-content column. Step 1 must size only C's columns: B's auto row has no definite maximum, so its approximation is infinite and the empty ratio item's percentage height is unresolved. The overlapping 20x30 marker supplies the initial 20px column contribution to C and A. Step 2 drills into B's rows, hoists C's children and obtains 30px from the marker, returning 30px to A. With that inherited row definite, the ratio item's 100% height becomes 30px and its 2:1 ratio changes C's min/max-content inline contribution to 60px. Step 3 adjusts C's standalone column and then A's column once to 60px. B inherits the revised column. The row adjustment check leaves the 30px row unchanged; this is not a fixed-point iteration. Final rectangles are A/B/C and the ratio item 60x30, marker 20x30. Coordinates are parent-relative.",
+  "input": {
+    "viewport": {
+      "width": 240,
+      "height": 160
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "grid",
+          "width": "max-content",
+          "gridTemplateColumns": [
+            "max-content"
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ]
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            "auto"
+          ]
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": [
+            "max-content"
+          ],
+          "gridTemplateRows": "subgrid"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "height": {
+            "percent": 1
+          },
+          "aspectRatio": 2,
+          "justifySelf": "start",
+          "alignSelf": "start"
+        }
+      },
+      {
+        "parent": 2,
+        "style": {
+          "writingMode": "horizontal-tb",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "width": 20,
+          "height": 30
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 20,
+        "height": 30
+      }
+    ]
+  }
+}

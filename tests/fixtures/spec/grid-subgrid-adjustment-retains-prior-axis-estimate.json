@@ -1,0 +1,117 @@
+{
+  "name": "grid-subgrid-adjustment-retains-prior-axis-estimate",
+  "kind": "spec",
+  "features": [
+    "grid",
+    "subgrid",
+    "intrinsic-sizing",
+    "aspect-ratio",
+    "wrapping"
+  ],
+  "spec": [
+    "https://drafts.csswg.org/css-grid-2/#algo-grid-sizing"
+  ],
+  "derivation": "A has one auto column and contains B, which inherits columns. B overlays a wrapping provider and C in one auto row. C inherits that row and has a standalone auto column containing a2:1 ratio item with20px minimum width and100% height. Initial column sizing uses the20px max-content provider/ratio floor. At20px, the provider fits one30px line, so the row pass yields30px. The one column adjustment uses that30px cross result, producing60px. Rechecking rows at60px still yields30px. Reinitializing the owning column to0 before reconstructing B rows is not a prior-stage estimate: it spuriously wraps at5px to120px and inflates A to240px. All boxes are60x30 in the final layout.",
+  "input": {
+    "viewport": {
+      "width": 300,
+      "height": 300
+    },
+    "nodes": [
+      {
+        "parent": null,
+        "style": {
+          "display": "inline grid",
+          "gridTemplateColumns": [
+            "auto"
+          ],
+          "gridTemplateRows": [
+            "auto"
+          ],
+          "justifyContent": "start",
+          "alignContent": "start"
+        }
+      },
+      {
+        "parent": 0,
+        "style": {
+          "display": "grid",
+          "gridTemplateColumns": "subgrid",
+          "gridTemplateRows": [
+            "auto"
+          ]
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "gridColumnStart": 1,
+          "gridRowStart": 1
+        },
+        "measure": {
+          "minWidth": 5,
+          "maxWidth": 20,
+          "height": 30,
+          "wrap": true
+        }
+      },
+      {
+        "parent": 1,
+        "style": {
+          "display": "grid",
+          "gridColumnStart": 1,
+          "gridRowStart": 1,
+          "gridTemplateColumns": [
+            "auto"
+          ],
+          "gridTemplateRows": "subgrid",
+          "justifyContent": "start"
+        }
+      },
+      {
+        "parent": 3,
+        "style": {
+          "aspectRatio": 2,
+          "height": {
+            "percent": 1
+          },
+          "minWidth": 20
+        }
+      }
+    ]
+  },
+  "expected": {
+    "sources": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "width": 60,
+        "height": 30
+      }
+    ]
+  }
+}

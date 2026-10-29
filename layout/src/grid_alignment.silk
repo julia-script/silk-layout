@@ -229,7 +229,7 @@ pub fn alignItem(
   area: Size,
   size: Size,
   usedMargin: ResolvedEdges,
-) -> ItemAlignment {
+) -> ItemAlignment with Intrinsic.inlineAlways() {
   let lowAuto = axis.lowAuto(style)
   let highAuto = axis.highAuto(style)
   let mut beforeAuto = style.margin.top.kind == DimensionKind.Auto

@@ -9,7 +9,7 @@
   "spec": [
     "https://drafts.csswg.org/css-grid-2/#subgrid-margins"
   ],
-  "derivation": "A columns40 and0 with10px gap span50. B inherits them with3px inline padding: local final-track start47 and end44 are distinct although its floored breadth is0. C inherits B in RTL. Reflection around extent44 maps the actual final-track end44 to logical start0, not -3 from reflecting floored breadth. C border box is44 at x3. Its20px first-column start-aligned child therefore ends at physical47 and starts27; its full-span child stays44 at x3.",
+  "derivation": "A columns40 and0 with10px gap span50. B inherits them with3px inline padding: local final-track start47 and end44 are distinct although its floored breadth is0. C inherits B in RTL. Reflection around extent44 maps the actual final-track end44 to logical start0, not -3 from reflecting floored breadth. C border box is44 at x3. Its20px first-column start-aligned child therefore ends at world x47 and starts at world x27; its full-span child stays44 at world x3. Sources are parent-relative, so the asserted child coordinates under C are24 and0.",
   "input": {
     "viewport": {
       "width": 200,
@@ -99,13 +99,13 @@
         "height": 20
       },
       {
-        "x": 27,
+        "x": 24,
         "y": 0,
         "width": 20,
         "height": 10
       },
       {
-        "x": 3,
+        "x": 0,
         "y": 0,
         "width": 44,
         "height": 20

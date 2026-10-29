@@ -9,7 +9,7 @@
   "spec": [
     "https://drafts.csswg.org/css-grid-2/#subgrid-margins"
   ],
-  "derivation": "The parent rows40 and0 have a10px gap. Row-subgrid padding3 leaves a44px whole content span, starting at y3 and ending47. The final zero track nevertheless starts at the parent interior line50 (local47). A20px start-aligned item in that track starts at50, not47; a spanning stretched item remains44px tall. Nested padding2 consumes each outer edge again without moving the interior line: nested spanning height40 at y5; nested terminal item still starts50. The inherited track must retain independent raw start and end even when the residual breadth is negative.",
+  "derivation": "The parent rows40 and0 have a10px gap. Row-subgrid padding3 leaves a44px whole content span, starting at y3 and ending47. The final zero track nevertheless starts at the parent interior line50 (local47). A20px start-aligned item in that track starts at50, not47; a spanning stretched item remains44px tall. Nested padding2 consumes each outer edge again without moving the interior line: nested spanning height40 at world y5; nested terminal item still starts at world y50. Their parent starts at y3, so the asserted parent-relative source coordinates are2 and47. The inherited track must retain independent raw start and end even when the residual breadth is negative.",
   "input": {
     "viewport": {
       "width": 200,
@@ -134,13 +134,13 @@
       },
       {
         "x": 0,
-        "y": 5,
+        "y": 2,
         "width": 30,
         "height": 40
       },
       {
         "x": 0,
-        "y": 50,
+        "y": 47,
         "width": 30,
         "height": 20
       }

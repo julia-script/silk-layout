@@ -217,6 +217,14 @@ fn trackPolicy(
   return move result
 }
 
+fn includeHypothesisPolicy(policy: &mut TrackPolicy, hypothetical: TrackPolicy) {
+  policy.intrinsic = policy.intrinsic || hypothetical.intrinsic
+  policy.automatic = policy.automatic || hypothetical.automatic
+  policy.needMin = policy.needMin || hypothetical.needMin
+  policy.needMax = policy.needMax || hypothetical.needMax
+  policy.cap = max(policy.cap, hypothetical.cap)
+}
+
 struct AxisSizing {
   columns: bool,
   origin: i32,
@@ -444,7 +452,20 @@ effect fn collectContributions<'pass, 'source, M: Measure + TextMeasure>(
       }
       index = index + 1
     }
+    changed = Baselines.applyShims(&baselines, sizing.columns, own.contributions.asMutSlice()) || changed
+    run SubgridContributions.inflate(&mut work, own.contributions.asSlice())
+    index = 0
+    while index < work.hypotheses.length() {
+      let itemChanged = run SubgridContributions.store(&mut own.contributions, next, work.hypotheses.get(index))
+      changed = changed || itemChanged
+      next = next + 1
+      index = index + 1
+    }
+    work.hypotheses.clear()
     run output.cache.gridMemos.subgridWork.append(move work)
+    if own.contributions.length() != next { changed = true }
+    own.contributions.truncate(next)
+    return changed
   }
   if own.contributions.length() != next { changed = true }
   own.contributions.truncate(next)
@@ -1435,7 +1456,6 @@ effect fn collectInherited<'pass, 'source, M: Measure + TextMeasure>(
   let layer = ContributionLayer { start: rootStart, end: rootEnd, low: low, high: high,
     gap: (ownSizing.usedGap - parentGap) * 0.5 }
   run work.layers.append(layer)
-  let hypothesisMarker = work.hypotheses.length()
   let mut occupiedStart = rootEnd
   let mut occupiedEnd = rootStart
   let mut index: usize = 0
@@ -1463,7 +1483,17 @@ effect fn collectInherited<'pass, 'source, M: Measure + TextMeasure>(
     let mut end = rootStart + i32.toUsize(span.end)
     if reverse { start = rootEnd - i32.toUsize(span.end)
       end = rootEnd - i32.toUsize(span.start) }
-    let policy = trackPolicy(rootTracks, start, end, rootSizing.usedGap, constraint.kind)
+    let mut policy = trackPolicy(rootTracks, start, end, rootSizing.usedGap, constraint.kind)
+    // A real item on fixed tracks can still size an intrinsic track through
+    // its edge placeholder. Do not skip that item's sizes (§9).
+    if start == occupiedStart && occupiedStart > rootStart {
+      includeHypothesisPolicy(&mut policy,
+        trackPolicy(rootTracks, rootStart, end, rootSizing.usedGap, constraint.kind))
+    }
+    if end == occupiedEnd && occupiedEnd < rootEnd {
+      includeHypothesisPolicy(&mut policy,
+        trackPolicy(rootTracks, start, rootEnd, rootSizing.usedGap, constraint.kind))
+    }
     let crossPolicy = trackPolicy(cross.tracks.asSlice(), i32.toUsize(crossSpan.start),
       i32.toUsize(crossSpan.end), crossSizing.usedGap, AvailableKind.Definite)
     let mut area = OptionalSize.none()
@@ -1504,15 +1534,11 @@ effect fn collectInherited<'pass, 'source, M: Measure + TextMeasure>(
     next = next + 1
     if start == occupiedStart && occupiedStart > rootStart {
       let adjustment = SubgridContributions.extra(work.layers.asSlice(), rootStart, end)
-      run SubgridContributions.hypothesis(&mut work, hypothesisMarker,
-        TrackContribution.make(rootStart, end, measured.minimum + adjustment,
-          measured.minContent + adjustment, measured.maxContent + adjustment))
+      run SubgridContributions.defer(&mut work, next - 1, rootStart, end, adjustment - extra)
     }
     if end == occupiedEnd && occupiedEnd < rootEnd {
       let adjustment = SubgridContributions.extra(work.layers.asSlice(), start, rootEnd)
-      run SubgridContributions.hypothesis(&mut work, hypothesisMarker,
-        TrackContribution.make(start, rootEnd, measured.minimum + adjustment,
-          measured.minContent + adjustment, measured.maxContent + adjustment))
+      run SubgridContributions.defer(&mut work, next - 1, start, rootEnd, adjustment - extra)
     }
     if nested {
       next = run collectInherited(nodes, &mut output, &mut measurer, item.id, &request,
@@ -1521,14 +1547,6 @@ effect fn collectInherited<'pass, 'source, M: Measure + TextMeasure>(
     }
     index = index + 1
   }
-  index = hypothesisMarker
-  while index < work.hypotheses.length() {
-    let itemChanged = run SubgridContributions.store(&mut result, next, work.hypotheses.get(index))
-    changed.* = changed.* || itemChanged
-    next = next + 1
-    index = index + 1
-  }
-  work.hypotheses.truncate(hypothesisMarker)
   let layerCount = work.layers.length() - 1
   work.layers.truncate(layerCount)
   output.cache.gridMemos.put(move lease)

@@ -15,13 +15,23 @@ pub struct ContributionLayer {
 }
 impl Copy for ContributionLayer {}
 
+pub struct HypothesisSource {
+  pub source: usize,
+  pub start: usize,
+  pub end: usize,
+  pub adjustment: f32,
+}
+impl Copy for HypothesisSource {}
+
 pub struct ContributionWork {
   pub layers: List<ContributionLayer>,
   pub hypotheses: List<TrackContribution>,
+  pub pending: List<HypothesisSource>,
 }
 impl ContributionWork {
   pub fn make() -> ContributionWork {
-    return ContributionWork { layers: List<ContributionLayer>.make(), hypotheses: List<TrackContribution>.make() }
+    return ContributionWork { layers: List<ContributionLayer>.make(),
+      hypotheses: List<TrackContribution>.make(), pending: List<HypothesisSource>.make() }
   }
 }
 
@@ -81,4 +91,26 @@ pub effect fn hypothesis(work: &mut ContributionWork, marker: usize, value: Trac
     index = index + 1
   }
   run work.hypotheses.append(value)
+}
+
+// Delay the maximum-per-span reduction until baseline shims have inflated the
+// real items (§12.5). The largest unshimmed item need not remain the largest.
+pub effect fn defer(work: &mut ContributionWork, source: usize, start: usize, end: usize,
+  adjustment: f32) ! OutOfMemoryError ? &mut Allocator {
+  run work.pending.append(HypothesisSource { source: source, start: start, end: end,
+    adjustment: adjustment })
+}
+
+pub effect fn inflate(work: &mut ContributionWork, contributions: &[TrackContribution])
+  ! OutOfMemoryError ? &mut Allocator {
+  let mut index: usize = 0
+  while index < work.pending.length() {
+    let pending = work.pending.get(index)
+    let source = contributions[pending.source]
+    run hypothesis(&mut work, 0, TrackContribution.make(pending.start, pending.end,
+      source.minimum + pending.adjustment, source.minContent + pending.adjustment,
+      source.maxContent + pending.adjustment))
+    index = index + 1
+  }
+  work.pending.clear()
 }

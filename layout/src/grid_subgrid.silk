@@ -5,7 +5,7 @@ import silk.num.usize
 import box_tree { BoxTree, BoxKind }
 import tree { Measurement, NO_NODE }
 import style { Style, WritingMode, Direction, Dimension, DimensionKind }
-import geometry { max }
+import geometry { max, min }
 import context { ResolvedBox, UNBOUNDED, resolve }
 import axes { Axes }
 import grid_style { GridTemplate, GridAxis, GridNamedLine, GridArea, GridTrack, GridBreadth, GridBreadthKind, MAX_GRID_TRACKS }
@@ -295,7 +295,13 @@ pub effect fn usedTracks(
     let mut low = track.position - start + delta
     let mut high = track.position + track.base - start - delta
     if index == 0 { low = 0.0 }
-    if index + 1 == tracks.length { high = track.position + track.base - start - end }
+    if index + 1 == tracks.length {
+      high = track.position + track.base - start - end
+      // The terminal line is the content edge, even when edge MBP consumes
+      // the entire last track. Flooring its breadth must not move that line
+      // outward and enlarge every item spanning into it (§9).
+      low = max(0.0, min(low, high))
+    }
     let adjustment = (high - low) - track.base
     track.base = max(0.0, high - low)
     track.position = low

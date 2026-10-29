@@ -163,7 +163,7 @@ effect fn collect(nodes: &BoxTree, flags: &[u8], id: usize, items: &mut List<Ite
   }
   return ordered
 }
-fn sort(items: &mut [Item], nodes: &BoxTree, count: usize) {
+fn sort(items: &mut [Item], nodes: &BoxTree, count: usize) with Intrinsic.cold() {
   let mut index: usize = 1
   while index < count {
     // Items are almost always in order already; only an out-of-order item
@@ -1006,8 +1006,12 @@ impl FlexMemos {
   }
   // The id of a container pass's item request, the same as an earlier pass's
   // when nothing in it changed; 0 when the memo is off for the pass.
-  effect fn request(self: &mut Self, container: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool) -> usize ! OutOfMemoryError ? &mut Allocator {
+  effect fn request(self: &mut Self, container: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool) -> usize ! OutOfMemoryError ? &mut Allocator with Intrinsic.inlineAlways() {
     if !self.enabled || self.fresh || input.fragmentation.active { return 0 }
+    return run self.requestKept(container, input, axis, parentStyle, main, intrinsic, mainDefinite)
+  }
+  // request for a pass whose memo is on: only computes after the first.
+  effect fn requestKept(self: &mut Self, container: usize, input: &Input, axis: &Axes, parentStyle: &Style, main: AvailableSpace, intrinsic: bool, mainDefinite: bool) -> usize ! OutOfMemoryError ? &mut Allocator with Intrinsic.cold() {
     if container >= self.requestHeads.length() {
       let missing = container + 1 - self.requestHeads.length()
       run self.requestHeads.appendRepeated(NO_NODE, missing)

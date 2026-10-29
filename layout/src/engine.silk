@@ -259,6 +259,12 @@ fn noInFlowChildren(nodes: &BoxTree, id: usize) -> bool {
   }
   return true
 }
+// noInFlowChildren && emptyBoxApplies, from the box's key shape once
+// keyShapes covers it.
+fn keptEmptyBox(nodes: &BoxTree, output: &LayoutPass, id: usize, input: &Input) -> bool with Intrinsic.inlineAlways() {
+  if id < output.keyShapes.length() { return shapeEmptyBox(nodes, output.keyShapes.get(id), id, &input) }
+  return noInFlowChildren(nodes, id) && emptyBoxApplies(nodes, id, &input)
+}
 
 fn emptyContentWidth(nodes: &BoxTree, id: usize) -> bool with Intrinsic.inlineAlways() {
   let node = nodes.node(id)
@@ -416,14 +422,19 @@ const KEY_WIDTH_FREE_TREE: u16 = 2048
 // (KEY_CONTENT_FREE_TREE) has equal min- and max-content widths.
 const KEY_CONTENT_FREE: u16 = 4096
 const KEY_CONTENT_FREE_TREE: u16 = 8192
+// The parts of emptyBoxApplies that depend only on the box and its
+// children; see plainEmptyShape.
+const KEY_EMPTY_PLAIN: u16 = 16384
 
 fn keyShape(nodes: &BoxTree, id: usize) -> u16 {
   let node = nodes.node(id)
   let style = nodes.style(id)
   if node.kind == BoxKind.InlineFormatting || style.replaced { return KEY_FIXED }
+  let noInFlow = noInFlowChildren(nodes, id)
   let mut shape: u16 = 0
+  if noInFlow && plainEmptyShape(style, node) { shape = KEY_EMPTY_PLAIN }
   // Empty grids can still have different min/max-content track sizes (§5.2).
-  if node.measurement == Measurement.None && node.kind != BoxKind.Text && node.kind != BoxKind.Grid && noInFlowChildren(nodes, id) { shape = shape | KEY_EMPTY }
+  if node.measurement == Measurement.None && node.kind != BoxKind.Text && node.kind != BoxKind.Grid && noInFlow { shape = shape | KEY_EMPTY }
   if style.width.kind == DimensionKind.Length { shape = shape | KEY_WIDTH_LENGTH }
   if style.height.kind == DimensionKind.Length { shape = shape | KEY_HEIGHT_LENGTH }
   if node.kind == BoxKind.Block && node.measurement == Measurement.None && !isFlex(style) && style.writingMode == WritingMode.HorizontalTb && style.height.kind != DimensionKind.MinContent && style.height.kind != DimensionKind.MaxContent && style.height.kind != DimensionKind.FitContent { shape = shape | KEY_BLOCK }
@@ -602,7 +613,7 @@ pub effect fn probeNode<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTre
 
 // probeNode after a cache miss for `key`.
 pub effect fn probeFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, input: &Input, key: &Input) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  if noInFlowChildren(nodes, id) && emptyBoxApplies(nodes, id, &input) {
+  if keptEmptyBox(nodes, &output, id, &input) {
     run probeEmptyBox(nodes, &mut output, id, &input, &key)
     return
   }
@@ -632,10 +643,27 @@ fn emptyBoxPlain(nodes: &BoxTree, id: usize, input: &Input) -> bool with Intrins
   return plainSizing(style, node, &input, false, &display)
 }
 
+// emptyBoxPlain's conditions on the box alone: plainSizing's style checks.
+fn plainEmptyShape(style: &Style, node: &BoxNode) -> bool {
+  return (node.kind == BoxKind.Block || node.kind == BoxKind.Flex) && !isGrid(style) && node.measurement == Measurement.None
+    && !style.replaced && style.aspectRatio <= 0.0 && style.writingMode == WritingMode.HorizontalTb && style.float == Float.None
+    && style.overflowX == Overflow.Visible && style.overflowY == Overflow.Visible
+    && !keywordSize(style.width.kind) && !keywordSize(style.height.kind) && !keywordSize(style.minWidth.kind)
+    && !keywordSize(style.minHeight.kind) && !keywordSize(style.maxWidth.kind) && !keywordSize(style.maxHeight.kind)
+}
+
+// noInFlowChildren && emptyBoxPlain for a box with key shape `shape`: the
+// request's part of the checks.
+fn shapeEmptyBox(nodes: &BoxTree, shape: u16, id: usize, input: &Input) -> bool with Intrinsic.inlineAlways() {
+  if shape & KEY_EMPTY_PLAIN == 0 || input.parentWritingMode != WritingMode.HorizontalTb { return false }
+  if input.fragmentation.active || input.fragmentation.boundaryProbe != BoundaryProbe.None || boxInputChanges(nodes, id, &input) { return false }
+  return effectiveDisplay(nodes.style(id), &input).outsideIs(DisplayOutside.Block)
+}
+
 // Whether an intrinsic width probe of a childless box, made from `input`,
 // takes emptyBoxApplies' path; its width is then the box's inset.
-pub fn emptyIntrinsicWidth(nodes: &BoxTree, id: usize, input: &Input) -> bool {
-  return noInFlowChildren(nodes, id) && emptyBoxPlain(nodes, id, &input)
+pub fn emptyIntrinsicWidth(nodes: &BoxTree, shape: u16, id: usize, input: &Input) -> bool {
+  return shapeEmptyBox(nodes, shape, id, &input)
 }
 
 fn emptyBoxApplies(nodes: &BoxTree, id: usize, input: &Input) -> bool {
@@ -695,8 +723,8 @@ fn emptyBoxLayout(style: &Style, input: &Input, bfc: &BfcState, box: &mut Resolv
 // probeEmptyBox's size without the cache: sizing a childless box again
 // costs less than storing and finding its result. False when
 // emptyBoxApplies does not hold, leaving result untouched.
-pub fn sizeEmptyBox(nodes: &BoxTree, id: usize, input: &Input, result: &mut Layout) -> bool {
-  if !noInFlowChildren(nodes, id) || !emptyBoxApplies(nodes, id, &input) { return false }
+pub fn sizeEmptyBox(nodes: &BoxTree, shape: u16, id: usize, input: &Input, result: &mut Layout) -> bool {
+  if !shapeEmptyBox(nodes, shape, id, &input) { return false }
   let style = nodes.style(id)
   let mut box = resolveBox(style, &input)
   emptyBoxLayout(style, &input, &BfcState.make(), &mut box, &mut result)
@@ -1054,7 +1082,7 @@ pub effect fn resolveFragmentBox<'pass, 'source, M: Measure + TextMeasure>(nodes
 effect fn layoutBox<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, incoming: &Input, bfc: &mut BfcState) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   // A box without in-flow children lays out as empty; positionTree then
   // places its absolutely positioned children, static positions included.
-  if incoming.performLayout && output.frame == NO_NODE && noInFlowChildren(nodes, id) && emptyBoxApplies(nodes, id, &incoming) {
+  if incoming.performLayout && output.frame == NO_NODE && keptEmptyBox(nodes, &output, id, &incoming) {
     return run layoutEmptyBox(nodes, &mut output, id, &incoming, &bfc)
   }
   // Most requests already carry what adjustBoxInput would set: lay those
@@ -1730,7 +1758,11 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     let shapes = facts.keyShapes.asMutSlice()
     let mut at: usize = 0
     while at < restyled.length() {
-      shapes[restyled.get(at)] = keyShape(&nodes, restyled.get(at))
+      let id = restyled.get(at)
+      shapes[id] = keyShape(&nodes, id)
+      // A parent's shape reads its children's positioning (noInFlowChildren).
+      let parent = nodes.node(id).parent
+      if parent != NO_NODE { shapes[parent] = keyShape(&nodes, parent) }
       at = at + 1
     }
     if restyled.length() != 0 { widthFreeTrees(&nodes, &mut facts.keyShapes) }

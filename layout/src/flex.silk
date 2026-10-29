@@ -197,10 +197,11 @@ fn blockAxisConstraint(style: &Style, horizontal: bool, constraint: AvailableSpa
 }
 effect fn probe<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, childInput: &Input, horizontal: bool, constraint: AvailableSpace, crossKnown: bool, cross: f64) -> Probe ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   // A childless box without measured content.
-  if constraintFreeProbe(output.keyShape(id)) {
+  let shape = output.keyShape(id)
+  if constraintFreeProbe(shape) {
     let input = probeInput(childInput, horizontal, constraint, crossKnown, cross)
     let mut sized = Layout.zero()
-    if sizeEmptyBox(nodes, id, &input, &mut sized) {
+    if sizeEmptyBox(nodes, shape, id, &input, &mut sized) {
       output.stats.sizeProbes = output.stats.sizeProbes + 1
       return Probe { size: sized.size, preferredRatio: sized.preferredRatio, ratioBorderBox: sized.ratioBorderBox }
     }
@@ -338,7 +339,7 @@ effect fn prepareFresh<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree
   if (autoMinimum && !deferMinimum) || (intrinsic && !deferMinimum) || (!basisDefinite && mainConstraint.kind == AvailableKind.MinContent && basis.kind != DimensionKind.MaxContent) || basis.kind == DimensionKind.MinContent || basis.kind == DimensionKind.FitContent || minimumDimension.kind == DimensionKind.MinContent || maximumDimension.kind == DimensionKind.MinContent || minimumDimension.kind == DimensionKind.FitContent || maximumDimension.kind == DimensionKind.FitContent {
     // A childless box's content box is empty: its intrinsic width is its
     // inset, and it has no preferred ratio.
-    if horizontal && constraintFreeProbe(output.keyShape(id)) && emptyIntrinsicWidth(nodes, id, &childInput) {
+    if horizontal && constraintFreeProbe(output.keyShape(id)) && emptyIntrinsicWidth(nodes, output.keyShape(id), id, &childInput) {
       minContent = item.inset
       ratio = 0.0
       borderRatio = false

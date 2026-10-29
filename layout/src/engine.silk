@@ -502,13 +502,26 @@ fn widthFreeTrees(nodes: &BoxTree, shapes: &mut List<u16>) {
   }
 }
 
-effect fn keyShapes(nodes: &BoxTree, result: &mut List<u16>) ! OutOfMemoryError ? &mut Allocator {
+// What a flex container reads of an item's style to collect it.
+pub const ITEM_OUT_OF_FLOW: u8 = 1
+pub const ITEM_ORDERED: u8 = 2
+fn itemFlags(style: &Style) -> u8 {
+  let mut flags: u8 = 0
+  if outOfFlow(style) { flags = ITEM_OUT_OF_FLOW }
+  if style.order != 0 { flags = flags | ITEM_ORDERED }
+  return flags
+}
+
+effect fn keyShapes(nodes: &BoxTree, result: &mut List<u16>, flags: &mut List<u8>) ! OutOfMemoryError ? &mut Allocator {
   let count = nodes.boxes.length()
   result.clear()
   run result.reserveExact(count)
+  flags.clear()
+  run flags.reserveExact(count)
   let mut id: usize = 0
   while id < count {
     run result.append(keyShape(nodes, id))
+    run flags.append(itemFlags(nodes.style(id)))
     id = id + 1
   }
   widthFreeTrees(nodes, &mut result.*)
@@ -1685,6 +1698,7 @@ effect fn cutoffBox<'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>,
   pass.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
   pass.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
   pass.keyShapes = Intrinsic.replace(facts.keyShapes, List<u16>.make())
+  pass.itemFlags = Intrinsic.replace(facts.itemFlags, List<u8>.make())
   let baselines = baselinesMatter(nodes, &output.fragments, id, range.start)
   let mut at = first
   while at < end && same {
@@ -1714,6 +1728,7 @@ effect fn cutoffBox<'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>,
   facts.reusable = Intrinsic.replace(pass.reusable, List<u8>.make())
   facts.viewportFree = Intrinsic.replace(pass.viewportFrees, List<bool>.make())
   facts.keyShapes = Intrinsic.replace(pass.keyShapes, List<u16>.make())
+  facts.itemFlags = Intrinsic.replace(pass.itemFlags, List<u8>.make())
   drop pass
   if same {
     output.fragments.spliceFrom(range.start, range.end, &scratchFragments)
@@ -1786,6 +1801,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     while at < restyled.length() {
       let id = restyled.get(at)
       shapes[id] = keyShape(&nodes, id)
+      facts.itemFlags.set(id, itemFlags(nodes.style(id)))
       // A parent's shape reads its children's positioning (noInFlowChildren).
       let parent = nodes.node(id).parent
       if parent != NO_NODE { shapes[parent] = keyShape(&nodes, parent) }
@@ -1802,7 +1818,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
     // Facts read only styles and structure, which stand with the boxes.
   } else {
     run Incremental.markSubtrees(&nodes, &mut facts)
-    run keyShapes(&nodes, &mut facts.keyShapes)
+    run keyShapes(&nodes, &mut facts.keyShapes, &mut facts.itemFlags)
     run positionVisits(&nodes, &mut facts.visits)
     run Incremental.indexStyleSources(tree, &nodes, &mut facts.styledOffsets, &mut facts.styledBoxes)
   }
@@ -1866,6 +1882,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
   boxes.reusable = Intrinsic.replace(facts.reusable, List<u8>.make())
   boxes.viewportFrees = Intrinsic.replace(facts.viewportFree, List<bool>.make())
   boxes.keyShapes = Intrinsic.replace(facts.keyShapes, List<u16>.make())
+  boxes.itemFlags = Intrinsic.replace(facts.itemFlags, List<u8>.make())
   boxes.visits = Intrinsic.replace(facts.visits, List<usize>.make())
   boxes.parents = Intrinsic.replace(facts.parents, List<usize>.make())
   let mut input = Input.make(viewport)
@@ -1892,6 +1909,7 @@ pub effect fn compute<'source, M: Measure + TextMeasure>(tree: &'source Tree, ou
       facts.reusable = Intrinsic.replace(boxes.reusable, List<u8>.make())
       facts.viewportFree = Intrinsic.replace(boxes.viewportFrees, List<bool>.make())
       facts.keyShapes = Intrinsic.replace(boxes.keyShapes, List<u16>.make())
+      facts.itemFlags = Intrinsic.replace(boxes.itemFlags, List<u8>.make())
       facts.visits = Intrinsic.replace(boxes.visits, List<usize>.make())
       facts.parents = Intrinsic.replace(boxes.parents, List<usize>.make())
       let usedWrites = Intrinsic.replace(boxes.writes, BoxWrites.make())

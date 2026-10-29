@@ -1,0 +1,28 @@
+{
+  "name": "grid-fragment-forced-row-propagation",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "forced-breaks"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-break-3/#forced-breaks"],
+  "input": {
+    "viewport": {"width": 123, "height": 200},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 97}, {"x": 0, "y": 113, "width": 123, "height": 97}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [41, 82], "gridTemplateRows": [17, 23, 29], "rowGap": 5}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {"breakBefore": "page"}},
+      {"parent": 0, "style": {}},
+      {"parent": 0, "style": {}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 97}, {"x": 0, "y": 113, "width": 123, "height": 57}]},
+    {"rects": [{"x": 0, "y": 0, "width": 41, "height": 17}]},
+    {"rects": [{"x": 41, "y": 0, "width": 82, "height": 17}]},
+    {"rects": [{"x": 0, "y": 113, "width": 41, "height": 23}]},
+    {"rects": [{"x": 41, "y": 113, "width": 82, "height": 23}]},
+    {"rects": [{"x": 0, "y": 141, "width": 41, "height": 29}]},
+    {"rects": [{"x": 41, "y": 141, "width": 82, "height": 29}]}
+  ]}
+}

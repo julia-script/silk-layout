@@ -1,0 +1,24 @@
+{
+  "name": "grid-fragment-parallel-inner-force",
+  "kind": "spec",
+  "features": ["grid", "fragmentation", "parallel-flows", "intrinsic-tracks"],
+  "spec": ["https://drafts.csswg.org/css-grid-2/#pagination", "https://drafts.csswg.org/css-break-3/#parallel-flows"],
+  "input": {
+    "viewport": {"width": 123, "height": 200},
+    "fragmentation": {"kind": "page", "frames": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 123, "height": 73}]},
+    "nodes": [
+      {"parent": null, "style": {"display": "grid", "gridTemplateColumns": [41, 82], "gridTemplateRows": ["auto"]}},
+      {"parent": 0, "style": {}},
+      {"parent": 1, "style": {"height": 29}},
+      {"parent": 1, "style": {"height": 17, "breakBefore": "page"}},
+      {"parent": 0, "style": {"height": 37}}
+    ]
+  },
+  "expected": {"sources": [
+    {"rects": [{"x": 0, "y": 0, "width": 123, "height": 73}, {"x": 0, "y": 91, "width": 123, "height": 17}]},
+    {"rects": [{"x": 0, "y": 0, "width": 41, "height": 73}, {"x": 0, "y": 91, "width": 41, "height": 17}]},
+    {"rects": [{"x": 0, "y": 0, "width": 41, "height": 29}]},
+    {"rects": [{"x": 0, "y": 91, "width": 41, "height": 17}]},
+    {"rects": [{"x": 41, "y": 0, "width": 82, "height": 37}]}
+  ]}
+}

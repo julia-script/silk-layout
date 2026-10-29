@@ -16,6 +16,7 @@ import geometry {
   BaselineSet,
   OptionalSize,
   AvailableKind,
+  AvailableSpace,
   abs
 }
 import text {
@@ -47,7 +48,7 @@ import context { Input, UNBOUNDED }
 import layout_pass { LayoutPass }
 import grid_contributions { ItemContribution, measureContribution }
 import grid_style { GridTemplate, GridTrack, GridBreadth, GridBreadthKind, GridError }
-import engine { compute }
+import engine { compute, probeNode }
 
 struct ContributionMeasure {
   calls: usize
@@ -83,8 +84,8 @@ impl Measure for ContributionMeasure {
       height = 17.0
     }
 
-    // Both recheck fixtures grow their maximum after rows resolve; only key 1
-    // also changes the minimum that triggers another column-sizing pass.
+    // Keys 1/2 grow their maxima after rows resolve; only key 1 also changes
+    // the triggering minimum. Key 3 adds a known-height-dependent width.
     if key != 0 {
       width = 20.0
       height = 30.0
@@ -97,6 +98,9 @@ impl Measure for ContributionMeasure {
           width = 40.0
         }
       }
+    }
+    if key == 3 && request.known.heightDefinite {
+      width = request.known.height * 2.0
     }
     if request.known.widthDefinite {
       width = request.known.width
@@ -598,4 +602,158 @@ test effect fn gridCrossAxisRecheckRefreshesMaximaOnlyAfterMinimumChanges()
     | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   run checkCrossAxisRecheck() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid §12.1 resolves container limits while sizing tracks. A caller's floor
+// ignored by an intrinsic query must not be revived by that authored-limit
+// projection. The explicit tracks total 20px by 5px.
+effect fn checkGridIntrinsicRequestMinimum()
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static>
+  ? &mut Allocator {
+  let mut style = Style.make()
+  style.display = Display.Box { outside: DisplayOutside.Block, inside: DisplayInside.Grid }
+  let mut tree = run Tree.make(move style)
+  let root = tree.root()
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(10.0)))
+  run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(5.0)))
+  run tree.setGrid(root, move template)
+  let boxes = run Boxes.build(
+    tree.nodes.asSlice(),
+    tree.styles.asSlice(),
+    tree.grids.asSlice(),
+    tree.gridNames.asSlice(),
+    WritingMode.HorizontalTb,
+    Direction.Ltr,
+  )
+  let id = boxes.firstBySource.get(root.index)
+  let mut output = LayoutTree.make()
+  run output.prepare(boxes.boxes.length())
+  let mut pass = run LayoutPass.make(
+    output.boxes.asMutSlice(),
+    &mut output.fragments,
+    boxes.sources,
+  )
+  let mut provider = ContributionMeasure { calls: 0 }
+  let mut input = Input.make(OptionalSize.none())
+  input.blockRoot = true
+  input.performLayout = false
+  input.minimum = Size { width: 120.0, height: 30.0 }
+  input.intrinsicWidth = true
+  input.availableWidth = AvailableSpace.minContent()
+  run probeNode(&boxes, &mut pass, &mut provider, id, &input)
+  run Testing.expect(
+    pass.boxes[id].size.width == 20.0 && pass.boxes[id].size.height == 30.0,
+    "intrinsic Grid width ignores its own floor but retains the height floor",
+  )
+  input.intrinsicWidth = false
+  input.availableWidth = AvailableSpace.maxContent()
+  input.intrinsicHeight = true
+  input.availableHeight = AvailableSpace.minContent()
+  run probeNode(&boxes, &mut pass, &mut provider, id, &input)
+  run Testing.expect(
+    pass.boxes[id].size.width == 120.0 && pass.boxes[id].size.height == 5.0,
+    "intrinsic Grid height ignores its own floor but retains the width floor",
+  )
+}
+
+test effect fn gridIntrinsicRequestDoesNotReviveItsIgnoredMinimum()
+  ! OutOfMemoryError
+    | InvalidNode
+    | GridError
+    | TextError
+    | FragmentationError
+    | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run checkGridIntrinsicRequestMinimum() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Sizing §5.1: an intrinsic query removes constraints in its queried axis,
+// not the opposite axis. The provider's width becomes twice its known height
+// after the height floor is enforced; width-only cache keys must distinguish it.
+effect fn checkMeasuredCrossMinimum()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static>
+  ? &mut Allocator {
+  let mut tree = run Tree.make(Style.make())
+  let root = tree.root()
+  run tree.setMeasurement(root, 3)
+  let boxes = run Boxes.build(
+    tree.nodes.asSlice(),
+    tree.styles.asSlice(),
+    tree.grids.asSlice(),
+    tree.gridNames.asSlice(),
+    WritingMode.HorizontalTb,
+    Direction.Ltr,
+  )
+  let id = boxes.firstBySource.get(root.index)
+  let mut output = LayoutTree.make()
+  run output.prepare(boxes.boxes.length())
+  let mut pass = run LayoutPass.make(
+    output.boxes.asMutSlice(),
+    &mut output.fragments,
+    boxes.sources,
+  )
+  let mut provider = ContributionMeasure { calls: 0 }
+  let mut input = Input.make(OptionalSize.none())
+  input.blockRoot = true
+  input.performLayout = false
+  input.baselines = false
+  input.fullSize = false
+  input.intrinsicWidth = true
+  input.availableWidth = AvailableSpace.minContent()
+  input.minimum = Size { width: 0.0, height: 40.0 }
+  run probeNode(&boxes, &mut pass, &mut provider, id, &input)
+  run Testing.expect(
+    pass.boxes[id].size.width == 80.0,
+    "height floor participates in measured intrinsic width",
+  )
+  input.minimum.height = 60.0
+  run probeNode(&boxes, &mut pass, &mut provider, id, &input)
+  run Testing.expect(
+    pass.boxes[id].size.width == 120.0,
+    "a changed cross floor cannot reuse the old measured width",
+  )
+  // The same cross constraint must reach the scalar intrinsic queries used
+  // by fit-content sizing, not just the top-level width-only probe.
+  input.intrinsicWidth = false
+  input.fullSize = true
+  input.shrinkToFit = true
+  input.availableWidth = AvailableSpace.definite(200.0)
+  input.minimum.height = 40.0
+  run probeNode(&boxes, &mut pass, &mut provider, id, &input)
+  run Testing.expect(
+    pass.boxes[id].size.width == 80.0 && pass.boxes[id].size.height == 40.0,
+    "fit-content sizing includes the effective cross minimum in its intrinsic queries",
+  )
+}
+
+test effect fn gridWidthProbeKeepsMeasuredCrossMinimumDependencies()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  run checkMeasuredCrossMinimum() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// Grid §6.6 / §12.5: resolving authored constraints for a contribution must
+// not reactivate a request floor ignored by the incoming intrinsic query.
+test effect fn gridContributionPropertiesDoNotReviveIgnoredRequestMinimum()
+  ! OutOfMemoryError | InvalidNode | TextError | FragmentationError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut input = Input.make(OptionalSize.none())
+  input.intrinsicWidth = true
+  input.minimum = Size { width: 120.0, height: 30.0 }
+  run check(
+    Style.make(),
+    input,
+    true,
+    false,
+    UNBOUNDED,
+    ItemContribution { minimum: 0.0, minContent: 23.0, maxContent: 91.0, usedMinimum: 0.0 },
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
 }

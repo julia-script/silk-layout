@@ -24,13 +24,17 @@ impl InheritedAxis {
 }
 pub struct GridContext {
   pub vertical: bool,
+  // Grid 2 §12.1: 0 full/final, 1 first axis, 2 second axis, 3 adjust first,
+  // 4 adjust second. The first axis is expressed in this child's writing mode.
+  pub phase: usize,
+  pub firstColumns: bool,
   pub columns: InheritedAxis,
   pub rows: InheritedAxis,
   pub areas: List<GridArea>,
 }
 impl GridContext {
   pub fn make(vertical: bool) -> GridContext {
-    return GridContext { vertical: vertical, columns: InheritedAxis.make(), rows: InheritedAxis.make(), areas: List<GridArea>.make() }
+    return GridContext { vertical: vertical, phase: 0, firstColumns: true, columns: InheritedAxis.make(), rows: InheritedAxis.make(), areas: List<GridArea>.make() }
   }
   fn dimensions(self: &Self) -> usize {
     let mut bits: usize = 0
@@ -64,7 +68,8 @@ fn sameAxis(a: &InheritedAxis, b: &InheritedAxis) -> bool {
   return true
 }
 fn sameContext(a: &GridContext, b: &GridContext) -> bool {
-  if a.vertical != b.vertical || !sameAxis(&a.columns, &b.columns) || !sameAxis(&a.rows, &b.rows)
+  if a.vertical != b.vertical || a.phase != b.phase || a.firstColumns != b.firstColumns
+    || !sameAxis(&a.columns, &b.columns) || !sameAxis(&a.rows, &b.rows)
     || a.areas.length() != b.areas.length() { return false }
   let mut at: usize = 0
   while at < a.areas.length() {

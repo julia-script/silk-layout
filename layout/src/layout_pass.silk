@@ -738,7 +738,9 @@ impl<'a, 'source> LayoutPass<'a, 'source> {
       let overflow = record.scrollableOverflow
       let horizontal = record.horizontalScrollbar
       let vertical = record.verticalScrollbar
-      run self.place(id, location, usedMargin, hasClearance, true)
+      // Its fragment, kept where it was, still holds its last placement;
+      // the parent publishes the new one when it places the box.
+      run self.place(id, location, usedMargin, hasClearance, false)
       self.boxes[id].scrollableOverflow = overflow
       self.boxes[id].horizontalScrollbar = horizontal
       self.boxes[id].verticalScrollbar = vertical

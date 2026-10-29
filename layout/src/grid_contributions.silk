@@ -183,6 +183,58 @@ fn probeInput(input: &Input, horizontal: bool, constraint: AvailableSpace) -> In
   return request
 }
 
+// Baseline capture uses the contribution's original sizing context, before
+// scalar min/max and fixed-track caps. A cap is not a new layout constraint.
+// Keep this beside probeInput so cross-axis knowledge and indefinite flags are
+// preserved identically by ordinary contributions and their baseline probes.
+pub fn contributionBaselineInput(
+  input: &Input,
+  style: &Style,
+  horizontal: bool,
+  kind: usize,
+) -> Input {
+  let size = preferred(style, horizontal)
+  let minSize = minimum(style, horizontal)
+  let usesPreferred = size.kind != DimensionKind.Auto && size.kind != DimensionKind.Content
+    && size.kind != DimensionKind.FitContent
+    && !percentage(size)
+  let mut source = size
+  if kind == 0 && !usesPreferred {
+    source = minSize
+  }
+  let mut constraint = minConstraint(style, horizontal)
+  if kind == 2 || source.kind == DimensionKind.MaxContent {
+    constraint = AvailableSpace.maxContent()
+  }
+  if source.kind == DimensionKind.MinContent {
+    constraint = minConstraint(style, horizontal)
+  }
+  if source.kind == DimensionKind.FitContent {
+    constraint = input.availableHeight
+    if horizontal {
+      constraint = input.availableWidth
+    }
+  }
+  let mut request = probeInput(input, horizontal, constraint)
+
+  // Definite authored preferred sizes did not use an intrinsic probe at all.
+  // Respect that property instead of forcing the capped contribution as known.
+  if resolves(size, definite(input.parent, horizontal)) {
+    request = input.*
+    request.performLayout = false
+    request.fragmentation.active = false
+    if horizontal {
+      request.intrinsicWidth = false
+      request.known.widthDefinite = false
+    } else {
+      request.intrinsicHeight = false
+      request.known.heightDefinite = false
+    }
+  }
+  request.baselines = true
+  return request
+}
+
 effect fn probe<'pass, 'source, M: Measure + TextMeasure>(
   nodes: &BoxTree<'source>,
   output: &mut LayoutPass<'pass, 'source>,

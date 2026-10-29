@@ -30,7 +30,7 @@ pub fn needsPreparation(template: &GridTemplate) -> bool with Intrinsic.inlineAl
 // A shrink-to-fit or min/max relayout gives the engine a used size, not a new
 // definite preferred size for repeat counting. Preserve author/parent constraints
 // and distinguish fill-available sizing from content-derived sizing.
-fn preferredSizes(
+pub fn preferredSizes(
   style: &Style,
   input: &Input,
   logical: &ResolvedBox,

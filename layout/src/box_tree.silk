@@ -11,16 +11,14 @@ import grid_style { GridTemplate }
 
 pub enum BoxKind { Block, Flex, Grid, Inline, InlineFormatting, Text }
 pub struct BoxNode {
-  pub source: usize, pub styleOwner: usize, pub anonymousStyle: usize,
+  // Fields read on every visit come first so they share one cache line.
+  pub anonymousStyle: usize,
   // styleOwner's index in styles, so style() needs no source lookup;
   // NO_NODE with anonymousStyle.
   pub styleIndex: usize,
-  pub kind: BoxKind,
-  pub parent: usize, pub firstChild: usize, pub lastChild: usize, pub nextSibling: usize,
-  pub previousContinuation: usize, pub nextContinuation: usize,
+  pub parent: usize, pub firstChild: usize, pub nextSibling: usize,
+  pub kind: BoxKind, pub measurement: Measurement,
   pub firstForSource: bool, pub lastForSource: bool,
-  // Lifted in-flow blocks consumed between this inline piece and its successor.
-  pub interruptionFirst: usize, pub interruptionLast: usize,
   pub anonymousBlock: bool, pub blockify: bool, pub independentRoot: bool,
   pub firstFormattedRun: bool,
   pub needsFragmentGeometry: bool,
@@ -28,7 +26,12 @@ pub struct BoxNode {
   // Propagation can depend on a descendant's computed flex lines.
   pub beforeControl: bool, pub dynamicBefore: bool,
   pub afterControl: bool, pub dynamicAfter: bool,
-  pub measureKey: usize, pub measurement: Measurement,
+  pub source: usize, pub styleOwner: usize,
+  pub lastChild: usize,
+  pub previousContinuation: usize, pub nextContinuation: usize,
+  // Lifted in-flow blocks consumed between this inline piece and its successor.
+  pub interruptionFirst: usize, pub interruptionLast: usize,
+  pub measureKey: usize,
   pub scrollOffset: Point,
 }
 impl Copy for BoxNode {}

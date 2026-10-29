@@ -357,6 +357,7 @@ fn usedInput(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: Optional
     input.parentWritingMode = nodes.style(parent).writingMode
     input.parentTextOrientation = nodes.style(parent).textOrientation
   }
+  GridPositioned.restoreInput(output, id, &mut input)
   return input
 }
 fn usedBox(nodes: &BoxTree, output: &LayoutPass, id: usize, viewport: OptionalSize) -> ResolvedBox {
@@ -998,8 +999,12 @@ fn containingExisting(nodes: &BoxTree, output: &LayoutPass, cb: usize, frame: us
 
 // A flex or grid item's allocation belongs to its parent's sizing algorithm.
 // Cache the complete probe results together so sibling continuations reuse them.
-effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, parent: usize, initial: OptionalSize) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, parent: usize, initial: OptionalSize, childInput: &mut Input) -> Layout ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
   let parentBox = output.fragments.values.get(parent).box
+  if GridPositioned.inheritsAllocation(nodes, parentBox, id) {
+    return run GridPositioned.allocateInheritedShell(nodes, &mut output, &mut measurer,
+      id, parent, initial, &mut childInput)
+  }
   let metadata = match output.fragmentFullBox(parent) {
     Option<FullBoxGeometry>.Some { value } => value
     Option<FullBoxGeometry>.None => { fail FragmentationError { frame: output.frame, message: "Container continuation has no full containing-block geometry" } }
@@ -1041,14 +1046,23 @@ effect fn containerShellAllocation<'pass, 'source, M: Measure + TextMeasure>(nod
   return result
 }
 
-effect fn prepareGridGeometry<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, fragment: usize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
-  if nodes.style(id).position == Position.Static || !GridPositioned.isContainer(nodes, id) || output.cache.gridGeometry.findFragment(id, fragment) != NO_NODE { return }
+effect fn prepareGridGeometry<'pass, 'source, M: Measure + TextMeasure>(nodes: &BoxTree<'source>, output: &mut LayoutPass<'pass, 'source>, measurer: &mut M, id: usize, fragment: usize, gridContext: usize) ! OutOfMemoryError | TextError | FragmentationError ? &mut Allocator {
+  if !GridPositioned.isContainer(nodes, id) { return }
+  if nodes.style(id).position == Position.Static {
+    if gridContext != 0 || output.cache.gridGeometry.find(id) != NO_NODE {
+      run output.cache.gridGeometry.captureContext(id, gridContext)
+      run output.cache.gridGeometry.setFragment(id, fragment, Rect.zero(), Rect.zero())
+    }
+    return
+  }
+  if output.cache.gridGeometry.findFragment(id, fragment) != NO_NODE { return }
   let metadata = match output.fragmentFullBox(fragment) {
     Option<FullBoxGeometry>.Some { value } => value
     Option<FullBoxGeometry>.None => { fail FragmentationError { frame: output.frame, message: "Grid continuation has no full containing-block geometry" } }
   }
   let firstFrame = run output.requiredFrame(0)
   let mut input = usedInput(nodes, &output, id, OptionalSize.definite(firstFrame.rect.width, firstFrame.rect.height))
+  input.gridContext = gridContext
   input.parent = metadata.parent
   input.known = metadata.known
   input.minimum = metadata.minimum
@@ -1063,7 +1077,8 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
   if id == NO_NODE || id == 0 { return run output.ensureFrameRoot(frame) }
   let existing = containingExisting(nodes, &output, id, frame)
   if existing != NO_NODE {
-    run prepareGridGeometry(nodes, &mut output, &mut measurer, id, existing)
+    let gridContext = GridPositioned.fragmentContext(&output, id, existing)
+    run prepareGridGeometry(nodes, &mut output, &mut measurer, id, existing, gridContext)
     return existing
   }
   let first = output.fragments.first(id)
@@ -1077,6 +1092,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
   let geometry = run output.requiredFrame(frame)
   let parentOrigin = fragmentPosition(&output, parent, false)
   let mut metadata = output.fragmentFullBox(first)
+  let mut gridContext = GridPositioned.acceptedContext(&output, id)
   if nodes.node(id).kind != BoxKind.Inline {
     let firstFrame = run output.requiredFrame(0)
     let mut initial = OptionalSize.definite(firstFrame.rect.width, firstFrame.rect.height)
@@ -1122,11 +1138,12 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     }
     let mut allocation = Layout.zero()
     if allocatedItem {
-      allocation = run containerShellAllocation(nodes, &mut output, &mut measurer, id, parent, initial)
+      allocation = run containerShellAllocation(nodes, &mut output, &mut measurer, id, parent, initial, &mut input)
       input.known = OptionalSize.definite(allocation.size.width, allocation.size.height)
       input.indefiniteWidth = !allocation.widthDefinite
       input.indefiniteHeight = !allocation.heightDefinite
     }
+    gridContext = input.gridContext
     if outOfFlow(nodes.style(id)) {
       input = run absoluteFrameInput(nodes, &output, id, parentBox, parent, frame, 0.0, BreakRelaxation.Strict, &input)
     }
@@ -1213,7 +1230,7 @@ effect fn containingInstance<'pass, 'source, M: Measure + TextMeasure>(nodes: &B
     }
     Option<FullBoxGeometry>.None => {}
   }
-  run prepareGridGeometry(nodes, &mut output, &mut measurer, id, emitted.index)
+  run prepareGridGeometry(nodes, &mut output, &mut measurer, id, emitted.index, gridContext)
   return emitted.index
 }
 

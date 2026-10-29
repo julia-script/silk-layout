@@ -637,8 +637,8 @@ effect fn expectSubgridShellRects(output: &mut LayoutTree, source: NodeId, inset
   ! InvalidNode | AssertionError<'static> {
   let expected = [
     Rect { x: 87.0 + inset, y: 5.0, width: 100.0 - inset, height: 60.0 },
-    Rect { x: 93.0 + inset, y: 91.0, width: 100.0 - inset, height: 60.0 },
-    Rect { x: 99.0 + inset, y: 177.0, width: 100.0 - inset, height: 30.0 },
+    Rect { x: 93.0 + inset, y: 91.0, width: 136.0 - inset, height: 60.0 },
+    Rect { x: 99.0 + inset, y: 177.0, width: 64.0 - inset, height: 30.0 },
   ]
   let mut rects = run output.sourceRects(source)
   let mut count: usize = 0
@@ -659,19 +659,24 @@ effect fn expectSubgridShellRects(output: &mut LayoutTree, source: NodeId, inset
 
 // Only the absolute descendant reaches pages 2 and 3. Its generated parent
 // and containing-block subgrid need positioning-only shells, not new ordinary
-// grids. Grid 2 §10.1 supplies the 100px area; §13 leaves break choice to the
-// engine. The accepted 150px absolute height consumes 60 + 60 + 30.
+// grids. Grid 2 §10.1 supplies 100/136/64px areas: parent columns are80/1fr
+// and 10% right padding leaves180/216/144px end edges on200/240/160px pages.
+// Section13 leaves break choice to the engine; height150 consumes60+60+30.
 effect fn subgridFutureShells()
   ! OutOfMemoryError | TextError | FragmentationError | InvalidNode | GridError | AssertionError<'static>
   ? &mut Allocator {
   let mut rootStyle = gridStyle()
-  rootStyle.width = Dimension.px(200.0)
+  rootStyle.width = Dimension.auto()
   rootStyle.height = Dimension.px(20.0)
   rootStyle.columnGap = Dimension.px(0.0)
   rootStyle.rowGap = Dimension.px(0.0)
   let mut tree = run Tree.make(move rootStyle)
   let root = tree.root()
-  run tracks(&mut tree, root, 80.0, 120.0, 20.0, 0.0)
+  let mut template = GridTemplate.make()
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.fixed(80.0)))
+  run template.columns.tracks.append(GridTrack.breadth(GridBreadth.flex(1.0)))
+  run template.rows.tracks.append(GridTrack.breadth(GridBreadth.fixed(20.0)))
+  run tree.setGrid(root, move template)
   let subgrid = run positionedSubgrid(&mut tree, root)
   let mut childStyle = absoluteStyle()
   childStyle.inset.bottom = Dimension.auto()
@@ -680,8 +685,8 @@ effect fn subgridFutureShells()
   run place(&mut tree, absolute, 2, 1)
   let pages = [
     Rect { x: 7.0, y: 5.0, width: 200.0, height: 60.0 },
-    Rect { x: 13.0, y: 91.0, width: 200.0, height: 60.0 },
-    Rect { x: 19.0, y: 177.0, width: 200.0, height: 60.0 },
+    Rect { x: 13.0, y: 91.0, width: 240.0, height: 60.0 },
+    Rect { x: 19.0, y: 177.0, width: 160.0, height: 60.0 },
   ]
   let mut output = LayoutTree.make()
   let mut measure = EmptyMeasure {}
@@ -691,7 +696,7 @@ effect fn subgridFutureShells()
     if stage == 1 {
       inset = 10.0
       let mut edited = absoluteStyle()
-      edited.inset.left = Dimension.pct(0.1)
+      edited.inset.left = Dimension.px(10.0)
       edited.inset.bottom = Dimension.auto()
       edited.height = Dimension.px(150.0)
       run tree.setStyle(absolute, move edited)

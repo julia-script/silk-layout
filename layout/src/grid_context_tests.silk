@@ -2,7 +2,7 @@ import silk.mem.allocator { Allocator, OutOfMemoryError }
 import silk.core.effect { Effect }
 import silk.core.option { Option }
 import silk.testing.testing { Testing, AssertionError }
-import grid_context { GridContext, GridContextStore }
+import grid_context { GridContext, GridContextStore, BaselineOffset }
 import grid_tracks { TrackState }
 import grid_style { GridNamedLine, GridArea, GridBreadthKind }
 import context { Input, resolveBox, childrenInput, UNBOUNDED }
@@ -253,4 +253,32 @@ test effect fn inheritedShellSnapshotRetainsOnlySelectedAllocation()
   store.restore(outer)
   run Testing.expect(store.valid(1, accepted) && !store.valid(1, selected),
     "enclosing rollback also owns the retained shell allocation")
+}
+
+test effect fn inheritedBaselineMemberRemapPreservesLogicalIdentity()
+  ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut store = GridContextStore.make()
+  let mut context = run descriptor(0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run context.baselineOffsets.append(BaselineOffset { id: 2, horizontal: false, shift: 7.0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let key = run store.bind(1, move context) |> Effect.provideMut<Allocator>(&mut allocator)
+  let toOld: [usize; 4] = [NO_NODE, 0, 1, 2]
+  let toNew: [usize; 3] = [1, 2, 3]
+  run store.remap(&toOld, &toNew) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(store.valid(2, key), "prefix insertion preserves the owner's accepted identity")
+  match move store.get(2, key) {
+    Option<&GridContext>.Some { value } => {
+      let offset = value.baselineOffsets.get(0)
+      run Testing.expect(offset.id == 3 && !offset.horizontal && offset.shift == 7.0,
+        "baseline members follow logical nodes through numeric id changes")
+    }
+    Option<&GridContext>.None => { run Testing.expect(false, "surviving group remains available") }
+  }
+  let removedToOld: [usize; 3] = [0, 1, 2]
+  let removedToNew: [usize; 4] = [0, 1, 2, NO_NODE]
+  run store.remap(&removedToOld, &removedToNew) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(!store.valid(2, key), "a genuinely removed member invalidates its ancestor group")
+  let replacement = run bind(&mut store, 2, 0) |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(replacement != key, "released remap slots cannot recycle accepted identities")
 }

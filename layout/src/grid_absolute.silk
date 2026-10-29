@@ -8,6 +8,7 @@ import grid_lines { LineNames, resolveAbsoluteSpan }
 import grid_style { GridLine, GridPlacement }
 import grid_tracks { TrackState }
 import style { Style, Direction }
+import tree { NO_NODE }
 
 pub struct TrackEdges {
   pub start: f32,
@@ -22,6 +23,8 @@ pub struct GridAxisGeometry {
   pub names: LineNames,
   pub origin: i32,
   pub explicitTracks: usize,
+  pub reversed: bool,
+  pub extent: f32,
 }
 
 impl GridAxisGeometry {
@@ -31,6 +34,8 @@ impl GridAxisGeometry {
       names: LineNames.make(),
       origin: 0,
       explicitTracks: 0,
+      reversed: false,
+      extent: 0.0,
     }
   }
 
@@ -54,6 +59,8 @@ impl GridAxisGeometry {
     run self.names.copyOccurrencesFrom(names)
     self.origin = origin
     self.explicitTracks = explicitTracks
+    self.reversed = false
+    self.extent = 0.0
   }
 }
 
@@ -61,6 +68,9 @@ pub struct GridGeometry {
   pub columns: GridAxisGeometry,
   pub rows: GridAxisGeometry,
   pub normalPadding: Rect,
+  pub fragment: usize,
+  pub content: Rect,
+  pub padding: Rect,
 }
 
 impl GridGeometry {
@@ -69,6 +79,9 @@ impl GridGeometry {
       columns: GridAxisGeometry.make(),
       rows: GridAxisGeometry.make(),
       normalPadding: Rect.zero(),
+      fragment: NO_NODE,
+      content: Rect.zero(),
+      padding: Rect.zero(),
     }
   }
 }
@@ -119,7 +132,8 @@ fn axisArea(
   let mut low = paddingStart
   let mut high = paddingStart + paddingSize
   if span.hasStart {
-    let position = lineEdge(axis, span.start, true)
+    let mut position = lineEdge(axis, span.start, true)
+    if axis.reversed { position = axis.extent - position }
     if reverse {
       high = contentStart + contentSize - position
     } else {
@@ -127,7 +141,8 @@ fn axisArea(
     }
   }
   if span.hasEnd {
-    let position = lineEdge(axis, span.end, false)
+    let mut position = lineEdge(axis, span.end, false)
+    if axis.reversed { position = axis.extent - position }
     if reverse {
       low = contentStart + contentSize - position
     } else {
@@ -142,7 +157,8 @@ fn axisArea(
 pub fn containingArea(
   style: &Style,
   placement: &GridPlacement,
-  geometry: &GridGeometry,
+  columns: &GridAxisGeometry,
+  rows: &GridAxisGeometry,
   content: Rect,
   padding: Rect,
 ) -> Rect {
@@ -150,7 +166,7 @@ pub fn containingArea(
   let reverseInline = (style.usedDirection() == Direction.Rtl) != axes.reverseLine
   if axes.vertical {
     let inline = axisArea(
-      &geometry.columns,
+      columns,
       &placement.columnStart,
       &placement.columnEnd,
       content.y,
@@ -160,7 +176,7 @@ pub fn containingArea(
       reverseInline,
     )
     let block = axisArea(
-      &geometry.rows,
+      rows,
       &placement.rowStart,
       &placement.rowEnd,
       content.x,
@@ -177,7 +193,7 @@ pub fn containingArea(
     }
   }
   let inline = axisArea(
-    &geometry.columns,
+    columns,
     &placement.columnStart,
     &placement.columnEnd,
     content.x,
@@ -187,7 +203,7 @@ pub fn containingArea(
     reverseInline,
   )
   let block = axisArea(
-    &geometry.rows,
+    rows,
     &placement.rowStart,
     &placement.rowEnd,
     content.y,

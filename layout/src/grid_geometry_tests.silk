@@ -38,7 +38,8 @@ fn area(store: &GridGeometryStore, id: usize) -> Rect {
   placement.rowEnd = line(2, 0)
   let content = Rect { x: 10.0, y: 20.0, width: 300.0, height: 200.0 }
   let padding = Rect { x: 0.0, y: 0.0, width: 330.0, height: 240.0 }
-  return containingArea(&Style.make(), &placement, store.get(store.find(id)), content, padding)
+  let geometry = store.get(store.find(id))
+  return containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding)
 }
 
 test effect fn gridGeometryNestedRollbackRestoresRepeatedVersions()
@@ -236,7 +237,8 @@ test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
   placement.columnEnd = line(2, 1)
   let content = Rect { x: 10.0, y: 20.0, width: 300.0, height: 200.0 }
   let padding = Rect { x: 0.0, y: 0.0, width: 330.0, height: 240.0 }
-  let kept = containingArea(&Style.make(), &placement, store.get(store.find(0)), content, padding)
+  let geometry = store.get(store.find(0))
+  let kept = containingArea(&Style.make(), &placement, &geometry.columns, &geometry.rows, content, padding)
   run Testing.expect(
     kept.x == 10.0 && kept.width == 45.0,
     "clearing source names does not change the retained named area",
@@ -247,7 +249,8 @@ test effect fn gridGeometryOwnsNamedLinesAndReplacesThemOnReuse()
   let replaced = containingArea(
     &Style.make(),
     &placement,
-    store.get(store.find(0)),
+    &store.get(store.find(0)).columns,
+    &store.get(store.find(0)).rows,
     content,
     padding,
   )

@@ -54,6 +54,9 @@ effect fn descriptor(change: usize) -> GridContext ! OutOfMemoryError ? &mut All
   if change == 29 { run context.rows.lines.append(GridNamedLine { line: 0, name: 2, repeat: 0 }) }
   if change == 30 { context.areas.asMutSlice()[0].rowStart = 1 }
   if change == 31 { context.areas.asMutSlice()[0].columnStart = 1 }
+  // Grid 2 §12.1: first-axis recursion and later adjustment are distinct requests.
+  if change == 32 { context.phase = 1 }
+  if change == 33 { context.firstColumns = false }
   return context
 }
 
@@ -71,7 +74,7 @@ test effect fn inheritedContextKeysCompareCompleteDependencies()
   let equal = run bind(&mut store, 3, 0) |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(key == equal && key & 3 == 1, "equal horizontal columns retain their width identity")
   let mut change: usize = 1
-  while change <= 31 {
+  while change <= 33 {
     let changed = run bind(&mut store, 3, change) |> Effect.provideMut<Allocator>(&mut allocator)
     run Testing.expect(changed != key && !store.valid(3, key), "every descriptor dependency invalidates the previous identity")
     if change == 1 { run Testing.expect(changed & 3 == 2, "vertical columns mark physical height") }
@@ -138,10 +141,10 @@ test effect fn inheritedContextRequestSizingAndCacheKeys()
   let mut cache = LayoutCache.make()
   let mut input = Input.make(OptionalSize.definite(200.0, 150.0))
   let mut style = Style.make()
-  style.width = Dimension.length(500.0)
-  style.minWidth = Dimension.length(400.0)
-  style.maxWidth = Dimension.length(600.0)
-  style.height = Dimension.length(33.0)
+  style.width = Dimension.px(500.0)
+  style.minWidth = Dimension.px(400.0)
+  style.maxWidth = Dimension.px(600.0)
+  style.height = Dimension.px(33.0)
   input.gridContext = run bind(&mut cache.gridContexts, 2, 0) |> Effect.provideMut<Allocator>(&mut allocator)
   input.known.width = 87.0
   input.known.widthDefinite = true

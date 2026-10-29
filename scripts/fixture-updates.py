@@ -56,6 +56,43 @@ def scenarios(document):
         text = document["nodes"][node]["text"]
         yield "retext", [{"set": [{"node": node, "text": text + " more words"}]}]
         yield "retext-word", [{"viewport": {"width": width - 37, "height": height}}, {"set": [{"node": node, "text": "x" + text}]}]
+    grids = [index for index, node in enumerate(document["nodes"])
+             if node.get("style", {}).get("display") in ("grid", "block grid", "inline-grid", "inline grid")]
+    if grids:
+        owner = grids[0]
+        original = document["nodes"][owner]["style"]
+        flow = "row" if original.get("gridAutoFlow") == "column dense" else "column dense"
+        variants = (
+            ("grid-template", dict(original, gridTemplateColumns=[35, {"minmax": [0, {"fr": 1}]}],
+                                   gridTemplateRows=[17, "auto"])),
+            ("grid-areas", dict(original, gridTemplateAreas=[["a", "a"], ["b", "c"]])),
+            ("grid-flow", dict(original, gridAutoFlow=flow)),
+            ("grid-implicit", dict(original, gridAutoColumns=[11, 23], gridAutoRows=[7, 19])),
+            ("grid-gaps", dict(original, columnGap=7, rowGap=5)),
+        )
+        for name, changed in variants:
+            forward = {"set": [{"node": owner, "style": changed}]}
+            yield name, [forward]
+            yield name + "-back", [forward, {"set": [{"node": owner, "style": original}]}]
+        children = [index for index, node in enumerate(document["nodes"])
+                    if node.get("parent") == owner and "style" in node]
+        if children:
+            child = children[0]
+            original = document["nodes"][child]["style"]
+            placed = dict(original, gridColumnStart=2, gridColumnEnd={"span": 1},
+                          gridRowStart=1, gridRowEnd={"span": 1})
+            forward = {"set": [{"node": child, "style": placed}]}
+            yield "grid-placement", [forward]
+            yield "grid-placement-back", [forward, {"set": [{"node": child, "style": original}]}]
+        inflow = [child for child in children
+                  if document["nodes"][child]["style"].get("position") not in ("absolute", "fixed")]
+        if inflow:
+            child = inflow[0]
+            original = document["nodes"][child]["style"]
+            ordered = dict(original, order=original.get("order", 0) + 3)
+            forward = {"set": [{"node": child, "style": ordered}]}
+            yield "grid-order", [forward]
+            yield "grid-order-back", [forward, {"set": [{"node": child, "style": original}]}]
 
 
 def final(document, cycle):
@@ -84,6 +121,9 @@ def main():
         for name, cycle in scenarios(document):
             fresh_code, fresh = run(cli, final(document, cycle))
             if fresh_code != 0:
+                if name.startswith("grid-"):
+                    checked += 1
+                    failures.append(f"{path.stem} {name}: fresh layout failed, exit {fresh_code}")
                 continue
             code, incremental = run(cli, dict(document, updates={"iterations": len(cycle), "cycle": cycle}))
             checked += 1
